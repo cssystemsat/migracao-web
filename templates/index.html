@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Migração 1.0 — Web</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Migração <span>1.0</span></h1>
+    <form id="form-login" class="login-form">
+      <select id="select-credencial" class="select-credencial">
+        <option value="">Cliente salvo...</option>
+      </select>
+      <input type="text" id="login" name="login" placeholder="Login" autocomplete="username" required>
+      <input type="password" id="senha" name="senha" placeholder="Senha" autocomplete="current-password" required>
+      <button type="submit" id="btn-autenticar">Autenticar</button>
+      <button type="button" id="btn-logout" class="btn-secondary hidden">Sair</button>
+      <button type="button" id="btn-gerenciar-logins" class="btn-secondary">Gerenciar logins</button>
+      <span id="status-auth" class="status-pill status-off">Não autenticado</span>
+    </form>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h2 class="titulo-consultas">Consultas / Listagens</h2>
+      <div class="botoes" id="botoes-consultas">
+        <button data-tipo="clientes">Listar Clientes</button>
+        <button data-tipo="veiculos">Listar Veículos</button>
+        <button data-tipo="rastreadores">Listar Rastreadores</button>
+        <button data-tipo="pessoas">Listar Pessoas</button>
+        <button data-tipo="desatualizados">Listar Desatualizados</button>
+        <button data-tipo="uos">Listar UO's</button>
+      </div>
+
+      <h2 class="titulo-import">Área de Importação</h2>
+      <div class="botoes" id="botoes-import">
+        <button data-tipo="cliente">Importar Cliente</button>
+        <button data-tipo="veiculo">Importar Veículo</button>
+        <button disabled title="Ainda não implementado">Importar Rastreador</button>
+        <button data-tipo="uo">Importar UO</button>
+        <button data-tipo="usuario">Importar Usuário</button>
+        <button disabled title="Ainda não implementado">Importar SimCard</button>
+      </div>
+    </section>
+
+    <section class="panel saida-panel">
+      <div class="saida-header">
+        <h2>Saída</h2>
+        <button id="btn-limpar" class="btn-secondary">Limpar</button>
+      </div>
+      <div id="saida" class="saida-corpo">
+        <p class="placeholder">Autentique-se e escolha uma consulta ou importação.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-titulo">Importação</h3>
+        <button id="modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="passo">
+          <span class="passo-num">1</span>
+          <label for="input-arquivo" class="file-label">Carregar Excel</label>
+          <input type="file" id="input-arquivo" accept=".xlsx,.xls">
+          <span id="arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
+        </div>
+
+        <div class="passo">
+          <span class="passo-num">2</span>
+          <span>Mapeie as colunas</span>
+        </div>
+        <div id="mapa-campos" class="mapa-campos"></div>
+
+        <div id="progresso-container" class="progresso-container hidden">
+          <div class="progresso-bar-bg"><div id="progresso-bar" class="progresso-bar"></div></div>
+          <div class="progresso-info">
+            <span id="progresso-status">Iniciando...</span>
+            <span id="progresso-pct">0%</span>
+          </div>
+        </div>
+
+        <button id="btn-iniciar-import" class="btn-primary" disabled>Iniciar Importação</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-credenciais" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Logins salvos</h3>
+        <button id="cred-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div id="lista-credenciais" class="lista-credenciais"></div>
+
+        <h4 class="form-credencial-titulo">Adicionar / editar login</h4>
+        <form id="form-nova-credencial" class="form-credencial">
+          <input type="text" id="cred-nome" placeholder="Nome do cliente" required>
+          <input type="text" id="cred-login" placeholder="Login" required>
+          <input type="password" id="cred-senha" placeholder="Senha" required>
+          <div class="form-credencial-botoes">
+            <button type="submit" id="btn-salvar-credencial" class="btn-primary">Adicionar</button>
+            <button type="button" id="btn-cancelar-edicao-credencial" class="btn-secondary hidden">Cancelar edição</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
