@@ -1,4 +1,5 @@
 credenciais.json
+firebase-service-account.json
 __pycache__/
 *.pyc
 .venv/

@@ -4,8 +4,10 @@ import os
 import threading
 import uuid
 
+import firebase_admin
 import pandas as pd
 import requests
+from firebase_admin import credentials, firestore
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 
 app = Flask(__name__)
@@ -13,6 +15,20 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 BASE_URL = "https://integration.systemsatx.com.br"
+
+# --- FIREBASE / FIRESTORE (banco de dados) ---
+# Credencial vem inteira (o JSON da chave de serviço) numa única variável de
+# ambiente, tanto local quanto no Render, pra não depender de upload de arquivo.
+_FIREBASE_CRED_JSON = os.environ.get("FIREBASE_CREDENTIALS_JSON")
+if not _FIREBASE_CRED_JSON:
+    raise RuntimeError(
+        "Variável de ambiente FIREBASE_CREDENTIALS_JSON não definida. "
+        "Configure-a com o conteúdo do arquivo de chave de serviço do Firebase."
+    )
+_firebase_cred = credentials.Certificate(json.loads(_FIREBASE_CRED_JSON))
+firebase_admin.initialize_app(_firebase_cred)
+db = firestore.client()
+CREDENCIAIS_COLLECTION = "credenciais"
 
 # Senha de acesso ao PRÓPRIO app (protege a ferramenta quando publicada na internet).
 # Só é exigida se a variável de ambiente APP_ACCESS_PASSWORD estiver definida;
@@ -288,27 +304,12 @@ def logout():
 
 
 # --- LOGINS SALVOS (para trocar de cliente rapidamente) ---
-# Guardados em texto puro num arquivo local (uso pessoal, single-user).
-CRED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "credenciais.json")
-CRED_LOCK = threading.Lock()
-
-
-def carregar_credenciais():
-    if not os.path.exists(CRED_FILE):
-        return []
-    with open(CRED_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def salvar_credenciais(lista):
-    with open(CRED_FILE, "w", encoding="utf-8") as f:
-        json.dump(lista, f, ensure_ascii=False, indent=2)
-
-
+# Guardados no Firestore (coleção "credenciais"), sobrevive a redeploys.
 @app.route("/api/credenciais", methods=["GET"])
 def listar_credenciais():
-    with CRED_LOCK:
-        return jsonify(ok=True, credenciais=carregar_credenciais())
+    docs = db.collection(CREDENCIAIS_COLLECTION).stream()
+    lista = [dict(d.to_dict(), id=d.id) for d in docs]
+    return jsonify(ok=True, credenciais=lista)
 
 
 @app.route("/api/credenciais", methods=["POST"])
@@ -319,12 +320,10 @@ def criar_credencial():
     senha = str(data.get("senha", ""))
     if not nome or not login or not senha:
         return jsonify(ok=False, error="Informe nome, login e senha."), 400
-    with CRED_LOCK:
-        lista = carregar_credenciais()
-        nova = {"id": uuid.uuid4().hex, "nome": nome, "login": login, "senha": senha}
-        lista.append(nova)
-        salvar_credenciais(lista)
-    return jsonify(ok=True, credencial=nova)
+    doc_ref = db.collection(CREDENCIAIS_COLLECTION).document()
+    dados = {"nome": nome, "login": login, "senha": senha}
+    doc_ref.set(dados)
+    return jsonify(ok=True, credencial=dict(dados, id=doc_ref.id))
 
 
 @app.route("/api/credenciais/<cred_id>", methods=["PUT"])
@@ -335,24 +334,20 @@ def editar_credencial(cred_id):
     senha = str(data.get("senha", ""))
     if not nome or not login or not senha:
         return jsonify(ok=False, error="Informe nome, login e senha."), 400
-    with CRED_LOCK:
-        lista = carregar_credenciais()
-        alvo = next((c for c in lista if c["id"] == cred_id), None)
-        if not alvo:
-            return jsonify(ok=False, error="Login não encontrado."), 404
-        alvo["nome"], alvo["login"], alvo["senha"] = nome, login, senha
-        salvar_credenciais(lista)
-    return jsonify(ok=True, credencial=alvo)
+    doc_ref = db.collection(CREDENCIAIS_COLLECTION).document(cred_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Login não encontrado."), 404
+    dados = {"nome": nome, "login": login, "senha": senha}
+    doc_ref.set(dados)
+    return jsonify(ok=True, credencial=dict(dados, id=cred_id))
 
 
 @app.route("/api/credenciais/<cred_id>", methods=["DELETE"])
 def excluir_credencial(cred_id):
-    with CRED_LOCK:
-        lista = carregar_credenciais()
-        nova_lista = [c for c in lista if c["id"] != cred_id]
-        if len(nova_lista) == len(lista):
-            return jsonify(ok=False, error="Login não encontrado."), 404
-        salvar_credenciais(nova_lista)
+    doc_ref = db.collection(CREDENCIAIS_COLLECTION).document(cred_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Login não encontrado."), 404
+    doc_ref.delete()
     return jsonify(ok=True)
 
 
