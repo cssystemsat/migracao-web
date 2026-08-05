@@ -359,6 +359,117 @@ el("botoes-import").addEventListener("click", async (e) => {
   abrirModalImport(btn.dataset.tipo);
 });
 
+el("botoes-migracao").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-tipo='migracao-clientes']");
+  if (!btn) return;
+  await carregarClientesMigracao();
+});
+
+// --- CLIENTES EM MIGRAÇÃO ---
+const overlayMigracao = el("overlay-migracao");
+const formMigracao = el("form-migracao");
+const migracaoModalTitulo = el("migracao-modal-titulo");
+const inputMigracaoCs = el("migracao-cs");
+const inputMigracaoPlataforma = el("migracao-plataforma");
+const inputMigracaoQtdClientes = el("migracao-qtd-clientes");
+const inputMigracaoQtdPlacas = el("migracao-qtd-placas");
+const inputMigracaoPercentual = el("migracao-percentual");
+
+let clienteMigracaoAtualId = null;
+
+async function carregarClientesMigracao() {
+  mostrarPlaceholder("Carregando clientes em migração...");
+  try {
+    const r = await fetch("/api/migracao/clientes");
+    const data = await r.json();
+    if (!data.ok) return mostrarErro(data.error || "Falha ao carregar.");
+    mostrarTabelaMigracao(data.clientes);
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+}
+
+function mostrarTabelaMigracao(clientes) {
+  const headers = ["Nome", "CS", "Plataforma de origem", "Quantidade de Clientes", "Quantidade de Placas", "Porcentagem da migração"];
+  const table = document.createElement("table");
+  table.className = "tabela-saida";
+
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  headers.forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  if (clientes.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = headers.length;
+    td.textContent = "Nenhum cliente cadastrado ainda. Adicione em \"Gerenciar logins\".";
+    td.style.color = "#6b7280";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+  clientes.forEach((c) => {
+    const tr = document.createElement("tr");
+    tr.className = "linha-clicavel";
+    tr.addEventListener("click", () => abrirModalMigracao(c));
+    [c.nome, c.cs, c.plataforma_origem, c.qtd_clientes, c.qtd_placas, `${c.percentual_migracao}%`].forEach((v) => {
+      const td = document.createElement("td");
+      td.textContent = v === null || v === undefined || v === "" ? "-" : String(v);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  setSaida(table);
+}
+
+function abrirModalMigracao(cliente) {
+  clienteMigracaoAtualId = cliente.id;
+  migracaoModalTitulo.textContent = cliente.nome;
+  inputMigracaoCs.value = cliente.cs || "";
+  inputMigracaoPlataforma.value = cliente.plataforma_origem || "";
+  inputMigracaoQtdClientes.value = cliente.qtd_clientes || 0;
+  inputMigracaoQtdPlacas.value = cliente.qtd_placas || 0;
+  inputMigracaoPercentual.value = cliente.percentual_migracao || 0;
+  overlayMigracao.classList.remove("hidden");
+}
+
+el("migracao-modal-fechar").addEventListener("click", () => overlayMigracao.classList.add("hidden"));
+overlayMigracao.addEventListener("click", (e) => {
+  if (e.target === overlayMigracao) overlayMigracao.classList.add("hidden");
+});
+
+formMigracao.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!clienteMigracaoAtualId) return;
+  const payload = {
+    cs: inputMigracaoCs.value.trim(),
+    plataforma_origem: inputMigracaoPlataforma.value.trim(),
+    qtd_clientes: inputMigracaoQtdClientes.value,
+    qtd_placas: inputMigracaoQtdPlacas.value,
+    percentual_migracao: inputMigracaoPercentual.value,
+  };
+  try {
+    const r = await fetch(`/api/migracao/clientes/${clienteMigracaoAtualId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!data.ok) return mostrarErro(data.error || "Falha ao salvar.");
+    overlayMigracao.classList.add("hidden");
+    await carregarClientesMigracao();
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+});
+
 async function abrirModalImport(tipo) {
   estado.importTipo = tipo;
   estado.fileId = null;

@@ -369,3 +369,21 @@ table.tabela-credenciais th { background: var(--cinza-100); }
   font-size: 0.95rem;
 }
 .cartao-acesso .btn-primary { margin-top: 0; }
+
+table.tabela-saida tr.linha-clicavel { cursor: pointer; }
+table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
+
+.form-migracao { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.campo-migracao { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--cinza-700); }
+.campo-migracao input {
+  padding: 8px 10px;
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+}
+.form-migracao .btn-primary { margin-top: 4px; }
+.migracao-acoes-placeholder {
+  border-top: 1px solid var(--cinza-200);
+  padding-top: 14px;
+  margin: 0;
+}

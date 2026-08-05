@@ -65,7 +65,7 @@
         </button>
         <div class="menu-conteudo">
           <div class="botoes" id="botoes-migracao">
-            <button disabled title="Em breve">Clientes em migração</button>
+            <button data-tipo="migracao-clientes">Clientes em migração</button>
             <button disabled title="Em breve">Envio de comando</button>
           </div>
         </div>
@@ -136,6 +136,41 @@
             <button type="button" id="btn-cancelar-edicao-credencial" class="btn-secondary hidden">Cancelar edição</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-migracao" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="migracao-modal-titulo">Cliente</h3>
+        <button id="migracao-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-migracao" class="form-migracao">
+          <label class="campo-migracao">
+            <span>CS</span>
+            <input type="text" id="migracao-cs" placeholder="Responsável CS">
+          </label>
+          <label class="campo-migracao">
+            <span>Plataforma de origem</span>
+            <input type="text" id="migracao-plataforma" placeholder="Ex: iTrack, Fleety...">
+          </label>
+          <label class="campo-migracao">
+            <span>Quantidade de Clientes</span>
+            <input type="number" id="migracao-qtd-clientes" min="0" step="1">
+          </label>
+          <label class="campo-migracao">
+            <span>Quantidade de Placas</span>
+            <input type="number" id="migracao-qtd-placas" min="0" step="1">
+          </label>
+          <label class="campo-migracao">
+            <span>Porcentagem da migração</span>
+            <input type="number" id="migracao-percentual" min="0" max="100" step="1">
+          </label>
+          <button type="submit" class="btn-primary">Salvar</button>
+        </form>
+        <p class="placeholder migracao-acoes-placeholder">Ações específicas deste cliente serão adicionadas aqui em breve.</p>
       </div>
     </div>
   </div>

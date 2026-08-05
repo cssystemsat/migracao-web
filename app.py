@@ -351,6 +351,63 @@ def excluir_credencial(cred_id):
     return jsonify(ok=True)
 
 
+# --- CLIENTES EM MIGRAÇÃO ---
+# Uma linha por login salvo em "Gerenciar logins" (o nome vem sempre de lá).
+# Os dados de acompanhamento da migração ficam numa coleção à parte, indexada
+# pelo mesmo id do login, para não duplicar/desalinhar o nome do cliente.
+MIGRACAO_COLLECTION = "migracao_dados"
+CAMPOS_MIGRACAO_PADRAO = {
+    "cs": "",
+    "plataforma_origem": "",
+    "qtd_clientes": 0,
+    "qtd_placas": 0,
+    "percentual_migracao": 0,
+}
+
+
+def _para_int(valor):
+    try:
+        return int(float(valor))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _para_float(valor):
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@app.route("/api/migracao/clientes", methods=["GET"])
+def listar_clientes_migracao():
+    credenciais = {d.id: d.to_dict() for d in db.collection(CREDENCIAIS_COLLECTION).stream()}
+    dados_migracao = {d.id: d.to_dict() for d in db.collection(MIGRACAO_COLLECTION).stream()}
+    lista = []
+    for cred_id, cred in credenciais.items():
+        dados = dict(CAMPOS_MIGRACAO_PADRAO)
+        dados.update(dados_migracao.get(cred_id, {}))
+        lista.append({"id": cred_id, "nome": cred.get("nome", ""), **dados})
+    lista.sort(key=lambda c: c["nome"].lower())
+    return jsonify(ok=True, clientes=lista)
+
+
+@app.route("/api/migracao/clientes/<cred_id>", methods=["PUT"])
+def atualizar_cliente_migracao(cred_id):
+    if not db.collection(CREDENCIAIS_COLLECTION).document(cred_id).get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado (verifique em Gerenciar logins)."), 404
+    data = request.get_json(force=True) or {}
+    dados = {
+        "cs": str(data.get("cs", "")).strip(),
+        "plataforma_origem": str(data.get("plataforma_origem", "")).strip(),
+        "qtd_clientes": _para_int(data.get("qtd_clientes")),
+        "qtd_placas": _para_int(data.get("qtd_placas")),
+        "percentual_migracao": _para_float(data.get("percentual_migracao")),
+    }
+    db.collection(MIGRACAO_COLLECTION).document(cred_id).set(dados)
+    return jsonify(ok=True, dados=dados)
+
+
 @app.route("/api/list/<tipo>")
 def listar(tipo):
     token = session.get("token")
