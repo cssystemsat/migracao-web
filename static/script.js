@@ -12,6 +12,12 @@ const progressoBar = el("progresso-bar");
 const progressoStatus = el("progresso-status");
 const progressoPct = el("progresso-pct");
 
+document.querySelectorAll(".menu-cabecalho").forEach((cabecalho) => {
+  cabecalho.addEventListener("click", () => {
+    cabecalho.closest(".menu-grupo").classList.toggle("aberto");
+  });
+});
+
 const estado = {
   autenticado: false,
   importTipo: null,

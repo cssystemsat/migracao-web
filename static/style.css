@@ -2,6 +2,7 @@
   --azul: #1d4ed8;
   --azul-escuro: #1e3a8a;
   --vermelho: #b91c1c;
+  --violeta: #6d28d9;
   --verde: #15803d;
   --verde-escuro: #166534;
   --cinza-100: #f4f5f7;
@@ -120,20 +121,49 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding: 16px;
 }
 
-.titulo-consultas, .titulo-import {
+.menu-lateral { padding: 8px 16px; }
+
+.menu-grupo { border-bottom: 1px solid var(--cinza-200); }
+.menu-grupo:last-child { border-bottom: none; }
+
+.menu-cabecalho {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  padding: 12px 0;
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin: 0 0 10px;
+  cursor: pointer;
 }
+.menu-cabecalho:hover:not(:disabled) { background: none; opacity: 0.8; }
 .titulo-consultas { color: var(--azul); }
-.titulo-import { color: var(--vermelho); margin-top: 22px; }
+.titulo-import { color: var(--vermelho); }
+.titulo-migracao { color: var(--violeta); }
 
-.botoes { display: flex; flex-direction: column; gap: 6px; }
+.menu-seta {
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+  color: var(--cinza-500);
+}
+.menu-grupo.aberto .menu-seta { transform: rotate(180deg); }
+
+.menu-conteudo {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.2s ease;
+}
+.menu-grupo.aberto .menu-conteudo { max-height: 600px; }
+
+.botoes { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; }
 .botoes button { text-align: left; background: var(--cinza-100); color: var(--cinza-900); border: 1px solid var(--cinza-200); }
 .botoes button:hover:not(:disabled) { background: var(--cinza-200); }
 #botoes-consultas button:hover:not(:disabled) { background: #dbeafe; border-color: #bfdbfe; }
 #botoes-import button:not(:disabled):hover { background: #fee2e2; border-color: #fecaca; }
+#botoes-migracao button:not(:disabled):hover { background: #ede9fe; border-color: #ddd6fe; }
 
 .saida-panel { min-height: 60vh; display: flex; flex-direction: column; }
 .saida-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }

@@ -23,25 +23,52 @@
   </header>
 
   <main class="layout">
-    <section class="panel">
-      <h2 class="titulo-consultas">Consultas / Listagens</h2>
-      <div class="botoes" id="botoes-consultas">
-        <button data-tipo="clientes">Listar Clientes</button>
-        <button data-tipo="veiculos">Listar Veículos</button>
-        <button data-tipo="rastreadores">Listar Rastreadores</button>
-        <button data-tipo="pessoas">Listar Pessoas</button>
-        <button data-tipo="desatualizados">Listar Desatualizados</button>
-        <button data-tipo="uos">Listar UO's</button>
+    <section class="panel menu-lateral">
+      <div class="menu-grupo" data-grupo="consultas">
+        <button type="button" class="menu-cabecalho titulo-consultas">
+          <span>Consultas / Listagens</span>
+          <span class="menu-seta">▾</span>
+        </button>
+        <div class="menu-conteudo">
+          <div class="botoes" id="botoes-consultas">
+            <button data-tipo="clientes">Listar Clientes</button>
+            <button data-tipo="veiculos">Listar Veículos</button>
+            <button data-tipo="rastreadores">Listar Rastreadores</button>
+            <button data-tipo="pessoas">Listar Pessoas</button>
+            <button data-tipo="desatualizados">Listar Desatualizados</button>
+            <button data-tipo="uos">Listar UO's</button>
+          </div>
+        </div>
       </div>
 
-      <h2 class="titulo-import">Área de Importação</h2>
-      <div class="botoes" id="botoes-import">
-        <button data-tipo="cliente">Importar Cliente</button>
-        <button data-tipo="veiculo">Importar Veículo</button>
-        <button disabled title="Ainda não implementado">Importar Rastreador</button>
-        <button data-tipo="uo">Importar UO</button>
-        <button data-tipo="usuario">Importar Usuário</button>
-        <button disabled title="Ainda não implementado">Importar SimCard</button>
+      <div class="menu-grupo" data-grupo="import">
+        <button type="button" class="menu-cabecalho titulo-import">
+          <span>Área de Importação</span>
+          <span class="menu-seta">▾</span>
+        </button>
+        <div class="menu-conteudo">
+          <div class="botoes" id="botoes-import">
+            <button data-tipo="cliente">Importar Cliente</button>
+            <button data-tipo="veiculo">Importar Veículo</button>
+            <button disabled title="Ainda não implementado">Importar Rastreador</button>
+            <button data-tipo="uo">Importar UO</button>
+            <button data-tipo="usuario">Importar Usuário</button>
+            <button disabled title="Ainda não implementado">Importar SimCard</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="menu-grupo" data-grupo="migracao">
+        <button type="button" class="menu-cabecalho titulo-migracao">
+          <span>Área de Migração</span>
+          <span class="menu-seta">▾</span>
+        </button>
+        <div class="menu-conteudo">
+          <div class="botoes" id="botoes-migracao">
+            <button disabled title="Em breve">Clientes em migração</button>
+            <button disabled title="Em breve">Envio de comando</button>
+          </div>
+        </div>
       </div>
     </section>
 
