@@ -258,7 +258,7 @@ table.tabela-saida tr:hover td { background: #f0f7ff; }
   padding: 8px 12px;
   border-radius: var(--radius);
 }
-#input-arquivo { display: none; }
+#input-arquivo, #comando-input-arquivo { display: none; }
 .arquivo-nome { color: var(--cinza-500); font-size: 0.85rem; }
 
 .mapa-campos {
@@ -411,68 +411,107 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
   font-size: 0.9rem;
 }
 
-.modal-grande { max-width: 820px; }
+.modal-grande { max-width: 980px; }
+.modal-grande .modal-body { padding: 10px 14px; }
 
-.comando-secao {
-  padding: 16px 0;
+.comando-auth-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
   border-bottom: 1px solid var(--cinza-200);
+  font-size: 0.8rem;
 }
-.comando-secao:first-child { padding-top: 0; }
-.comando-secao:last-of-type { border-bottom: none; }
-.comando-secao h4 { margin: 0 0 12px; font-size: 0.9rem; color: var(--cinza-700); }
-
-.comando-auth-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.comando-auth-form input {
-  padding: 8px 10px;
+.comando-auth-titulo { font-weight: 600; color: var(--cinza-700); margin-right: 2px; }
+.comando-auth-campo { display: flex; align-items: center; gap: 4px; color: var(--cinza-700); }
+.comando-auth-campo input {
+  padding: 3px 6px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
+  width: 120px;
+  font-size: 0.8rem;
 }
+.comando-numero-campo { margin-left: auto; }
+.comando-numero-campo input { width: 150px; }
+.comando-auth-form button { padding: 4px 10px; font-size: 0.8rem; }
+
+.comando-colunas {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+.comando-coluna { display: flex; flex-direction: column; }
+
+.comando-secao { padding: 5px 0; border-bottom: 1px solid var(--cinza-200); }
+.comando-coluna .comando-secao:first-child { padding-top: 0; }
+.comando-coluna .comando-secao:last-child { border-bottom: none; }
+.comando-secao h4 { margin: 0 0 5px; font-size: 0.78rem; color: var(--cinza-700); }
 
 .comando-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
-  margin-bottom: 12px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-bottom: 5px;
 }
+.comando-grid .campo-migracao { gap: 1px; font-size: 0.72rem; }
 .comando-grid select, .comando-grid input {
-  padding: 8px 10px;
+  padding: 3px 6px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
   width: 100%;
+  font-size: 0.78rem;
 }
 
-.comando-acoes-topo { display: flex; gap: 8px; margin-bottom: 10px; }
+.comando-acoes-topo { display: flex; gap: 5px; margin-bottom: 5px; }
+.comando-acoes-topo button { padding: 4px 8px; font-size: 0.76rem; }
 
 .comando-preview {
   background: var(--cinza-100);
   border: 1px solid var(--cinza-200);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 5px 7px;
   font-family: "Consolas", monospace;
-  font-size: 0.88rem;
-  margin-bottom: 12px;
+  font-size: 0.76rem;
+  margin-bottom: 5px;
   word-break: break-all;
 }
 
-.comando-envio-linha { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.comando-envio-linha { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .comando-envio-linha input[type="text"] {
   flex: 1;
-  min-width: 160px;
-  padding: 8px 10px;
+  min-width: 100px;
+  padding: 4px 6px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
+  font-size: 0.78rem;
 }
+.comando-envio-linha button { padding: 4px 10px; font-size: 0.78rem; }
+.comando-envio-coluna { flex-direction: column; align-items: stretch; }
+.comando-envio-coluna input[type="text"] { min-width: 0; }
+
+.comando-massa-dica { font-size: 0.68rem; margin: 0 0 4px; }
+.comando-massa-arquivo-linha { display: flex; align-items: center; gap: 5px; }
+.comando-massa-arquivo-linha .file-label { padding: 4px 8px; font-size: 0.76rem; white-space: nowrap; }
+
 .comando-intervalo-input {
-  width: 90px;
-  padding: 8px 10px;
+  width: 54px;
+  padding: 4px 6px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
+  font-size: 0.78rem;
 }
 
-.comando-massa-log { max-height: 180px; overflow-y: auto; margin-top: 10px; }
+.comando-massa-log { max-height: 70px; overflow-y: auto; margin-top: 4px; font-size: 0.74rem; }
 
 .comando-resposta {
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   color: var(--cinza-700);
-  min-height: 1.2em;
+  min-height: 1.1em;
+  margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+  .comando-colunas { grid-template-columns: 1fr; }
 }

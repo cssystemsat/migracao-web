@@ -802,7 +802,6 @@ el("btn-comando-limpar").addEventListener("click", () => {
   comandoApnInput.value = "";
   comandoLoginApnInput.value = "";
   comandoPortaInput.value = "";
-  el("comando-numero-gerado").value = "";
   comandoPreview.textContent = "Escolha o modelo, um comando e clique em Gerar";
 });
 
@@ -834,16 +833,16 @@ async function enviarComandoSms(numero, conteudo, campaignId) {
 }
 
 el("btn-comando-enviar-gerado").addEventListener("click", () => {
-  const numero = el("comando-numero-gerado").value.trim();
+  const numero = el("comando-numero").value.trim();
   const conteudo = comandoPreview.textContent;
-  if (!numero || !conteudo) return mostrarErro("Gere o comando e informe o número.");
+  if (!numero || !conteudo) return mostrarErro("Gere o comando e informe o N° linha.");
   enviarComandoSms(numero, conteudo, "Envio de comando pronto");
 });
 
 el("btn-comando-enviar-livre").addEventListener("click", () => {
-  const numero = el("comando-numero-livre").value.trim();
+  const numero = el("comando-numero").value.trim();
   const conteudo = el("comando-texto-livre").value;
-  if (!numero || !conteudo) return mostrarErro("Informe o texto e o número.");
+  if (!numero || !conteudo) return mostrarErro("Informe o texto e o N° linha.");
   enviarComandoSms(numero, conteudo, "Envio de comando livre");
 });
 

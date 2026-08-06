@@ -781,7 +781,9 @@ def comando_upload_massa():
     conteudo = request.files["arquivo"].read()
     try:
         wb = openpyxl.load_workbook(io.BytesIO(conteudo))
-        total_linhas = max(wb.active.max_row - 1, 0)
+        # max_row inclui a linha 1 (cabeçalho), que também é enviada como SMS
+        # (comportamento original preservado) — refletimos o total real de envios.
+        total_linhas = max(wb.active.max_row, 0)
     except Exception as e:
         return jsonify(ok=False, error=f"Falha ao ler Excel: {e}"), 400
     file_id = uuid.uuid4().hex
@@ -813,7 +815,7 @@ def comando_enviar_massa():
     def gerar():
         sucessos = erros = 0
         linha = 1
-        total = max(len(coluna1) - 1, 1)
+        total = max(len(coluna1), 1)
         valor_coluna1 = coluna1[1] if len(coluna1) > 1 else "None"
 
         while valor_coluna1 != "None":
