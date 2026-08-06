@@ -619,9 +619,10 @@ function iniciarPollingImport(jobId, logContainer) {
           logContainer.appendChild(divPlanilha);
         }
 
-        overlay.classList.add("hidden");
-        btnIniciarImport.disabled = false;
-        btnIniciarImport.textContent = "Iniciar Importação";
+        // Fica aberto mostrando o resultado — fecha só quando clicar em "Fechar".
+        progressoStatus.textContent = `Concluído! Sucessos: ${job.sucessos} | Erros: ${job.erros}`;
+        btnIniciarImport.disabled = true;
+        btnIniciarImport.textContent = "Concluído — clique em Fechar";
       }
     } catch (err) {
       pararPollingImport();
