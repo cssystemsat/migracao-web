@@ -13,7 +13,7 @@ import pandas as pd
 import requests
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
-from flask import Flask, Response, jsonify, redirect, render_template, request, session, stream_with_context, url_for
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
@@ -465,6 +465,57 @@ def import_upload():
     return jsonify(ok=True, file_id=file_id, colunas=list(df.columns), total_linhas=len(df))
 
 
+# Importação roda em thread separada, pelo mesmo motivo do envio de comando em
+# massa: uma importação grande facilmente passa dos ~30s que o Render/gunicorn
+# tolera num único request parado, cortando a importação no meio.
+IMPORT_JOBS = {}
+IMPORT_JOBS_LOCK = threading.Lock()
+
+
+def _executar_import(job_id, tipo_config, mapping, df, endpoint, token, criar_planilha, nome_cliente_planilha):
+    sucessos = erros = 0
+    clientes_importados = set()
+    placas_importadas = set()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    for pos, (index, row) in enumerate(df.iterrows()):
+        payload = montar_payload(tipo_config, mapping, row)
+        try:
+            resp = requests.post(f"{BASE_URL}{endpoint}", json=payload, headers=headers, timeout=20)
+            if resp.status_code in (200, 201):
+                sucessos += 1
+                if criar_planilha:
+                    if payload.get("ClientIntegrationCode"):
+                        clientes_importados.add(payload["ClientIntegrationCode"])
+                    if payload.get("Identification"):
+                        placas_importadas.add(payload["Identification"])
+            else:
+                erros += 1
+                with IMPORT_JOBS_LOCK:
+                    IMPORT_JOBS[job_id]["logs"].append(f"Erro linha {pos + 1}: {resp.text}")
+        except requests.exceptions.RequestException as e:
+            erros += 1
+            with IMPORT_JOBS_LOCK:
+                IMPORT_JOBS[job_id]["logs"].append(f"Erro linha {pos + 1}: {e}")
+
+        with IMPORT_JOBS_LOCK:
+            job = IMPORT_JOBS[job_id]
+            job["atual"] = pos + 1
+            job["sucessos"] = sucessos
+            job["erros"] = erros
+
+    resultado_planilha = None
+    if criar_planilha:
+        qtd_clientes = len(clientes_importados)
+        qtd_placas = len(placas_importadas)
+        upsert_cliente_migracao(nome_cliente_planilha, qtd_clientes, qtd_placas)
+        resultado_planilha = {"nome": nome_cliente_planilha, "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas}
+
+    with IMPORT_JOBS_LOCK:
+        IMPORT_JOBS[job_id]["status"] = "concluido"
+        IMPORT_JOBS[job_id]["planilha"] = resultado_planilha
+
+
 @app.route("/api/import/run", methods=["POST"])
 def import_run():
     token = session.get("token")
@@ -487,58 +538,37 @@ def import_run():
         return jsonify(ok=False, error="Informe o nome do cliente para criar a planilha em Clientes em migração."), 400
 
     with UPLOADS_LOCK:
-        df = UPLOADS.get(file_id)
+        df = UPLOADS.pop(file_id, None)
     if df is None:
         return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
 
     endpoint = tipo_config["endpoint"]
+    total = len(df)
 
-    def gerar():
-        sucessos = erros = 0
-        total = len(df)
-        clientes_importados = set()
-        placas_importadas = set()
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        for pos, (index, row) in enumerate(df.iterrows()):
-            payload = montar_payload(tipo_config, mapping, row)
-            try:
-                resp = requests.post(f"{BASE_URL}{endpoint}", json=payload, headers=headers, timeout=20)
-                if resp.status_code in (200, 201):
-                    sucessos += 1
-                    if criar_planilha:
-                        if payload.get("ClientIntegrationCode"):
-                            clientes_importados.add(payload["ClientIntegrationCode"])
-                        if payload.get("Identification"):
-                            placas_importadas.add(payload["Identification"])
-                else:
-                    erros += 1
-                    yield json.dumps({
-                        "type": "log",
-                        "message": f"Erro linha {pos + 1}: {resp.text}",
-                    }) + "\n"
-            except requests.exceptions.RequestException as e:
-                erros += 1
-                yield json.dumps({"type": "log", "message": f"Erro linha {pos + 1}: {e}"}) + "\n"
+    job_id = uuid.uuid4().hex
+    with IMPORT_JOBS_LOCK:
+        IMPORT_JOBS[job_id] = {
+            "status": "rodando", "atual": 0, "total": total,
+            "sucessos": 0, "erros": 0, "logs": [], "planilha": None,
+        }
 
-            pct = int(((pos + 1) / total) * 100) if total else 100
-            yield json.dumps({
-                "type": "progress", "pct": pct, "atual": pos + 1, "total": total,
-                "sucessos": sucessos, "erros": erros,
-            }) + "\n"
+    threading.Thread(
+        target=_executar_import,
+        args=(job_id, tipo_config, mapping, df, endpoint, token, criar_planilha, nome_cliente_planilha),
+        daemon=True,
+    ).start()
 
-        with UPLOADS_LOCK:
-            UPLOADS.pop(file_id, None)
+    return jsonify(ok=True, job_id=job_id, total=total)
 
-        resultado_planilha = None
-        if criar_planilha:
-            qtd_clientes = len(clientes_importados)
-            qtd_placas = len(placas_importadas)
-            upsert_cliente_migracao(nome_cliente_planilha, qtd_clientes, qtd_placas)
-            resultado_planilha = {"nome": nome_cliente_planilha, "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas}
 
-        yield json.dumps({"type": "done", "sucessos": sucessos, "erros": erros, "planilha": resultado_planilha}) + "\n"
-
-    return Response(stream_with_context(gerar()), mimetype="application/x-ndjson")
+@app.route("/api/import/run/status/<job_id>")
+def import_run_status(job_id):
+    with IMPORT_JOBS_LOCK:
+        job = IMPORT_JOBS.get(job_id)
+        if not job:
+            return jsonify(ok=False, error="Job não encontrado."), 404
+        resultado = dict(job)
+    return jsonify(ok=True, **resultado)
 
 
 # --- ENVIO DE COMANDO (SMS Market) ---

@@ -571,6 +571,67 @@ inputArquivo.addEventListener("change", async () => {
   }
 });
 
+let importLogsMostrados = 0;
+let importPollTimer = null;
+
+function pararPollingImport() {
+  if (importPollTimer) {
+    clearInterval(importPollTimer);
+    importPollTimer = null;
+  }
+}
+
+function iniciarPollingImport(jobId, logContainer) {
+  importPollTimer = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/import/run/status/${jobId}`);
+      const job = await r.json();
+      if (!job.ok) {
+        pararPollingImport();
+        return mostrarErro(job.error || "Falha ao consultar andamento.");
+      }
+
+      const pct = job.total ? Math.min(Math.round((job.atual / job.total) * 100), 100) : 0;
+      progressoBar.style.width = pct + "%";
+      progressoPct.textContent = pct + "%";
+      progressoStatus.textContent = `Processando ${job.atual} de ${job.total} (sucessos: ${job.sucessos}, erros: ${job.erros})`;
+
+      for (let i = importLogsMostrados; i < job.logs.length; i++) {
+        const linhaLog = document.createElement("div");
+        linhaLog.className = "log-linha";
+        linhaLog.textContent = job.logs[i];
+        logContainer.appendChild(linhaLog);
+      }
+      importLogsMostrados = job.logs.length;
+
+      if (job.status === "concluido") {
+        pararPollingImport();
+
+        const div = document.createElement("div");
+        div.className = "resumo-final";
+        div.textContent = `Concluído! Sucessos: ${job.sucessos} | Erros: ${job.erros}`;
+        logContainer.appendChild(div);
+
+        if (job.planilha) {
+          const divPlanilha = document.createElement("div");
+          divPlanilha.className = "resumo-final";
+          divPlanilha.textContent = `Cliente "${job.planilha.nome}" atualizado em Clientes em migração: ${job.planilha.qtd_clientes} clientes, ${job.planilha.qtd_placas} placas.`;
+          logContainer.appendChild(divPlanilha);
+        }
+
+        overlay.classList.add("hidden");
+        btnIniciarImport.disabled = false;
+        btnIniciarImport.textContent = "Iniciar Importação";
+      }
+    } catch (err) {
+      pararPollingImport();
+      mostrarErro(String(err));
+      btnIniciarImport.disabled = false;
+      btnIniciarImport.textContent = "Iniciar Importação";
+    }
+  }, 1500);
+}
+
 btnIniciarImport.addEventListener("click", async () => {
   const mapping = {};
   mapaCampos.querySelectorAll("select").forEach((sel) => {
@@ -595,6 +656,7 @@ btnIniciarImport.addEventListener("click", async () => {
 
   const logContainer = document.createElement("div");
   setSaida(logContainer);
+  importLogsMostrados = 0;
 
   try {
     const resp = await fetch("/api/import/run", {
@@ -608,60 +670,12 @@ btnIniciarImport.addEventListener("click", async () => {
         nome_cliente_planilha: nomeClientePlanilha,
       }),
     });
-
-    if (!resp.ok) {
-      const data = await resp.json();
-      throw new Error(data.error || "Falha ao iniciar importação.");
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let resumo = null;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const linhas = buffer.split("\n");
-      buffer = linhas.pop();
-      for (const linha of linhas) {
-        if (!linha.trim()) continue;
-        const evento = JSON.parse(linha);
-        if (evento.type === "progress") {
-          progressoBar.style.width = evento.pct + "%";
-          progressoPct.textContent = evento.pct + "%";
-          progressoStatus.textContent = `Processando ${evento.atual} de ${evento.total} (sucessos: ${evento.sucessos}, erros: ${evento.erros})`;
-        } else if (evento.type === "log") {
-          const linhaLog = document.createElement("div");
-          linhaLog.className = "log-linha";
-          linhaLog.textContent = evento.message;
-          logContainer.appendChild(linhaLog);
-        } else if (evento.type === "done") {
-          resumo = evento;
-        }
-      }
-    }
-
-    if (resumo) {
-      const div = document.createElement("div");
-      div.className = "resumo-final";
-      div.textContent = `Concluído! Sucessos: ${resumo.sucessos} | Erros: ${resumo.erros}`;
-      logContainer.appendChild(div);
-
-      if (resumo.planilha) {
-        const divPlanilha = document.createElement("div");
-        divPlanilha.className = "resumo-final";
-        divPlanilha.textContent = `Cliente "${resumo.planilha.nome}" atualizado em Clientes em migração: ${resumo.planilha.qtd_clientes} clientes, ${resumo.planilha.qtd_placas} placas.`;
-        logContainer.appendChild(divPlanilha);
-      }
-    }
-
-    overlay.classList.add("hidden");
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || "Falha ao iniciar importação.");
+    iniciarPollingImport(data.job_id, logContainer);
   } catch (err) {
     mostrarErro(String(err));
     overlay.classList.add("hidden");
-  } finally {
     btnIniciarImport.disabled = false;
     btnIniciarImport.textContent = "Iniciar Importação";
   }
