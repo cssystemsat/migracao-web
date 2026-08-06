@@ -870,6 +870,61 @@ el("comando-input-arquivo").addEventListener("change", async () => {
   }
 });
 
+let comandoMassaLogsMostrados = 0;
+let comandoMassaPollTimer = null;
+
+function pararPollingMassa() {
+  if (comandoMassaPollTimer) {
+    clearInterval(comandoMassaPollTimer);
+    comandoMassaPollTimer = null;
+  }
+}
+
+function iniciarPollingMassa(jobId) {
+  comandoMassaPollTimer = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/comando/enviar-massa/status/${jobId}`);
+      const job = await r.json();
+      if (!job.ok) {
+        pararPollingMassa();
+        return mostrarErro(job.error || "Falha ao consultar andamento.");
+      }
+
+      const pct = job.total ? Math.min(Math.round((job.atual / job.total) * 100), 100) : 0;
+      comandoMassaBar.style.width = pct + "%";
+      comandoMassaPct.textContent = pct + "%";
+      comandoMassaStatus.textContent = `Linha ${job.atual} de ${job.total} (sucessos: ${job.sucessos}, erros: ${job.erros})`;
+
+      for (let i = comandoMassaLogsMostrados; i < job.logs.length; i++) {
+        const div = document.createElement("div");
+        div.className = "log-linha";
+        div.textContent = job.logs[i];
+        comandoMassaLog.appendChild(div);
+      }
+      comandoMassaLogsMostrados = job.logs.length;
+
+      if (job.status === "concluido") {
+        pararPollingMassa();
+        const div = document.createElement("div");
+        div.className = "resumo-final";
+        div.textContent = `Concluído! Sucessos: ${job.sucessos} | Erros: ${job.erros}`;
+        comandoMassaLog.appendChild(div);
+        if (job.saldo !== undefined && job.saldo !== null) {
+          comandoSaldo.textContent = `Saldo: ${job.saldo}`;
+        }
+        btnComandoEnviarMassa.disabled = false;
+        btnComandoEnviarMassa.textContent = "Enviar";
+        comandoMassaFileId = null;
+        comandoArquivoNome.textContent = "Nenhum arquivo selecionado";
+        el("comando-input-arquivo").value = "";
+      }
+    } catch (err) {
+      pararPollingMassa();
+      mostrarErro(String(err));
+    }
+  }, 1500);
+}
+
 btnComandoEnviarMassa.addEventListener("click", async () => {
   if (!comandoMassaFileId) return;
   const intervalo = el("comando-intervalo").value || "5";
@@ -879,6 +934,7 @@ btnComandoEnviarMassa.addEventListener("click", async () => {
   comandoMassaBar.style.width = "0%";
   comandoMassaPct.textContent = "0%";
   comandoMassaLog.innerHTML = "";
+  comandoMassaLogsMostrados = 0;
 
   try {
     const resp = await fetch("/api/comando/enviar-massa", {
@@ -886,57 +942,13 @@ btnComandoEnviarMassa.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file_id: comandoMassaFileId, intervalo }),
     });
-    if (!resp.ok) {
-      const data = await resp.json();
-      throw new Error(data.error || "Falha ao iniciar envio em massa.");
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let resumo = null;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const linhas = buffer.split("\n");
-      buffer = linhas.pop();
-      for (const linha of linhas) {
-        if (!linha.trim()) continue;
-        const evento = JSON.parse(linha);
-        if (evento.type === "progress") {
-          comandoMassaBar.style.width = evento.pct + "%";
-          comandoMassaPct.textContent = evento.pct + "%";
-          comandoMassaStatus.textContent = `Linha ${evento.atual} de ${evento.total} (sucessos: ${evento.sucessos}, erros: ${evento.erros})`;
-        } else if (evento.type === "log") {
-          const div = document.createElement("div");
-          div.className = "log-linha";
-          div.textContent = evento.message;
-          comandoMassaLog.appendChild(div);
-        } else if (evento.type === "done") {
-          resumo = evento;
-        }
-      }
-    }
-
-    if (resumo) {
-      const div = document.createElement("div");
-      div.className = "resumo-final";
-      div.textContent = `Concluído! Sucessos: ${resumo.sucessos} | Erros: ${resumo.erros}`;
-      comandoMassaLog.appendChild(div);
-      if (resumo.saldo !== undefined && resumo.saldo !== null) {
-        comandoSaldo.textContent = `Saldo: ${resumo.saldo}`;
-      }
-    }
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || "Falha ao iniciar envio em massa.");
+    iniciarPollingMassa(data.job_id);
   } catch (err) {
     mostrarErro(String(err));
-  } finally {
     btnComandoEnviarMassa.disabled = false;
     btnComandoEnviarMassa.textContent = "Enviar";
-    comandoMassaFileId = null;
-    comandoArquivoNome.textContent = "Nenhum arquivo selecionado";
-    el("comando-input-arquivo").value = "";
   }
 });
 

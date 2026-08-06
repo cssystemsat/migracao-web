@@ -685,8 +685,10 @@ def _consultar_saldo_sms(usuario, senha):
     return r.json().get("balance_2")
 
 
-def _enviar_sms(numero, conteudo, campaign_id):
-    auth = session.get("sms_auth")
+def _enviar_sms(numero, conteudo, campaign_id, auth=None):
+    # auth explícito é usado pela thread de envio em massa, que roda fora do
+    # contexto de requisição e por isso não tem acesso à `session`.
+    auth = auth or session.get("sms_auth")
     if not auth:
         return None, "Autentique-se na SMS Market primeiro."
     headers = {"Authorization": f"Basic {auth}"}
@@ -792,17 +794,69 @@ def comando_upload_massa():
     return jsonify(ok=True, file_id=file_id, total_linhas=total_linhas)
 
 
+# Envio em massa roda em thread separada (não presa a um único request HTTP),
+# porque o Render/gunicorn mata requisições longas paradas (timeout padrão de
+# 30s) — com muitas linhas e intervalo entre SMS's isso facilmente estoura.
+# A tela consulta o andamento via polling em /status/<job_id>.
+COMANDO_JOBS = {}
+COMANDO_JOBS_LOCK = threading.Lock()
+
+
+def _executar_envio_massa(job_id, coluna1, coluna2, coluna3, intervalo, auth, usuario, senha):
+    sucessos = erros = 0
+    linha = 1
+    total = max(len(coluna1), 1)
+    valor_coluna1 = coluna1[1] if len(coluna1) > 1 else "None"
+
+    while valor_coluna1 != "None":
+        valor_coluna1 = coluna1[linha - 1] if linha <= len(coluna1) else None
+        valor_coluna2 = coluna2[linha - 1] if linha <= len(coluna2) else None
+        valor_coluna3 = coluna3[linha - 1] if linha <= len(coluna3) else None
+
+        if valor_coluna1 is None and valor_coluna2 is None:
+            break
+
+        resposta, erro = _enviar_sms(valor_coluna2, valor_coluna1, valor_coluna3, auth=auth)
+        with COMANDO_JOBS_LOCK:
+            job = COMANDO_JOBS[job_id]
+            if erro:
+                erros += 1
+                job["logs"].append(f"Erro linha {linha}: {erro}")
+            else:
+                sucessos += 1
+                job["logs"].append(f"Linha {linha}: {resposta}")
+            job["atual"] = linha
+            job["sucessos"] = sucessos
+            job["erros"] = erros
+
+        time.sleep(intervalo)
+        linha += 1
+
+    saldo = None
+    if usuario and senha:
+        try:
+            saldo = _consultar_saldo_sms(usuario, senha)
+        except requests.exceptions.RequestException:
+            pass
+
+    with COMANDO_JOBS_LOCK:
+        COMANDO_JOBS[job_id]["status"] = "concluido"
+        COMANDO_JOBS[job_id]["saldo"] = saldo
+
+
 @app.route("/api/comando/enviar-massa", methods=["POST"])
 def comando_enviar_massa():
-    if not session.get("sms_auth"):
+    auth = session.get("sms_auth")
+    if not auth:
         return jsonify(ok=False, error="Autentique-se na SMS Market primeiro."), 401
+    usuario, senha = session.get("sms_usuario"), session.get("sms_senha")
 
     body = request.get_json(force=True) or {}
     file_id = body.get("file_id")
     intervalo = _para_int(body.get("intervalo"))
 
     with UPLOADS_MASSA_LOCK:
-        conteudo = UPLOADS_MASSA.get(file_id)
+        conteudo = UPLOADS_MASSA.pop(file_id, None)
     if conteudo is None:
         return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
 
@@ -811,52 +865,32 @@ def comando_enviar_massa():
     coluna1 = [str(cell.value) for cell in sheet["A"]]
     coluna2 = [str(cell.value) for cell in sheet["B"]]
     coluna3 = [str(cell.value) for cell in sheet["C"]]
+    total = max(len(coluna1), 1)
 
-    def gerar():
-        sucessos = erros = 0
-        linha = 1
-        total = max(len(coluna1), 1)
-        valor_coluna1 = coluna1[1] if len(coluna1) > 1 else "None"
+    job_id = uuid.uuid4().hex
+    with COMANDO_JOBS_LOCK:
+        COMANDO_JOBS[job_id] = {
+            "status": "rodando", "atual": 0, "total": total,
+            "sucessos": 0, "erros": 0, "logs": [], "saldo": None,
+        }
 
-        while valor_coluna1 != "None":
-            valor_coluna1 = coluna1[linha - 1] if linha <= len(coluna1) else None
-            valor_coluna2 = coluna2[linha - 1] if linha <= len(coluna2) else None
-            valor_coluna3 = coluna3[linha - 1] if linha <= len(coluna3) else None
+    threading.Thread(
+        target=_executar_envio_massa,
+        args=(job_id, coluna1, coluna2, coluna3, intervalo, auth, usuario, senha),
+        daemon=True,
+    ).start()
 
-            if valor_coluna1 is None and valor_coluna2 is None:
-                break
+    return jsonify(ok=True, job_id=job_id, total=total)
 
-            resposta, erro = _enviar_sms(valor_coluna2, valor_coluna1, valor_coluna3)
-            if erro:
-                erros += 1
-                yield json.dumps({"type": "log", "message": f"Erro linha {linha}: {erro}"}) + "\n"
-            else:
-                sucessos += 1
-                yield json.dumps({"type": "log", "message": f"Linha {linha}: {resposta}"}) + "\n"
 
-            pct = min(int((linha / total) * 100), 100)
-            yield json.dumps({
-                "type": "progress", "pct": pct, "atual": linha, "total": total,
-                "sucessos": sucessos, "erros": erros,
-            }) + "\n"
-
-            time.sleep(intervalo)
-            linha += 1
-
-        with UPLOADS_MASSA_LOCK:
-            UPLOADS_MASSA.pop(file_id, None)
-
-        saldo = None
-        usuario, senha = session.get("sms_usuario"), session.get("sms_senha")
-        if usuario and senha:
-            try:
-                saldo = _consultar_saldo_sms(usuario, senha)
-            except requests.exceptions.RequestException:
-                pass
-
-        yield json.dumps({"type": "done", "sucessos": sucessos, "erros": erros, "saldo": saldo}) + "\n"
-
-    return Response(stream_with_context(gerar()), mimetype="application/x-ndjson")
+@app.route("/api/comando/enviar-massa/status/<job_id>")
+def comando_enviar_massa_status(job_id):
+    with COMANDO_JOBS_LOCK:
+        job = COMANDO_JOBS.get(job_id)
+        if not job:
+            return jsonify(ok=False, error="Job não encontrado."), 404
+        resultado = dict(job)
+    return jsonify(ok=True, **resultado)
 
 
 if __name__ == "__main__":
