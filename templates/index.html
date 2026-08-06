@@ -66,7 +66,7 @@
         <div class="menu-conteudo">
           <div class="botoes" id="botoes-migracao">
             <button data-tipo="migracao-clientes">Clientes em migração</button>
-            <button disabled title="Em breve">Envio de comando</button>
+            <button data-tipo="envio-comando">Envio de comando</button>
           </div>
         </div>
       </div>
@@ -103,6 +103,14 @@
           <span>Mapeie as colunas</span>
         </div>
         <div id="mapa-campos" class="mapa-campos"></div>
+
+        <div id="bloco-criar-planilha" class="bloco-criar-planilha hidden">
+          <label class="checkbox-linha">
+            <input type="checkbox" id="chk-criar-planilha">
+            Criar planilha
+          </label>
+          <input type="text" id="input-nome-planilha" class="hidden" placeholder="Nome do cliente (vai aparecer em Clientes em migração)">
+        </div>
 
         <div id="progresso-container" class="progresso-container hidden">
           <div class="progresso-bar-bg"><div id="progresso-bar" class="progresso-bar"></div></div>
@@ -171,6 +179,112 @@
           <button type="submit" class="btn-primary">Salvar</button>
         </form>
         <p class="placeholder migracao-acoes-placeholder">Ações específicas deste cliente serão adicionadas aqui em breve.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-comando" class="overlay hidden">
+    <div class="modal modal-grande">
+      <div class="modal-header">
+        <h3>Envio de comando</h3>
+        <button id="comando-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+
+        <div class="comando-secao">
+          <h4>Autenticação SMS Market</h4>
+          <form id="form-comando-auth" class="comando-auth-form">
+            <input type="text" id="comando-usuario" placeholder="Usuário">
+            <input type="password" id="comando-senha" placeholder="Senha">
+            <button type="submit" class="btn-primary">Autenticar</button>
+            <span id="comando-saldo" class="status-pill status-off">Saldo: -</span>
+          </form>
+        </div>
+
+        <div class="comando-secao">
+          <h4>Comando gerado</h4>
+          <div class="comando-grid">
+            <label class="campo-migracao">
+              <span>Modelo</span>
+              <select id="comando-modelo"></select>
+            </label>
+            <label class="campo-migracao">
+              <span>Comando</span>
+              <select id="comando-tipo"></select>
+            </label>
+            <label class="campo-migracao">
+              <span>Protocolo</span>
+              <select id="comando-protocolo">
+                <option value="TCP">TCP</option>
+                <option value="UDP">UDP</option>
+              </select>
+            </label>
+            <label class="campo-migracao">
+              <span>Operadora</span>
+              <select id="comando-operadora">
+                <option value="Vivo">Vivo</option>
+                <option value="Outras">Outras</option>
+              </select>
+            </label>
+            <label class="campo-migracao">
+              <span>ID/ESN</span>
+              <input type="text" id="comando-id">
+            </label>
+            <label class="campo-migracao">
+              <span>APN</span>
+              <input type="text" id="comando-apn">
+            </label>
+            <label class="campo-migracao">
+              <span>L/S APN</span>
+              <input type="text" id="comando-loginapn">
+            </label>
+            <label class="campo-migracao">
+              <span>Porta</span>
+              <input type="text" id="comando-porta">
+            </label>
+          </div>
+          <div class="comando-acoes-topo">
+            <button type="button" id="btn-comando-gerar" class="btn-secondary">Gerar</button>
+            <button type="button" id="btn-comando-limpar" class="btn-secondary">Limpar</button>
+            <button type="button" id="btn-comando-copiar" class="btn-secondary">Copiar</button>
+          </div>
+          <div id="comando-preview" class="comando-preview">Escolha o modelo, um comando e clique em Gerar</div>
+          <div class="comando-envio-linha">
+            <input type="text" id="comando-numero-gerado" placeholder="Número (DDI+DDD+número)">
+            <button type="button" id="btn-comando-enviar-gerado" class="btn-primary">Enviar</button>
+          </div>
+        </div>
+
+        <div class="comando-secao">
+          <h4>Comando livre</h4>
+          <div class="comando-envio-linha">
+            <input type="text" id="comando-texto-livre" placeholder="Texto do comando">
+            <input type="text" id="comando-numero-livre" placeholder="Número (DDI+DDD+número)">
+            <button type="button" id="btn-comando-enviar-livre" class="btn-primary">Enviar</button>
+          </div>
+        </div>
+
+        <div class="comando-secao">
+          <h4>Envio em massa</h4>
+          <p class="placeholder">Planilha com 3 colunas: A) Comando, B) Telefone, C) Campanha.</p>
+          <div class="comando-envio-linha">
+            <label for="comando-input-arquivo" class="file-label">Escolher Planilha</label>
+            <input type="file" id="comando-input-arquivo" accept=".xlsx,.xls">
+            <span id="comando-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
+            <input type="number" id="comando-intervalo" min="0" value="5" class="comando-intervalo-input">
+            <button type="button" id="btn-comando-enviar-massa" class="btn-primary" disabled>Enviar</button>
+          </div>
+          <div id="comando-massa-progresso" class="progresso-container hidden">
+            <div class="progresso-bar-bg"><div id="comando-massa-bar" class="progresso-bar"></div></div>
+            <div class="progresso-info">
+              <span id="comando-massa-status">Iniciando...</span>
+              <span id="comando-massa-pct">0%</span>
+            </div>
+          </div>
+          <div id="comando-massa-log" class="comando-massa-log"></div>
+        </div>
+
+        <div id="comando-resposta" class="comando-resposta"></div>
       </div>
     </div>
   </div>

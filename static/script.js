@@ -11,6 +11,9 @@ const progressoContainer = el("progresso-container");
 const progressoBar = el("progresso-bar");
 const progressoStatus = el("progresso-status");
 const progressoPct = el("progresso-pct");
+const blocoCriarPlanilha = el("bloco-criar-planilha");
+const chkCriarPlanilha = el("chk-criar-planilha");
+const inputNomePlanilha = el("input-nome-planilha");
 
 document.querySelectorAll(".menu-cabecalho").forEach((cabecalho) => {
   cabecalho.addEventListener("click", () => {
@@ -24,6 +27,7 @@ const estado = {
   fileId: null,
   colunas: [],
   campos: [],
+  credencialAtualNome: null,
 };
 
 function setSaida(node) {
@@ -103,7 +107,7 @@ function aplicarEstadoAuth(autenticado) {
   }
 }
 
-async function autenticarComCampos() {
+async function autenticarComCampos(nomeCredencial) {
   const login = el("login").value.trim();
   const senha = el("senha").value;
   if (!login || !senha) return;
@@ -120,6 +124,7 @@ async function autenticarComCampos() {
     if (data.ok) {
       aplicarEstadoAuth(true);
       el("senha").value = "";
+      estado.credencialAtualNome = nomeCredencial || null;
       mostrarPlaceholder("Autenticado com sucesso! Escolha uma consulta ou importação.");
     } else {
       aplicarEstadoAuth(false);
@@ -135,12 +140,13 @@ async function autenticarComCampos() {
 
 el("form-login").addEventListener("submit", (e) => {
   e.preventDefault();
-  autenticarComCampos();
+  autenticarComCampos(null);
 });
 
 el("btn-logout").addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST" });
   aplicarEstadoAuth(false);
+  estado.credencialAtualNome = null;
   mostrarPlaceholder("Sessão encerrada.");
 });
 
@@ -187,7 +193,7 @@ selectCredencial.addEventListener("change", async () => {
   if (!cred) return;
   el("login").value = cred.login;
   el("senha").value = cred.senha;
-  await autenticarComCampos();
+  await autenticarComCampos(cred.nome);
   selectCredencial.value = "";
 });
 
@@ -238,7 +244,7 @@ function renderListaCredenciais() {
       el("login").value = c.login;
       el("senha").value = c.senha;
       overlayCred.classList.add("hidden");
-      await autenticarComCampos();
+      await autenticarComCampos(c.nome);
     });
 
     const btnEditar = document.createElement("button");
@@ -482,6 +488,16 @@ async function abrirModalImport(tipo) {
   btnIniciarImport.disabled = true;
   btnIniciarImport.textContent = "Iniciar Importação";
 
+  if (tipo === "veiculo") {
+    blocoCriarPlanilha.classList.remove("hidden");
+    chkCriarPlanilha.checked = false;
+    inputNomePlanilha.value = estado.credencialAtualNome || "";
+    inputNomePlanilha.classList.add("hidden");
+  } else {
+    blocoCriarPlanilha.classList.add("hidden");
+    chkCriarPlanilha.checked = false;
+  }
+
   const r = await fetch(`/api/import/params/${tipo}`);
   const data = await r.json();
   if (!data.ok) return mostrarErro(data.error || "Tipo desconhecido.");
@@ -491,6 +507,10 @@ async function abrirModalImport(tipo) {
   renderMapaCampos();
   overlay.classList.remove("hidden");
 }
+
+chkCriarPlanilha.addEventListener("change", () => {
+  inputNomePlanilha.classList.toggle("hidden", !chkCriarPlanilha.checked);
+});
 
 function renderMapaCampos() {
   mapaCampos.innerHTML = "";
@@ -560,6 +580,12 @@ btnIniciarImport.addEventListener("click", async () => {
     return mostrarErro("Mapeie ao menos uma coluna antes de iniciar.");
   }
 
+  const criarPlanilha = estado.importTipo === "veiculo" && chkCriarPlanilha.checked;
+  const nomeClientePlanilha = inputNomePlanilha.value.trim();
+  if (criarPlanilha && !nomeClientePlanilha) {
+    return mostrarErro("Informe o nome do cliente para criar a planilha em Clientes em migração.");
+  }
+
   btnIniciarImport.disabled = true;
   btnIniciarImport.textContent = "Importando...";
   progressoContainer.classList.remove("hidden");
@@ -574,7 +600,13 @@ btnIniciarImport.addEventListener("click", async () => {
     const resp = await fetch("/api/import/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tipo: estado.importTipo, file_id: estado.fileId, mapping }),
+      body: JSON.stringify({
+        tipo: estado.importTipo,
+        file_id: estado.fileId,
+        mapping,
+        criar_planilha: criarPlanilha,
+        nome_cliente_planilha: nomeClientePlanilha,
+      }),
     });
 
     if (!resp.ok) {
@@ -616,6 +648,13 @@ btnIniciarImport.addEventListener("click", async () => {
       div.className = "resumo-final";
       div.textContent = `Concluído! Sucessos: ${resumo.sucessos} | Erros: ${resumo.erros}`;
       logContainer.appendChild(div);
+
+      if (resumo.planilha) {
+        const divPlanilha = document.createElement("div");
+        divPlanilha.className = "resumo-final";
+        divPlanilha.textContent = `Cliente "${resumo.planilha.nome}" atualizado em Clientes em migração: ${resumo.planilha.qtd_clientes} clientes, ${resumo.planilha.qtd_placas} placas.`;
+        logContainer.appendChild(divPlanilha);
+      }
     }
 
     overlay.classList.add("hidden");
@@ -625,6 +664,280 @@ btnIniciarImport.addEventListener("click", async () => {
   } finally {
     btnIniciarImport.disabled = false;
     btnIniciarImport.textContent = "Iniciar Importação";
+  }
+});
+
+// --- ENVIO DE COMANDO (SMS Market) ---
+const overlayComando = el("overlay-comando");
+const comandoModelo = el("comando-modelo");
+const comandoTipo = el("comando-tipo");
+const comandoOperadora = el("comando-operadora");
+const comandoIdInput = el("comando-id");
+const comandoApnInput = el("comando-apn");
+const comandoLoginApnInput = el("comando-loginapn");
+const comandoPortaInput = el("comando-porta");
+const comandoPreview = el("comando-preview");
+const comandoSaldo = el("comando-saldo");
+const comandoResposta = el("comando-resposta");
+const comandoArquivoNome = el("comando-arquivo-nome");
+const btnComandoEnviarMassa = el("btn-comando-enviar-massa");
+const comandoMassaProgresso = el("comando-massa-progresso");
+const comandoMassaBar = el("comando-massa-bar");
+const comandoMassaStatus = el("comando-massa-status");
+const comandoMassaPct = el("comando-massa-pct");
+const comandoMassaLog = el("comando-massa-log");
+
+const MODELOS_RASTREADOR = [
+  "E3/E3+", "F1/M1", "GTK LW", "GV-50", "GV-55", "GV-75", "ITR-120/155", "J16",
+  "JC181", "JC400D", "JC400AD", "JC450", "VL01/02/03", "LV12", "MXT-140", "N4",
+  "NT20", "Oneblock", "ST3XX", "ST40XX", "ST80XX", "TK311", "TR05",
+];
+
+const COMANDOS_POR_MODELO = {
+  "E3/E3+": ["REG000000#", "SMS1", "IP/Porta1", "IP/Porta2", "SMS0"],
+  "F1/M1": ["IP/Porta", "APN", "Reset"],
+  "GTK LW": ["IP/Porta", "APN", "Reset"],
+  "GV-50": ["IP/Porta", "APN", "Reset"],
+  "GV-55": ["IP/Porta", "APN", "Reset"],
+  "GV-75": ["IP/Porta", "APN", "Reset"],
+  "ITR-120/155": ["IP/Porta", "APN", "Reset"],
+  "J16": ["IP/Porta", "APN", "Reset"],
+  "JC181": ["COREKITSW,0", "APN", "URLTYPE,2", "SERVER"],
+  "JC400D": ["APN", "SERVER", "RSERVICE", "UPLOAD", "RESET"],
+  "JC400AD": ["COREKITSW", "APN", "SERVER", "RSERVICE", "UPLOAD", "FILELIST", "Reset"],
+  "JC450": ["URLTYPE,2", "APN", "SERVER", "LOCATEREP", "SHUTDOWNTIME", "WAKEMODE"],
+  "VL01/02/03": ["IP/Porta", "APN", "Reset"],
+  "LV12": ["IP/Porta", "APN", "Reset"],
+  "MXT-140": ["IP/Porta"],
+  "N4": ["IP/Porta", "APN", "Reset"],
+  "NT20": ["IP/Porta", "APN", "Reset"],
+  "Oneblock": ["IP/Porta", "APN", "Reset"],
+  "ST3XX": ["IP/Porta", "Rede zip", "Reset"],
+  "ST40XX": ["IP/Porta", "APN", "Rede zip", "IG Física", "Reset"],
+  "ST80XX": ["IP/Porta", "APN", "Rede zip", "IG Física", "Reset"],
+  "TK311": ["IP/Porta", "Reset"],
+  "TR05": ["IP/Porta", "APN", "Reset"],
+};
+
+function popularSelect(select, opcoes, placeholder) {
+  select.innerHTML = "";
+  const optVazio = document.createElement("option");
+  optVazio.value = "";
+  optVazio.textContent = placeholder;
+  select.appendChild(optVazio);
+  opcoes.forEach((o) => {
+    const opt = document.createElement("option");
+    opt.value = o;
+    opt.textContent = o;
+    select.appendChild(opt);
+  });
+}
+
+popularSelect(comandoModelo, MODELOS_RASTREADOR, "Selecione o modelo...");
+
+comandoModelo.addEventListener("change", () => {
+  popularSelect(comandoTipo, COMANDOS_POR_MODELO[comandoModelo.value] || [], "Selecione o comando...");
+});
+
+el("botoes-migracao").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tipo='envio-comando']");
+  if (!btn) return;
+  overlayComando.classList.remove("hidden");
+});
+
+el("comando-modal-fechar").addEventListener("click", () => overlayComando.classList.add("hidden"));
+overlayComando.addEventListener("click", (e) => {
+  if (e.target === overlayComando) overlayComando.classList.add("hidden");
+});
+
+el("form-comando-auth").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const usuario = el("comando-usuario").value.trim();
+  const senha = el("comando-senha").value;
+  if (!usuario || !senha) return;
+  try {
+    const r = await fetch("/api/comando/autenticar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario, senha }),
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      comandoSaldo.textContent = "Saldo: -";
+      comandoSaldo.className = "status-pill status-off";
+      return mostrarErro(data.error || "Falha ao autenticar na SMS Market.");
+    }
+    comandoSaldo.textContent = `Saldo: ${data.saldo}`;
+    comandoSaldo.className = "status-pill status-on";
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+});
+
+el("btn-comando-gerar").addEventListener("click", async () => {
+  const payload = {
+    modelo: comandoModelo.value,
+    comando: comandoTipo.value,
+    id: comandoIdInput.value,
+    apn: comandoApnInput.value,
+    loginapn: comandoLoginApnInput.value,
+    porta: comandoPortaInput.value,
+    operadora: comandoOperadora.value,
+  };
+  try {
+    const r = await fetch("/api/comando/gerar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    comandoPreview.textContent = data.ok ? data.texto : (data.error || "Comando não implementado para este modelo.");
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+});
+
+el("btn-comando-limpar").addEventListener("click", () => {
+  comandoIdInput.value = "";
+  comandoApnInput.value = "";
+  comandoLoginApnInput.value = "";
+  comandoPortaInput.value = "";
+  el("comando-numero-gerado").value = "";
+  comandoPreview.textContent = "Escolha o modelo, um comando e clique em Gerar";
+});
+
+el("btn-comando-copiar").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(comandoPreview.textContent);
+    comandoResposta.textContent = "Comando copiado para a área de transferência.";
+  } catch (err) {
+    mostrarErro("Não foi possível copiar: " + String(err));
+  }
+});
+
+async function enviarComandoSms(numero, conteudo, campaignId) {
+  try {
+    const r = await fetch("/api/comando/enviar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ numero, conteudo, campaign_id: campaignId }),
+    });
+    const data = await r.json();
+    if (!data.ok) return mostrarErro(data.error || "Falha ao enviar SMS.");
+    if (data.saldo !== undefined && data.saldo !== null) {
+      comandoSaldo.textContent = `Saldo: ${data.saldo}`;
+    }
+    comandoResposta.textContent = `Resposta: ${data.resposta}`;
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+}
+
+el("btn-comando-enviar-gerado").addEventListener("click", () => {
+  const numero = el("comando-numero-gerado").value.trim();
+  const conteudo = comandoPreview.textContent;
+  if (!numero || !conteudo) return mostrarErro("Gere o comando e informe o número.");
+  enviarComandoSms(numero, conteudo, "Envio de comando pronto");
+});
+
+el("btn-comando-enviar-livre").addEventListener("click", () => {
+  const numero = el("comando-numero-livre").value.trim();
+  const conteudo = el("comando-texto-livre").value;
+  if (!numero || !conteudo) return mostrarErro("Informe o texto e o número.");
+  enviarComandoSms(numero, conteudo, "Envio de comando livre");
+});
+
+let comandoMassaFileId = null;
+
+el("comando-input-arquivo").addEventListener("change", async () => {
+  const file = el("comando-input-arquivo").files[0];
+  if (!file) return;
+  comandoArquivoNome.textContent = "Enviando...";
+  const formData = new FormData();
+  formData.append("arquivo", file);
+  try {
+    const r = await fetch("/api/comando/upload-massa", { method: "POST", body: formData });
+    const data = await r.json();
+    if (!data.ok) {
+      comandoArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErro(data.error || "Falha ao enviar arquivo.");
+    }
+    comandoMassaFileId = data.file_id;
+    comandoArquivoNome.textContent = `${file.name} (~${data.total_linhas} linhas)`;
+    btnComandoEnviarMassa.disabled = false;
+  } catch (err) {
+    comandoArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErro(String(err));
+  }
+});
+
+btnComandoEnviarMassa.addEventListener("click", async () => {
+  if (!comandoMassaFileId) return;
+  const intervalo = el("comando-intervalo").value || "5";
+  btnComandoEnviarMassa.disabled = true;
+  btnComandoEnviarMassa.textContent = "Enviando...";
+  comandoMassaProgresso.classList.remove("hidden");
+  comandoMassaBar.style.width = "0%";
+  comandoMassaPct.textContent = "0%";
+  comandoMassaLog.innerHTML = "";
+
+  try {
+    const resp = await fetch("/api/comando/enviar-massa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: comandoMassaFileId, intervalo }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json();
+      throw new Error(data.error || "Falha ao iniciar envio em massa.");
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let resumo = null;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const linhas = buffer.split("\n");
+      buffer = linhas.pop();
+      for (const linha of linhas) {
+        if (!linha.trim()) continue;
+        const evento = JSON.parse(linha);
+        if (evento.type === "progress") {
+          comandoMassaBar.style.width = evento.pct + "%";
+          comandoMassaPct.textContent = evento.pct + "%";
+          comandoMassaStatus.textContent = `Linha ${evento.atual} de ${evento.total} (sucessos: ${evento.sucessos}, erros: ${evento.erros})`;
+        } else if (evento.type === "log") {
+          const div = document.createElement("div");
+          div.className = "log-linha";
+          div.textContent = evento.message;
+          comandoMassaLog.appendChild(div);
+        } else if (evento.type === "done") {
+          resumo = evento;
+        }
+      }
+    }
+
+    if (resumo) {
+      const div = document.createElement("div");
+      div.className = "resumo-final";
+      div.textContent = `Concluído! Sucessos: ${resumo.sucessos} | Erros: ${resumo.erros}`;
+      comandoMassaLog.appendChild(div);
+      if (resumo.saldo !== undefined && resumo.saldo !== null) {
+        comandoSaldo.textContent = `Saldo: ${resumo.saldo}`;
+      }
+    }
+  } catch (err) {
+    mostrarErro(String(err));
+  } finally {
+    btnComandoEnviarMassa.disabled = false;
+    btnComandoEnviarMassa.textContent = "Enviar";
+    comandoMassaFileId = null;
+    comandoArquivoNome.textContent = "Nenhum arquivo selecionado";
+    el("comando-input-arquivo").value = "";
   }
 });
 

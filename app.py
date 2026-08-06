@@ -1,13 +1,18 @@
+import base64
 import hmac
+import io
 import json
 import os
 import threading
+import time
 import uuid
 
 import firebase_admin
+import openpyxl
 import pandas as pd
 import requests
 from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 
 app = Flask(__name__)
@@ -352,11 +357,11 @@ def excluir_credencial(cred_id):
 
 
 # --- CLIENTES EM MIGRAÇÃO ---
-# Uma linha por login salvo em "Gerenciar logins" (o nome vem sempre de lá).
-# Os dados de acompanhamento da migração ficam numa coleção à parte, indexada
-# pelo mesmo id do login, para não duplicar/desalinhar o nome do cliente.
-MIGRACAO_COLLECTION = "migracao_dados"
+# Coleção independente: uma linha nasce quando alguém importa veículos com a
+# opção "Criar planilha" marcada (não mais atrelada aos logins salvos).
+MIGRACAO_COLLECTION = "migracao_clientes"
 CAMPOS_MIGRACAO_PADRAO = {
+    "nome": "",
     "cs": "",
     "plataforma_origem": "",
     "qtd_clientes": 0,
@@ -379,23 +384,34 @@ def _para_float(valor):
         return 0.0
 
 
+def upsert_cliente_migracao(nome, qtd_clientes, qtd_placas):
+    """Cria a linha do cliente se não existir (por nome); se existir, atualiza as quantidades."""
+    query = db.collection(MIGRACAO_COLLECTION).where(filter=FieldFilter("nome", "==", nome)).limit(1).stream()
+    existente = next(query, None)
+    if existente:
+        existente.reference.update({"qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas})
+        return existente.id
+    dados = dict(CAMPOS_MIGRACAO_PADRAO)
+    dados.update({"nome": nome, "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas})
+    doc_ref = db.collection(MIGRACAO_COLLECTION).document()
+    doc_ref.set(dados)
+    return doc_ref.id
+
+
 @app.route("/api/migracao/clientes", methods=["GET"])
 def listar_clientes_migracao():
-    credenciais = {d.id: d.to_dict() for d in db.collection(CREDENCIAIS_COLLECTION).stream()}
-    dados_migracao = {d.id: d.to_dict() for d in db.collection(MIGRACAO_COLLECTION).stream()}
-    lista = []
-    for cred_id, cred in credenciais.items():
-        dados = dict(CAMPOS_MIGRACAO_PADRAO)
-        dados.update(dados_migracao.get(cred_id, {}))
-        lista.append({"id": cred_id, "nome": cred.get("nome", ""), **dados})
+    docs = db.collection(MIGRACAO_COLLECTION).stream()
+    lista = [dict(d.to_dict(), id=d.id) for d in docs]
     lista.sort(key=lambda c: c["nome"].lower())
     return jsonify(ok=True, clientes=lista)
 
 
-@app.route("/api/migracao/clientes/<cred_id>", methods=["PUT"])
-def atualizar_cliente_migracao(cred_id):
-    if not db.collection(CREDENCIAIS_COLLECTION).document(cred_id).get().exists:
-        return jsonify(ok=False, error="Cliente não encontrado (verifique em Gerenciar logins)."), 404
+@app.route("/api/migracao/clientes/<cliente_id>", methods=["PUT"])
+def atualizar_cliente_migracao(cliente_id):
+    doc_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
+    atual = doc_ref.get()
+    if not atual.exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
     data = request.get_json(force=True) or {}
     dados = {
         "cs": str(data.get("cs", "")).strip(),
@@ -404,8 +420,8 @@ def atualizar_cliente_migracao(cred_id):
         "qtd_placas": _para_int(data.get("qtd_placas")),
         "percentual_migracao": _para_float(data.get("percentual_migracao")),
     }
-    db.collection(MIGRACAO_COLLECTION).document(cred_id).set(dados)
-    return jsonify(ok=True, dados=dados)
+    doc_ref.update(dados)
+    return jsonify(ok=True, dados=dict(atual.to_dict(), **dados))
 
 
 @app.route("/api/list/<tipo>")
@@ -459,12 +475,16 @@ def import_run():
     tipo = body.get("tipo")
     file_id = body.get("file_id")
     mapping = body.get("mapping") or {}
+    criar_planilha = bool(body.get("criar_planilha")) and tipo == "veiculo"
+    nome_cliente_planilha = str(body.get("nome_cliente_planilha", "")).strip()
 
     tipo_config = PARAMS.get(tipo)
     if not tipo_config:
         return jsonify(ok=False, error="Tipo desconhecido."), 404
     if not mapping:
         return jsonify(ok=False, error="Mapeie ao menos uma coluna."), 400
+    if criar_planilha and not nome_cliente_planilha:
+        return jsonify(ok=False, error="Informe o nome do cliente para criar a planilha em Clientes em migração."), 400
 
     with UPLOADS_LOCK:
         df = UPLOADS.get(file_id)
@@ -476,6 +496,8 @@ def import_run():
     def gerar():
         sucessos = erros = 0
         total = len(df)
+        clientes_importados = set()
+        placas_importadas = set()
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         for pos, (index, row) in enumerate(df.iterrows()):
             payload = montar_payload(tipo_config, mapping, row)
@@ -483,6 +505,11 @@ def import_run():
                 resp = requests.post(f"{BASE_URL}{endpoint}", json=payload, headers=headers, timeout=20)
                 if resp.status_code in (200, 201):
                     sucessos += 1
+                    if criar_planilha:
+                        if payload.get("ClientIntegrationCode"):
+                            clientes_importados.add(payload["ClientIntegrationCode"])
+                        if payload.get("Identification"):
+                            placas_importadas.add(payload["Identification"])
                 else:
                     erros += 1
                     yield json.dumps({
@@ -501,7 +528,331 @@ def import_run():
 
         with UPLOADS_LOCK:
             UPLOADS.pop(file_id, None)
-        yield json.dumps({"type": "done", "sucessos": sucessos, "erros": erros}) + "\n"
+
+        resultado_planilha = None
+        if criar_planilha:
+            qtd_clientes = len(clientes_importados)
+            qtd_placas = len(placas_importadas)
+            upsert_cliente_migracao(nome_cliente_planilha, qtd_clientes, qtd_placas)
+            resultado_planilha = {"nome": nome_cliente_planilha, "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas}
+
+        yield json.dumps({"type": "done", "sucessos": sucessos, "erros": erros, "planilha": resultado_planilha}) + "\n"
+
+    return Response(stream_with_context(gerar()), mimetype="application/x-ndjson")
+
+
+# --- ENVIO DE COMANDO (SMS Market) ---
+# Portado do "Configurador de rastreadores V5.0" (tkinter). A lógica de geração
+# de comando por modelo/comando e o fluxo de envio (único, livre, em massa)
+# foram mantidos fiéis ao programa original, inclusive peculiaridades dele
+# (ex.: alguns modelos retornam um texto diferente do exibido na tela original;
+# aqui exibimos sempre o texto que é realmente enviado).
+SMS_BASE_URL = "https://api.smsmarket.com.br/webservice-rest"
+
+UPLOADS_MASSA = {}
+UPLOADS_MASSA_LOCK = threading.Lock()
+
+
+def gerar_comando_sms(modelo, comando, id_, apn, loginapn, porta, operadora):
+    """Retorna o texto do comando a ser enviado, ou None se a combinação não é suportada."""
+
+    if modelo == "E3/E3+":
+        if comando == "REG000000#":
+            return "REG000000#"
+        if comando == "SMS1":
+            return "SMS1"
+        if comando == "IP/Porta1":
+            return f"IP1#200.152.62.20#{porta}#"
+        if comando == "IP/Porta2":
+            return f"IP2#200.152.62.20#{porta}#"
+        if comando == "SMS0":
+            return "SMS0"
+
+    if modelo == "F1/M1":
+        if comando == "IP/Porta":
+            return f"SERVER,0,200.152.62.20,{porta},0#"
+        if comando == "APN":
+            return f"APN,{apn},{loginapn},{loginapn}#"
+        if comando == "Reset":
+            return "#reiniciar,888888#"
+
+    if modelo == "ITR-120/155":
+        if comando == "IP/Porta":
+            return f"SERVER,0,200.152.62.20,{porta},0#"
+        if comando == "APN":
+            return f"APN,{apn},{loginapn},{loginapn}#"
+        if comando == "Reset":
+            return "RESET#"
+
+    if modelo == "JC181":
+        if comando == "COREKITSW,0":
+            return "COREKITSW,0"
+        if comando == "APN":
+            return f"APN,{apn},{loginapn},{loginapn}"
+        if comando == "URLTYPE,2":
+            return "URLTYPE,2"
+        if comando == "SERVER":
+            return "SERVER,0,200.152.62.22,21122"
+
+    if modelo == "JC450":
+        if comando == "URLTYPE,2":
+            return "URLTYPE,2"
+        if comando == "APN":
+            return f"APN,jimi,{apn},,,,,,{loginapn},,{loginapn},,,,,IP,IP,"
+        if comando == "SERVER":
+            return "SERVER,jimi.systemsatx.com.br,21122,NA,NA,NA,NA"
+        if comando == "LOCATEREP":
+            return "LOCATEREP,60"
+        if comando == "SHUTDOWNTIME":
+            return "SHUTDOWNTIME,120"
+        if comando == "WAKEMODE":
+            return "WAKEMODE,103"
+
+    if modelo in ("VL01/02/03", "LV12", "N4", "J16"):
+        if comando == "IP/Porta":
+            return f"SERVER,0,200.152.62.20,{porta},0#"
+        if comando == "APN":
+            return f"APN,{apn},{loginapn},{loginapn}#"
+        if comando == "Reset":
+            return "RESET#"
+
+    if modelo == "NT20":
+        if comando == "IP/Porta":
+            return f"SERVER,8520,200.152.62.20,{porta},0#"
+        if comando == "APN":
+            return f"APN,{apn},{loginapn},{loginapn}#"
+        if comando == "Reset":
+            return "RESET#"
+
+    if modelo in ("ST40XX", "ST80XX"):
+        if comando == "IP/Porta":
+            return f"PRG;{id_};10;05#200.152.62.20;06#{porta};08#200.152.62.20;09#{porta}"
+        if comando == "APN":
+            return f"PRG;{apn};10;00#01;01#{apn};02#{loginapn};03#{loginapn}"
+        if comando == "Rede zip":
+            return f"PRG;{apn};10;00#01;01#{apn};02#{loginapn};03#{loginapn}"
+        if comando == "IG Física":
+            return f"PRG;{id_};17;00#01"
+        if comando == "Reset":
+            return f"CMD;{id_};03;03"
+
+    if modelo == "ST3XX":
+        if comando == "IP/Porta":
+            if operadora == "Outras":
+                return f"ST300NTW;{id_};02;1;{apn};{loginapn};{loginapn};200.152.62.20;{porta};200.152.62.20;{porta};;"
+            return f"ST300NTW;{id_};02;0;{apn};{loginapn};{loginapn};200.152.62.20;{porta};200.152.62.20;{porta};;"
+        if comando == "Rede zip":
+            return f"ST300NTW;{id_};02;1;{apn};{loginapn};{loginapn};200.152.62.20;{porta};200.152.62.20;{porta};;"
+        if comando == "Reset":
+            return f"ST300CMD;{id_};02;Reboot"
+
+    if modelo == "TK311":
+        if comando == "IP/Porta":
+            return f"adminip123456 200.152.62.20 {porta}"
+        if comando == "Reset":
+            return "reset123456"
+
+    if modelo == "JC400AD":
+        if comando == "COREKITSW":
+            return "COREKITSW,0"
+        if comando == "APN":
+            return f"APN,SYSTEMSAT,{apn},,,,,,{loginapn},,{loginapn},,,,,IPv4,IPv4,,"
+        if comando == "SERVER":
+            return "SERVER#1#jimi.systemsatx.com.br#21100"
+        if comando == "RSERVICE":
+            return "RSERVICE,jimi.systemsatx.com.br:1936/live"
+        if comando == "UPLOAD":
+            return "UPLOAD,http://jimi.systemsatx.com.br:23010/upload"
+        if comando == "FILELIST":
+            return "FILELIST,https://jimiapi.systemsatx.com.br/fileList"
+        if comando == "Reset":
+            return "Reboot"
+
+    if modelo in ("GTK LW", "TR05"):
+        if comando == "IP/Porta":
+            return f"SERVER,8888,200.152.62.20,{porta}#"
+        if comando == "APN":
+            return f"APN,{apn},{loginapn},{loginapn}#"
+        if comando == "Reset":
+            return "RESET#"
+
+    return None
+
+
+def _consultar_saldo_sms(usuario, senha):
+    r = requests.get(f"{SMS_BASE_URL}/balance", params={"user": usuario, "password": senha}, timeout=15)
+    r.raise_for_status()
+    return r.json().get("balance_2")
+
+
+def _enviar_sms(numero, conteudo, campaign_id):
+    auth = session.get("sms_auth")
+    if not auth:
+        return None, "Autentique-se na SMS Market primeiro."
+    headers = {"Authorization": f"Basic {auth}"}
+    payload = {"number": numero, "content": conteudo, "type": "0", "campaign_id": campaign_id}
+    try:
+        r = requests.post(f"{SMS_BASE_URL}/send-single.php", data=payload, headers=headers, timeout=20)
+        data = r.json()
+        return data.get("responseDescription"), None
+    except requests.exceptions.RequestException as e:
+        return None, str(e)
+    except ValueError:
+        return None, "Resposta inválida da SMS Market."
+
+
+@app.route("/api/comando/autenticar", methods=["POST"])
+def comando_autenticar():
+    data = request.get_json(force=True) or {}
+    usuario = str(data.get("usuario", "")).strip()
+    senha = str(data.get("senha", ""))
+    if not usuario or not senha:
+        return jsonify(ok=False, error="Informe usuário e senha."), 400
+    try:
+        saldo = _consultar_saldo_sms(usuario, senha)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar saldo: {e}"), 400
+    if saldo is None or saldo == "None":
+        return jsonify(ok=False, error="Usuário ou senha inválido."), 400
+    session["sms_usuario"] = usuario
+    session["sms_senha"] = senha
+    session["sms_auth"] = base64.b64encode(f"{usuario}:{senha}".encode()).decode()
+    return jsonify(ok=True, saldo=saldo)
+
+
+@app.route("/api/comando/saldo")
+def comando_saldo():
+    usuario, senha = session.get("sms_usuario"), session.get("sms_senha")
+    if not usuario or not senha:
+        return jsonify(ok=False, error="Autentique-se na SMS Market primeiro."), 401
+    try:
+        saldo = _consultar_saldo_sms(usuario, senha)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar saldo: {e}"), 400
+    return jsonify(ok=True, saldo=saldo)
+
+
+@app.route("/api/comando/gerar", methods=["POST"])
+def comando_gerar():
+    data = request.get_json(force=True) or {}
+    texto = gerar_comando_sms(
+        modelo=data.get("modelo", ""),
+        comando=data.get("comando", ""),
+        id_=data.get("id", ""),
+        apn=data.get("apn", ""),
+        loginapn=data.get("loginapn", ""),
+        porta=data.get("porta", ""),
+        operadora=data.get("operadora", ""),
+    )
+    if texto is None:
+        return jsonify(ok=False, error="Comando não implementado para este modelo."), 400
+    return jsonify(ok=True, texto=texto)
+
+
+@app.route("/api/comando/enviar", methods=["POST"])
+def comando_enviar():
+    if not session.get("sms_auth"):
+        return jsonify(ok=False, error="Autentique-se na SMS Market primeiro."), 401
+    data = request.get_json(force=True) or {}
+    numero = str(data.get("numero", "")).strip()
+    conteudo = str(data.get("conteudo", ""))
+    campaign_id = str(data.get("campaign_id", "Envio de comando"))
+    if not numero or not conteudo:
+        return jsonify(ok=False, error="Informe número e conteúdo."), 400
+
+    resposta, erro = _enviar_sms(numero, conteudo, campaign_id)
+    if erro:
+        return jsonify(ok=False, error=erro), 400
+
+    saldo = None
+    usuario, senha = session.get("sms_usuario"), session.get("sms_senha")
+    if usuario and senha:
+        try:
+            saldo = _consultar_saldo_sms(usuario, senha)
+        except requests.exceptions.RequestException:
+            pass
+    return jsonify(ok=True, resposta=resposta, saldo=saldo)
+
+
+@app.route("/api/comando/upload-massa", methods=["POST"])
+def comando_upload_massa():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    conteudo = request.files["arquivo"].read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(conteudo))
+        total_linhas = max(wb.active.max_row - 1, 0)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler Excel: {e}"), 400
+    file_id = uuid.uuid4().hex
+    with UPLOADS_MASSA_LOCK:
+        UPLOADS_MASSA[file_id] = conteudo
+    return jsonify(ok=True, file_id=file_id, total_linhas=total_linhas)
+
+
+@app.route("/api/comando/enviar-massa", methods=["POST"])
+def comando_enviar_massa():
+    if not session.get("sms_auth"):
+        return jsonify(ok=False, error="Autentique-se na SMS Market primeiro."), 401
+
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    intervalo = _para_int(body.get("intervalo"))
+
+    with UPLOADS_MASSA_LOCK:
+        conteudo = UPLOADS_MASSA.get(file_id)
+    if conteudo is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+
+    wb = openpyxl.load_workbook(io.BytesIO(conteudo))
+    sheet = wb.active
+    coluna1 = [str(cell.value) for cell in sheet["A"]]
+    coluna2 = [str(cell.value) for cell in sheet["B"]]
+    coluna3 = [str(cell.value) for cell in sheet["C"]]
+
+    def gerar():
+        sucessos = erros = 0
+        linha = 1
+        total = max(len(coluna1) - 1, 1)
+        valor_coluna1 = coluna1[1] if len(coluna1) > 1 else "None"
+
+        while valor_coluna1 != "None":
+            valor_coluna1 = coluna1[linha - 1] if linha <= len(coluna1) else None
+            valor_coluna2 = coluna2[linha - 1] if linha <= len(coluna2) else None
+            valor_coluna3 = coluna3[linha - 1] if linha <= len(coluna3) else None
+
+            if valor_coluna1 is None and valor_coluna2 is None:
+                break
+
+            resposta, erro = _enviar_sms(valor_coluna2, valor_coluna1, valor_coluna3)
+            if erro:
+                erros += 1
+                yield json.dumps({"type": "log", "message": f"Erro linha {linha}: {erro}"}) + "\n"
+            else:
+                sucessos += 1
+                yield json.dumps({"type": "log", "message": f"Linha {linha}: {resposta}"}) + "\n"
+
+            pct = min(int((linha / total) * 100), 100)
+            yield json.dumps({
+                "type": "progress", "pct": pct, "atual": linha, "total": total,
+                "sucessos": sucessos, "erros": erros,
+            }) + "\n"
+
+            time.sleep(intervalo)
+            linha += 1
+
+        with UPLOADS_MASSA_LOCK:
+            UPLOADS_MASSA.pop(file_id, None)
+
+        saldo = None
+        usuario, senha = session.get("sms_usuario"), session.get("sms_senha")
+        if usuario and senha:
+            try:
+                saldo = _consultar_saldo_sms(usuario, senha)
+            except requests.exceptions.RequestException:
+                pass
+
+        yield json.dumps({"type": "done", "sucessos": sucessos, "erros": erros, "saldo": saldo}) + "\n"
 
     return Response(stream_with_context(gerar()), mimetype="application/x-ndjson")
 
