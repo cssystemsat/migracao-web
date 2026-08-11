@@ -396,7 +396,7 @@ async function carregarClientesMigracao() {
 }
 
 function mostrarTabelaMigracao(clientes) {
-  const headers = ["Nome", "CS", "Plataforma de origem", "Quantidade de Clientes", "Quantidade de Placas", "Porcentagem da migração"];
+  const headers = ["Nome", "CS", "Plataforma de origem", "Quantidade de Clientes", "Quantidade de Placas", "Porcentagem da migração", ""];
   const table = document.createElement("table");
   table.className = "tabela-saida";
 
@@ -415,7 +415,7 @@ function mostrarTabelaMigracao(clientes) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = headers.length;
-    td.textContent = "Nenhum cliente cadastrado ainda. Adicione em \"Gerenciar logins\".";
+    td.textContent = "Nenhum cliente ainda. Importe veículos com \"Criar planilha\" marcado para começar.";
     td.style.color = "#6b7280";
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -423,12 +423,26 @@ function mostrarTabelaMigracao(clientes) {
   clientes.forEach((c) => {
     const tr = document.createElement("tr");
     tr.className = "linha-clicavel";
-    tr.addEventListener("click", () => abrirModalMigracao(c));
+    tr.title = "Clique para ver os veículos importados";
+    tr.addEventListener("click", () => abrirVeiculosMigracao(c));
     [c.nome, c.cs, c.plataforma_origem, c.qtd_clientes, c.qtd_placas, `${c.percentual_migracao}%`].forEach((v) => {
       const td = document.createElement("td");
       td.textContent = v === null || v === undefined || v === "" ? "-" : String(v);
       tr.appendChild(td);
     });
+
+    const tdAcoes = document.createElement("td");
+    const btnConfig = document.createElement("button");
+    btnConfig.className = "btn-engrenagem";
+    btnConfig.textContent = "⚙";
+    btnConfig.title = "Configurar CS, plataforma, percentual...";
+    btnConfig.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirModalMigracao(c);
+    });
+    tdAcoes.appendChild(btnConfig);
+    tr.appendChild(tdAcoes);
+
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -475,6 +489,134 @@ formMigracao.addEventListener("submit", async (e) => {
     mostrarErro(String(err));
   }
 });
+
+// --- VEÍCULOS DO CLIENTE EM MIGRAÇÃO ---
+const overlayVeiculosMigracao = el("overlay-veiculos-migracao");
+const veiculosMigracaoTitulo = el("veiculos-migracao-titulo");
+const veiculosMigracaoCorpo = el("veiculos-migracao-corpo");
+
+el("veiculos-migracao-fechar").addEventListener("click", () => overlayVeiculosMigracao.classList.add("hidden"));
+overlayVeiculosMigracao.addEventListener("click", (e) => {
+  if (e.target === overlayVeiculosMigracao) overlayVeiculosMigracao.classList.add("hidden");
+});
+
+async function abrirVeiculosMigracao(cliente) {
+  veiculosMigracaoTitulo.textContent = `Veículos — ${cliente.nome}`;
+  veiculosMigracaoCorpo.innerHTML = '<p class="placeholder">Carregando...</p>';
+  overlayVeiculosMigracao.classList.remove("hidden");
+  try {
+    const r = await fetch(`/api/migracao/clientes/${cliente.id}/veiculos`);
+    const data = await r.json();
+    if (!data.ok) {
+      veiculosMigracaoCorpo.innerHTML = "";
+      return mostrarErro(data.error || "Falha ao carregar veículos.");
+    }
+    renderTabelaVeiculosMigracao(cliente.id, data.veiculos);
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+}
+
+function renderTabelaVeiculosMigracao(clienteId, veiculos) {
+  veiculosMigracaoCorpo.innerHTML = "";
+
+  if (veiculos.length === 0) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhum veículo importado para esse cliente ainda.";
+    veiculosMigracaoCorpo.appendChild(p);
+    return;
+  }
+
+  const headers = ["Cliente", "Veículo", "Equipamento", "ID do equipamento", "Número da linha", "Comando", "Ações"];
+  const table = document.createElement("table");
+  table.className = "tabela-saida";
+
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  headers.forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  veiculos.forEach((v) => {
+    const tr = document.createElement("tr");
+
+    [v.cliente, v.veiculo, v.equipamento, v.id_equipamento, v.numero_linha].forEach((valor) => {
+      const td = document.createElement("td");
+      td.textContent = valor || "-";
+      tr.appendChild(td);
+    });
+
+    const tdComando = document.createElement("td");
+    const inputComando = document.createElement("input");
+    inputComando.type = "text";
+    inputComando.className = "veiculo-comando-input";
+    inputComando.placeholder = "Digite o comando...";
+    inputComando.value = v.comando || "";
+    let ultimoComandoSalvo = inputComando.value;
+    inputComando.addEventListener("blur", async () => {
+      if (inputComando.value === ultimoComandoSalvo) return;
+      try {
+        const r = await fetch(`/api/migracao/clientes/${clienteId}/veiculos/${v.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comando: inputComando.value }),
+        });
+        const data = await r.json();
+        if (!data.ok) return mostrarErro(data.error || "Falha ao salvar comando.");
+        ultimoComandoSalvo = inputComando.value;
+      } catch (err) {
+        mostrarErro(String(err));
+      }
+    });
+    tdComando.appendChild(inputComando);
+    tr.appendChild(tdComando);
+
+    const tdAcoes = document.createElement("td");
+    const btnEnviar = document.createElement("button");
+    btnEnviar.className = "btn-enviar-icone";
+    btnEnviar.textContent = "➤";
+    btnEnviar.title = "Enviar comando para essa linha";
+    btnEnviar.addEventListener("click", async () => {
+      const numero = (v.numero_linha || "").trim();
+      const conteudo = inputComando.value.trim();
+      if (!numero) return mostrarErro("Esse veículo não tem número de linha cadastrado.");
+      if (!conteudo) return mostrarErro("Digite um comando antes de enviar.");
+      btnEnviar.disabled = true;
+      const textoOriginal = btnEnviar.textContent;
+      btnEnviar.textContent = "...";
+      try {
+        const r = await fetch("/api/comando/enviar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ numero, conteudo, campaign_id: "Comando avulso - migração" }),
+        });
+        const data = await r.json();
+        if (!data.ok) {
+          mostrarErro(data.error || "Falha ao enviar SMS.");
+        } else {
+          btnEnviar.title = `Última resposta: ${data.resposta}`;
+        }
+      } catch (err) {
+        mostrarErro(String(err));
+      } finally {
+        btnEnviar.disabled = false;
+        btnEnviar.textContent = textoOriginal;
+      }
+    });
+    tdAcoes.appendChild(btnEnviar);
+    tr.appendChild(tdAcoes);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  veiculosMigracaoCorpo.appendChild(table);
+}
 
 async function abrirModalImport(tipo) {
   estado.importTipo = tipo;

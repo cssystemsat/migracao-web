@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import hmac
 import io
 import json
@@ -384,18 +385,45 @@ def _para_float(valor):
         return 0.0
 
 
-def upsert_cliente_migracao(nome, qtd_clientes, qtd_placas):
-    """Cria a linha do cliente se não existir (por nome); se existir, atualiza as quantidades."""
+def obter_ou_criar_cliente_migracao(nome):
+    """Retorna o id da linha do cliente (por nome), criando-a se ainda não existir."""
     query = db.collection(MIGRACAO_COLLECTION).where(filter=FieldFilter("nome", "==", nome)).limit(1).stream()
     existente = next(query, None)
     if existente:
-        existente.reference.update({"qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas})
         return existente.id
     dados = dict(CAMPOS_MIGRACAO_PADRAO)
-    dados.update({"nome": nome, "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas})
+    dados["nome"] = nome
     doc_ref = db.collection(MIGRACAO_COLLECTION).document()
     doc_ref.set(dados)
     return doc_ref.id
+
+
+def _veiculo_doc_id(cliente, veiculo):
+    """ID determinístico por (cliente, veículo) — reimportar o mesmo veículo atualiza a
+    linha existente em vez de duplicar."""
+    chave = f"{cliente}||{veiculo}".encode("utf-8")
+    return hashlib.sha1(chave).hexdigest()
+
+
+def salvar_veiculos_migracao(cliente_migracao_id, veiculos):
+    """Upsert por (cliente, veículo). Usa merge para não apagar o 'comando' já digitado."""
+    subcolecao = db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).collection("veiculos")
+    for v in veiculos:
+        doc_id = _veiculo_doc_id(v["cliente"], v["veiculo"])
+        subcolecao.document(doc_id).set(v, merge=True)
+
+
+def recalcular_contagens_migracao(cliente_migracao_id):
+    """Recalcula qtd_clientes/qtd_placas a partir do total acumulado de veículos salvos."""
+    subcolecao = db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).collection("veiculos")
+    docs = [d.to_dict() for d in subcolecao.stream()]
+    clientes = {d.get("cliente") for d in docs if d.get("cliente")}
+    placas = {d.get("veiculo") for d in docs if d.get("veiculo")}
+    qtd_clientes, qtd_placas = len(clientes), len(placas)
+    db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).update({
+        "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas,
+    })
+    return qtd_clientes, qtd_placas
 
 
 @app.route("/api/migracao/clientes", methods=["GET"])
@@ -422,6 +450,31 @@ def atualizar_cliente_migracao(cliente_id):
     }
     doc_ref.update(dados)
     return jsonify(ok=True, dados=dict(atual.to_dict(), **dados))
+
+
+@app.route("/api/migracao/clientes/<cliente_id>/veiculos", methods=["GET"])
+def listar_veiculos_migracao(cliente_id):
+    if not db.collection(MIGRACAO_COLLECTION).document(cliente_id).get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    docs = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("veiculos").stream()
+    lista = []
+    for d in docs:
+        dados = d.to_dict()
+        dados.setdefault("comando", "")
+        lista.append(dict(dados, id=d.id))
+    lista.sort(key=lambda v: (v.get("cliente") or "", v.get("veiculo") or ""))
+    return jsonify(ok=True, veiculos=lista)
+
+
+@app.route("/api/migracao/clientes/<cliente_id>/veiculos/<veiculo_id>", methods=["PUT"])
+def atualizar_comando_veiculo_migracao(cliente_id, veiculo_id):
+    ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("veiculos").document(veiculo_id)
+    if not ref.get().exists:
+        return jsonify(ok=False, error="Veículo não encontrado."), 404
+    data = request.get_json(force=True) or {}
+    comando = str(data.get("comando", ""))
+    ref.update({"comando": comando})
+    return jsonify(ok=True, comando=comando)
 
 
 @app.route("/api/list/<tipo>")
@@ -472,10 +525,18 @@ IMPORT_JOBS = {}
 IMPORT_JOBS_LOCK = threading.Lock()
 
 
+def _extrair_aninhado(payload, *chaves):
+    atual = payload
+    for chave in chaves:
+        if not isinstance(atual, dict):
+            return None
+        atual = atual.get(chave)
+    return atual
+
+
 def _executar_import(job_id, tipo_config, mapping, df, endpoint, token, criar_planilha, nome_cliente_planilha):
     sucessos = erros = 0
-    clientes_importados = set()
-    placas_importadas = set()
+    veiculos_para_planilha = []
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     for pos, (index, row) in enumerate(df.iterrows()):
@@ -485,10 +546,21 @@ def _executar_import(job_id, tipo_config, mapping, df, endpoint, token, criar_pl
             if resp.status_code in (200, 201):
                 sucessos += 1
                 if criar_planilha:
-                    if payload.get("ClientIntegrationCode"):
-                        clientes_importados.add(payload["ClientIntegrationCode"])
-                    if payload.get("Identification"):
-                        placas_importadas.add(payload["Identification"])
+                    cliente = payload.get("ClientIntegrationCode")
+                    veiculo = payload.get("Identification")
+                    if cliente and veiculo:
+                        ddi = _extrair_aninhado(payload, "Tracker1", "Simcard1", "CountryCode") or ""
+                        ddd = _extrair_aninhado(payload, "Tracker1", "Simcard1", "AreaCode") or ""
+                        numero = _extrair_aninhado(payload, "Tracker1", "Simcard1", "PhoneNumber") or ""
+                        equipamento = _extrair_aninhado(payload, "Tracker1", "TrackerTemplateIntegrationCode") or ""
+                        id_equipamento = _extrair_aninhado(payload, "Tracker1", "IdTracker") or ""
+                        veiculos_para_planilha.append({
+                            "cliente": str(cliente),
+                            "veiculo": str(veiculo),
+                            "equipamento": str(equipamento),
+                            "id_equipamento": str(id_equipamento),
+                            "numero_linha": f"{ddi}{ddd}{numero}",
+                        })
             else:
                 erros += 1
                 with IMPORT_JOBS_LOCK:
@@ -506,9 +578,10 @@ def _executar_import(job_id, tipo_config, mapping, df, endpoint, token, criar_pl
 
     resultado_planilha = None
     if criar_planilha:
-        qtd_clientes = len(clientes_importados)
-        qtd_placas = len(placas_importadas)
-        upsert_cliente_migracao(nome_cliente_planilha, qtd_clientes, qtd_placas)
+        cliente_migracao_id = obter_ou_criar_cliente_migracao(nome_cliente_planilha)
+        if veiculos_para_planilha:
+            salvar_veiculos_migracao(cliente_migracao_id, veiculos_para_planilha)
+        qtd_clientes, qtd_placas = recalcular_contagens_migracao(cliente_migracao_id)
         resultado_planilha = {"nome": nome_cliente_planilha, "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas}
 
     with IMPORT_JOBS_LOCK:
