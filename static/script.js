@@ -547,11 +547,11 @@ formMigracao.addEventListener("submit", async (e) => {
       body: JSON.stringify(payload),
     });
     const data = await parseJsonResponse(r);
-    if (!data.ok) return mostrarErro(data.error || "Falha ao salvar.");
+    if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
     overlayMigracao.classList.add("hidden");
     await carregarClientesMigracao();
   } catch (err) {
-    mostrarErro(String(err));
+    alert(`Erro ao salvar: ${String(err)}`);
   }
 });
 
@@ -591,7 +591,7 @@ async function abrirVeiculosMigracao(cliente) {
   btnEditarVeiculos.textContent = "Editar";
   btnSelecionarTodosVeiculos.textContent = "Selecionar todos";
   overlayVeiculosMigracao.classList.remove("hidden");
-  await recarregarVeiculosMigracao();
+  await recarregarVeiculosMigracao(true);
 }
 
 let contadorLinhaBrancoVeiculo = 0;
@@ -605,15 +605,18 @@ function criarLinhaBrancoVeiculo() {
   };
 }
 
-async function recarregarVeiculosMigracao() {
+async function recarregarVeiculosMigracao(permitirLinhasBranco = false) {
   try {
     const r = await fetch(`/api/migracao/clientes/${veiculosMigracaoClienteIdAtual}/veiculos`);
     const data = await parseJsonResponse(r);
     if (!data.ok) {
       veiculosMigracaoCorpo.innerHTML = "";
-      return mostrarErro(data.error || "Falha ao carregar veículos.");
+      return alert(`Erro ao carregar veículos: ${data.error || "falha desconhecida"}`);
     }
-    if (data.veiculos.length === 0) {
+    if (data.veiculos.length === 0 && permitirLinhasBranco) {
+      // Só gera linhas em branco na abertura inicial. Depois de um salvamento,
+      // se vier vazio (falha real ou instabilidade de rede), mostramos vazio
+      // mesmo — nunca substituímos dados recém-digitados por linhas em branco.
       veiculosMigracaoDadosAtuais = Array.from({ length: 10 }, criarLinhaBrancoVeiculo);
       modoEdicaoVeiculos = true;
       btnEditarVeiculos.textContent = "Salvar";
@@ -622,7 +625,7 @@ async function recarregarVeiculosMigracao() {
     }
     renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
   } catch (err) {
-    mostrarErro(String(err));
+    alert(`Erro ao carregar veículos: ${String(err)}`);
   }
 }
 
@@ -690,10 +693,10 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
           body: JSON.stringify({ status: novoStatus }),
         });
         const data = await parseJsonResponse(r);
-        if (!data.ok) return mostrarErro(data.error || "Falha ao salvar status.");
+        if (!data.ok) return alert(`Erro ao salvar status: ${data.error || "falha desconhecida"}`);
         tr.className = STATUS_VEICULO_CLASSE[novoStatus] || "";
       } catch (err) {
-        mostrarErro(String(err));
+        alert(`Erro ao salvar status: ${String(err)}`);
       }
     });
     tdStatus.appendChild(selectStatus);
@@ -731,10 +734,10 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
           body: JSON.stringify({ comando: inputComando.value }),
         });
         const data = await parseJsonResponse(r);
-        if (!data.ok) return mostrarErro(data.error || "Falha ao salvar comando.");
+        if (!data.ok) return alert(`Erro ao salvar comando: ${data.error || "falha desconhecida"}`);
         ultimoComandoSalvo = inputComando.value;
       } catch (err) {
-        mostrarErro(String(err));
+        alert(`Erro ao salvar comando: ${String(err)}`);
       }
     });
     tdComando.appendChild(inputComando);
@@ -750,7 +753,12 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     btnEnviar.addEventListener("click", async () => {
       const inputNumero = tr.querySelector('[data-campo="numero_linha"]');
       const numero = inputNumero ? inputNumero.value : v.numero_linha;
-      await enviarComandoLinhaVeiculo(btnEnviar, numero, inputComando.value);
+      const resultado = await enviarComandoLinhaVeiculo(btnEnviar, numero, inputComando.value);
+      if (resultado.ok) {
+        alert(`Comando enviado para ${numero}.\n\nResposta da SMS Market: ${resultado.resposta}`);
+      } else {
+        alert(`Falha ao enviar comando para ${numero || "(sem número)"}.\n\nErro: ${resultado.error}`);
+      }
     });
     tdAcoes.appendChild(btnEnviar);
 
@@ -810,7 +818,7 @@ btnEditarVeiculos.addEventListener("click", async () => {
       body: JSON.stringify({ veiculos: itens }),
     });
     const data = await parseJsonResponse(r);
-    if (!data.ok) return mostrarErro(data.error || "Falha ao salvar edições.");
+    if (!data.ok) return alert(`Erro ao salvar edições: ${data.error || "falha desconhecida"}`);
 
     // Atualiza os dados locais com o que acabou de ser salvo e já volta pro modo
     // normal (sem depender do round-trip de um novo GET pra sair da edição).
@@ -823,7 +831,7 @@ btnEditarVeiculos.addEventListener("click", async () => {
     renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
     recarregarVeiculosMigracao();
   } catch (err) {
-    mostrarErro(String(err));
+    alert(`Erro ao salvar edições: ${String(err)}`);
   } finally {
     btnEditarVeiculos.disabled = false;
   }
@@ -867,11 +875,12 @@ btnEnviarSelecionados.addEventListener("click", async () => {
   const linhas = Array.from(veiculosMigracaoCorpo.querySelectorAll("tbody tr")).filter(
     (tr) => tr.querySelector(".veiculo-checkbox")?.checked
   );
-  if (linhas.length === 0) return mostrarErro("Marque ao menos um veículo pra enviar.");
+  if (linhas.length === 0) return alert("Marque ao menos um veículo pra enviar.");
 
   btnEnviarSelecionados.disabled = true;
   let sucessos = 0;
   let erros = 0;
+  const detalhes = [];
 
   for (let i = 0; i < linhas.length; i++) {
     const tr = linhas[i];
@@ -881,12 +890,18 @@ btnEnviarSelecionados.addEventListener("click", async () => {
     const btnLinha = tr.querySelector(".btn-enviar-icone");
     const numeroLinha = inputNumero ? inputNumero.value : (tr.children[6]?.textContent || "");
     const resultado = await enviarComandoLinhaVeiculo(btnLinha, numeroLinha, inputComando ? inputComando.value : "");
-    if (resultado.ok) sucessos++;
-    else erros++;
+    if (resultado.ok) {
+      sucessos++;
+      detalhes.push(`✔ ${numeroLinha || "(sem número)"}: ${resultado.resposta}`);
+    } else {
+      erros++;
+      detalhes.push(`✘ ${numeroLinha || "(sem número)"}: ${resultado.error}`);
+    }
   }
 
   veiculosMigracaoEnvioStatus.textContent = `Concluído! Sucessos: ${sucessos} | Erros: ${erros}`;
   btnEnviarSelecionados.disabled = false;
+  alert(`Envio em lote concluído.\nSucessos: ${sucessos} | Erros: ${erros}\n\n${detalhes.join("\n")}`);
 });
 
 async function abrirModalImport(tipo) {
