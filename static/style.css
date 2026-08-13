@@ -238,7 +238,15 @@ table.tabela-saida tr:hover td { background: #f0f7ff; }
   border-bottom: 1px solid var(--cinza-200);
 }
 .modal-header h3 { margin: 0; }
-.modal-header-acoes { display: flex; align-items: center; gap: 10px; }
+.modal-header-acoes { display: flex; align-items: center; gap: 8px; }
+.modal-header-acoes button {
+  width: auto;
+  padding: 8px 14px;
+  margin-top: 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.modal-header-acoes .btn-primary { font-weight: 600; }
 
 .modal-body { padding: 18px; overflow-y: auto; }
 

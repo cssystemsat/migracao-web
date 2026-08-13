@@ -21,7 +21,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (1.0 -> 1.1 -> 1.2 ...); só vira 2.0 quando pedido.
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -497,6 +497,27 @@ def atualizar_veiculo_migracao(cliente_id, veiculo_id):
         return jsonify(ok=False, error="Nada para atualizar."), 400
     ref.update(atualizacoes)
     return jsonify(ok=True, **atualizacoes)
+
+
+CAMPOS_VEICULO_EDITAVEIS = ["cliente", "veiculo", "equipamento", "id_equipamento", "numero_linha", "comando"]
+
+
+@app.route("/api/migracao/clientes/<cliente_id>/veiculos/salvar-lote", methods=["POST"])
+def salvar_lote_veiculos_migracao(cliente_id):
+    if not db.collection(MIGRACAO_COLLECTION).document(cliente_id).get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    body = request.get_json(force=True) or {}
+    itens = body.get("veiculos") or []
+    subcolecao = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("veiculos")
+    for item in itens:
+        veiculo_id = item.get("id")
+        if not veiculo_id:
+            continue
+        atualizacoes = {campo: str(item.get(campo, "")) for campo in CAMPOS_VEICULO_EDITAVEIS if campo in item}
+        if atualizacoes:
+            subcolecao.document(veiculo_id).update(atualizacoes)
+    qtd_clientes, qtd_placas = recalcular_contagens_migracao(cliente_id)
+    return jsonify(ok=True, qtd_clientes=qtd_clientes, qtd_placas=qtd_placas)
 
 
 @app.route("/api/list/<tipo>")

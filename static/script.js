@@ -495,6 +495,8 @@ const overlayVeiculosMigracao = el("overlay-veiculos-migracao");
 const veiculosMigracaoTitulo = el("veiculos-migracao-titulo");
 const veiculosMigracaoCorpo = el("veiculos-migracao-corpo");
 const btnEnviarSelecionados = el("veiculos-migracao-enviar-selecionados");
+const btnSelecionarTodosVeiculos = el("veiculos-migracao-selecionar-todos");
+const btnEditarVeiculos = el("veiculos-migracao-editar");
 const veiculosMigracaoEnvioStatus = el("veiculos-migracao-envio-status");
 
 const STATUS_VEICULO_OPCOES = ["Aguardando", "Enviado", "Migrado", "Enviar"];
@@ -504,8 +506,11 @@ const STATUS_VEICULO_CLASSE = {
   Migrado: "linha-status-migrado",
   Enviar: "linha-status-enviar",
 };
+const CAMPOS_VEICULO_EDITAVEIS = ["cliente", "veiculo", "equipamento", "id_equipamento", "numero_linha"];
 
 let veiculosMigracaoClienteIdAtual = null;
+let veiculosMigracaoDadosAtuais = [];
+let modoEdicaoVeiculos = false;
 
 el("veiculos-migracao-fechar").addEventListener("click", () => overlayVeiculosMigracao.classList.add("hidden"));
 overlayVeiculosMigracao.addEventListener("click", (e) => {
@@ -517,15 +522,23 @@ async function abrirVeiculosMigracao(cliente) {
   veiculosMigracaoTitulo.textContent = `Veículos — ${cliente.nome}`;
   veiculosMigracaoCorpo.innerHTML = '<p class="placeholder">Carregando...</p>';
   veiculosMigracaoEnvioStatus.textContent = "";
+  modoEdicaoVeiculos = false;
+  btnEditarVeiculos.textContent = "Editar";
+  btnSelecionarTodosVeiculos.textContent = "Selecionar todos";
   overlayVeiculosMigracao.classList.remove("hidden");
+  await recarregarVeiculosMigracao();
+}
+
+async function recarregarVeiculosMigracao() {
   try {
-    const r = await fetch(`/api/migracao/clientes/${cliente.id}/veiculos`);
+    const r = await fetch(`/api/migracao/clientes/${veiculosMigracaoClienteIdAtual}/veiculos`);
     const data = await r.json();
     if (!data.ok) {
       veiculosMigracaoCorpo.innerHTML = "";
       return mostrarErro(data.error || "Falha ao carregar veículos.");
     }
-    renderTabelaVeiculosMigracao(cliente.id, data.veiculos);
+    veiculosMigracaoDadosAtuais = data.veiculos;
+    renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
   } catch (err) {
     mostrarErro(String(err));
   }
@@ -559,6 +572,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   const tbody = document.createElement("tbody");
   veiculos.forEach((v) => {
     const tr = document.createElement("tr");
+    tr.dataset.veiculoId = v.id;
     const statusAtual = v.status || "Aguardando";
     tr.className = STATUS_VEICULO_CLASSE[statusAtual] || "";
 
@@ -597,9 +611,18 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     tdStatus.appendChild(selectStatus);
     tr.appendChild(tdStatus);
 
-    [v.cliente, v.veiculo, v.equipamento, v.id_equipamento, v.numero_linha].forEach((valor) => {
+    CAMPOS_VEICULO_EDITAVEIS.forEach((campo) => {
       const td = document.createElement("td");
-      td.textContent = valor || "-";
+      if (modoEdicaoVeiculos) {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "veiculo-comando-input";
+        input.dataset.campo = campo;
+        input.value = v[campo] || "";
+        td.appendChild(input);
+      } else {
+        td.textContent = v[campo] || "-";
+      }
       tr.appendChild(td);
     });
 
@@ -607,11 +630,12 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     const inputComando = document.createElement("input");
     inputComando.type = "text";
     inputComando.className = "veiculo-comando-input";
+    inputComando.dataset.campo = "comando";
     inputComando.placeholder = "Digite o comando...";
     inputComando.value = v.comando || "";
     let ultimoComandoSalvo = inputComando.value;
     inputComando.addEventListener("blur", async () => {
-      if (inputComando.value === ultimoComandoSalvo) return;
+      if (modoEdicaoVeiculos || inputComando.value === ultimoComandoSalvo) return;
       try {
         const r = await fetch(`/api/migracao/clientes/${clienteId}/veiculos/${v.id}`, {
           method: "PUT",
@@ -644,6 +668,53 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   table.appendChild(tbody);
   veiculosMigracaoCorpo.appendChild(table);
 }
+
+btnSelecionarTodosVeiculos.addEventListener("click", () => {
+  const checkboxes = Array.from(veiculosMigracaoCorpo.querySelectorAll(".veiculo-checkbox"));
+  if (checkboxes.length === 0) return;
+  const todosMarcados = checkboxes.every((cb) => cb.checked);
+  checkboxes.forEach((cb) => { cb.checked = !todosMarcados; });
+  btnSelecionarTodosVeiculos.textContent = todosMarcados ? "Selecionar todos" : "Desmarcar todos";
+});
+
+btnEditarVeiculos.addEventListener("click", async () => {
+  if (!modoEdicaoVeiculos) {
+    modoEdicaoVeiculos = true;
+    btnEditarVeiculos.textContent = "Salvar";
+    renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
+    return;
+  }
+
+  const linhas = Array.from(veiculosMigracaoCorpo.querySelectorAll("tbody tr"));
+  const itens = linhas.map((tr) => {
+    const item = { id: tr.dataset.veiculoId };
+    CAMPOS_VEICULO_EDITAVEIS.forEach((campo) => {
+      const input = tr.querySelector(`[data-campo="${campo}"]`);
+      if (input) item[campo] = input.value;
+    });
+    const inputComando = tr.querySelector('[data-campo="comando"]');
+    if (inputComando) item.comando = inputComando.value;
+    return item;
+  });
+
+  btnEditarVeiculos.disabled = true;
+  try {
+    const r = await fetch(`/api/migracao/clientes/${veiculosMigracaoClienteIdAtual}/veiculos/salvar-lote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ veiculos: itens }),
+    });
+    const data = await r.json();
+    if (!data.ok) return mostrarErro(data.error || "Falha ao salvar edições.");
+    modoEdicaoVeiculos = false;
+    btnEditarVeiculos.textContent = "Editar";
+    await recarregarVeiculosMigracao();
+  } catch (err) {
+    mostrarErro(String(err));
+  } finally {
+    btnEditarVeiculos.disabled = false;
+  }
+});
 
 async function enviarComandoLinhaVeiculo(botao, numeroLinha, comandoTexto) {
   const numero = (numeroLinha || "").trim();
@@ -692,9 +763,10 @@ btnEnviarSelecionados.addEventListener("click", async () => {
   for (let i = 0; i < linhas.length; i++) {
     const tr = linhas[i];
     veiculosMigracaoEnvioStatus.textContent = `Enviando ${i + 1} de ${linhas.length}...`;
-    const inputComando = tr.querySelector(".veiculo-comando-input");
+    const inputComando = tr.querySelector('[data-campo="comando"]');
+    const inputNumero = tr.querySelector('[data-campo="numero_linha"]');
     const btnLinha = tr.querySelector(".btn-enviar-icone");
-    const numeroLinha = tr.children[6]?.textContent || "";
+    const numeroLinha = inputNumero ? inputNumero.value : (tr.children[6]?.textContent || "");
     const resultado = await enviarComandoLinhaVeiculo(btnLinha, numeroLinha, inputComando ? inputComando.value : "");
     if (resultado.ok) sucessos++;
     else erros++;
