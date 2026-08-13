@@ -238,8 +238,19 @@ table.tabela-saida tr:hover td { background: #f0f7ff; }
   border-bottom: 1px solid var(--cinza-200);
 }
 .modal-header h3 { margin: 0; }
+.modal-header-acoes { display: flex; align-items: center; gap: 10px; }
 
 .modal-body { padding: 18px; overflow-y: auto; }
+
+.overlay-fullscreen { padding: 0; }
+.modal-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  border-radius: 0;
+}
+.modal-fullscreen .modal-body { flex: 1; }
 
 .passo { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .passo-num {
@@ -393,7 +404,7 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 }
 .btn-engrenagem:hover:not(:disabled) { background: var(--cinza-200); }
 
-.veiculos-migracao-corpo { max-height: 70vh; overflow-y: auto; }
+.veiculos-migracao-corpo { width: 100%; }
 
 .veiculo-comando-input {
   width: 100%;
@@ -414,6 +425,29 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 }
 .btn-enviar-icone:hover:not(:disabled) { background: var(--verde-escuro); }
 .btn-enviar-icone:disabled { opacity: 0.6; }
+
+.veiculo-status-select {
+  padding: 5px 7px;
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--branco);
+}
+
+table.tabela-saida tr.linha-status-aguardando td { background: #dbeafe; }
+table.tabela-saida tr.linha-status-enviado td { background: #fef9c3; }
+table.tabela-saida tr.linha-status-migrado td { background: #dcfce7; }
+table.tabela-saida tr.linha-status-enviar td { background: #fee2e2; }
+table.tabela-saida tr.linha-status-aguardando:hover td { background: #bfdbfe; }
+table.tabela-saida tr.linha-status-enviado:hover td { background: #fef08a; }
+table.tabela-saida tr.linha-status-migrado:hover td { background: #bbf7d0; }
+table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
+
+.veiculos-migracao-envio-status {
+  font-size: 0.8rem;
+  color: var(--cinza-700);
+}
 
 .bloco-criar-planilha {
   margin-top: 14px;

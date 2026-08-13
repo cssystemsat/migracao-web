@@ -494,6 +494,18 @@ formMigracao.addEventListener("submit", async (e) => {
 const overlayVeiculosMigracao = el("overlay-veiculos-migracao");
 const veiculosMigracaoTitulo = el("veiculos-migracao-titulo");
 const veiculosMigracaoCorpo = el("veiculos-migracao-corpo");
+const btnEnviarSelecionados = el("veiculos-migracao-enviar-selecionados");
+const veiculosMigracaoEnvioStatus = el("veiculos-migracao-envio-status");
+
+const STATUS_VEICULO_OPCOES = ["Aguardando", "Enviado", "Migrado", "Enviar"];
+const STATUS_VEICULO_CLASSE = {
+  Aguardando: "linha-status-aguardando",
+  Enviado: "linha-status-enviado",
+  Migrado: "linha-status-migrado",
+  Enviar: "linha-status-enviar",
+};
+
+let veiculosMigracaoClienteIdAtual = null;
 
 el("veiculos-migracao-fechar").addEventListener("click", () => overlayVeiculosMigracao.classList.add("hidden"));
 overlayVeiculosMigracao.addEventListener("click", (e) => {
@@ -501,8 +513,10 @@ overlayVeiculosMigracao.addEventListener("click", (e) => {
 });
 
 async function abrirVeiculosMigracao(cliente) {
+  veiculosMigracaoClienteIdAtual = cliente.id;
   veiculosMigracaoTitulo.textContent = `Veículos — ${cliente.nome}`;
   veiculosMigracaoCorpo.innerHTML = '<p class="placeholder">Carregando...</p>';
+  veiculosMigracaoEnvioStatus.textContent = "";
   overlayVeiculosMigracao.classList.remove("hidden");
   try {
     const r = await fetch(`/api/migracao/clientes/${cliente.id}/veiculos`);
@@ -528,7 +542,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     return;
   }
 
-  const headers = ["Cliente", "Veículo", "Equipamento", "ID do equipamento", "Número da linha", "Comando", "Ações"];
+  const headers = ["", "Status", "Cliente", "Veículo", "Equipamento", "ID do equipamento", "Número da linha", "Comando", "Ações"];
   const table = document.createElement("table");
   table.className = "tabela-saida";
 
@@ -545,6 +559,43 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   const tbody = document.createElement("tbody");
   veiculos.forEach((v) => {
     const tr = document.createElement("tr");
+    const statusAtual = v.status || "Aguardando";
+    tr.className = STATUS_VEICULO_CLASSE[statusAtual] || "";
+
+    const tdCheck = document.createElement("td");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "veiculo-checkbox";
+    tdCheck.appendChild(checkbox);
+    tr.appendChild(tdCheck);
+
+    const tdStatus = document.createElement("td");
+    const selectStatus = document.createElement("select");
+    selectStatus.className = "veiculo-status-select";
+    STATUS_VEICULO_OPCOES.forEach((opcao) => {
+      const opt = document.createElement("option");
+      opt.value = opcao;
+      opt.textContent = opcao;
+      if (opcao === statusAtual) opt.selected = true;
+      selectStatus.appendChild(opt);
+    });
+    selectStatus.addEventListener("change", async () => {
+      const novoStatus = selectStatus.value;
+      try {
+        const r = await fetch(`/api/migracao/clientes/${clienteId}/veiculos/${v.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: novoStatus }),
+        });
+        const data = await r.json();
+        if (!data.ok) return mostrarErro(data.error || "Falha ao salvar status.");
+        tr.className = STATUS_VEICULO_CLASSE[novoStatus] || "";
+      } catch (err) {
+        mostrarErro(String(err));
+      }
+    });
+    tdStatus.appendChild(selectStatus);
+    tr.appendChild(tdStatus);
 
     [v.cliente, v.veiculo, v.equipamento, v.id_equipamento, v.numero_linha].forEach((valor) => {
       const td = document.createElement("td");
@@ -583,31 +634,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     btnEnviar.textContent = "➤";
     btnEnviar.title = "Enviar comando para essa linha";
     btnEnviar.addEventListener("click", async () => {
-      const numero = (v.numero_linha || "").trim();
-      const conteudo = inputComando.value.trim();
-      if (!numero) return mostrarErro("Esse veículo não tem número de linha cadastrado.");
-      if (!conteudo) return mostrarErro("Digite um comando antes de enviar.");
-      btnEnviar.disabled = true;
-      const textoOriginal = btnEnviar.textContent;
-      btnEnviar.textContent = "...";
-      try {
-        const r = await fetch("/api/comando/enviar", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ numero, conteudo, campaign_id: "Comando avulso - migração" }),
-        });
-        const data = await r.json();
-        if (!data.ok) {
-          mostrarErro(data.error || "Falha ao enviar SMS.");
-        } else {
-          btnEnviar.title = `Última resposta: ${data.resposta}`;
-        }
-      } catch (err) {
-        mostrarErro(String(err));
-      } finally {
-        btnEnviar.disabled = false;
-        btnEnviar.textContent = textoOriginal;
-      }
+      await enviarComandoLinhaVeiculo(btnEnviar, v.numero_linha, inputComando.value);
     });
     tdAcoes.appendChild(btnEnviar);
     tr.appendChild(tdAcoes);
@@ -617,6 +644,65 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   table.appendChild(tbody);
   veiculosMigracaoCorpo.appendChild(table);
 }
+
+async function enviarComandoLinhaVeiculo(botao, numeroLinha, comandoTexto) {
+  const numero = (numeroLinha || "").trim();
+  const conteudo = (comandoTexto || "").trim();
+  if (!numero) return { ok: false, error: "Sem número de linha cadastrado." };
+  if (!conteudo) return { ok: false, error: "Comando vazio." };
+
+  if (botao) {
+    botao.disabled = true;
+    var textoOriginal = botao.textContent;
+    botao.textContent = "...";
+  }
+  try {
+    const r = await fetch("/api/comando/enviar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ numero, conteudo, campaign_id: "Comando avulso - migração" }),
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      if (botao) botao.title = data.error || "Falha ao enviar.";
+      return { ok: false, error: data.error || "Falha ao enviar SMS." };
+    }
+    if (botao) botao.title = `Última resposta: ${data.resposta}`;
+    return { ok: true, resposta: data.resposta };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  } finally {
+    if (botao) {
+      botao.disabled = false;
+      botao.textContent = textoOriginal;
+    }
+  }
+}
+
+btnEnviarSelecionados.addEventListener("click", async () => {
+  const linhas = Array.from(veiculosMigracaoCorpo.querySelectorAll("tbody tr")).filter(
+    (tr) => tr.querySelector(".veiculo-checkbox")?.checked
+  );
+  if (linhas.length === 0) return mostrarErro("Marque ao menos um veículo pra enviar.");
+
+  btnEnviarSelecionados.disabled = true;
+  let sucessos = 0;
+  let erros = 0;
+
+  for (let i = 0; i < linhas.length; i++) {
+    const tr = linhas[i];
+    veiculosMigracaoEnvioStatus.textContent = `Enviando ${i + 1} de ${linhas.length}...`;
+    const inputComando = tr.querySelector(".veiculo-comando-input");
+    const btnLinha = tr.querySelector(".btn-enviar-icone");
+    const numeroLinha = tr.children[6]?.textContent || "";
+    const resultado = await enviarComandoLinhaVeiculo(btnLinha, numeroLinha, inputComando ? inputComando.value : "");
+    if (resultado.ok) sucessos++;
+    else erros++;
+  }
+
+  veiculosMigracaoEnvioStatus.textContent = `Concluído! Sucessos: ${sucessos} | Erros: ${erros}`;
+  btnEnviarSelecionados.disabled = false;
+});
 
 async function abrirModalImport(tipo) {
   estado.importTipo = tipo;

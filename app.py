@@ -21,7 +21,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (1.0 -> 1.1 -> 1.2 ...); só vira 2.0 quando pedido.
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -408,12 +408,21 @@ def _veiculo_doc_id(cliente, veiculo):
     return hashlib.sha1(chave).hexdigest()
 
 
+STATUS_VEICULO_VALIDOS = ["Aguardando", "Enviado", "Migrado", "Enviar"]
+STATUS_VEICULO_PADRAO = "Aguardando"
+
+
 def salvar_veiculos_migracao(cliente_migracao_id, veiculos):
-    """Upsert por (cliente, veículo). Usa merge para não apagar o 'comando' já digitado."""
+    """Upsert por (cliente, veículo). Usa merge para não apagar 'comando'/'status' já definidos.
+    Veículos novos entram com status "Aguardando"; veículos reimportados mantêm o status atual."""
     subcolecao = db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).collection("veiculos")
     for v in veiculos:
         doc_id = _veiculo_doc_id(v["cliente"], v["veiculo"])
-        subcolecao.document(doc_id).set(v, merge=True)
+        doc_ref = subcolecao.document(doc_id)
+        dados = dict(v)
+        if not doc_ref.get().exists:
+            dados["status"] = STATUS_VEICULO_PADRAO
+        doc_ref.set(dados, merge=True)
 
 
 def recalcular_contagens_migracao(cliente_migracao_id):
@@ -464,20 +473,30 @@ def listar_veiculos_migracao(cliente_id):
     for d in docs:
         dados = d.to_dict()
         dados.setdefault("comando", "")
+        dados.setdefault("status", STATUS_VEICULO_PADRAO)
         lista.append(dict(dados, id=d.id))
     lista.sort(key=lambda v: (v.get("cliente") or "", v.get("veiculo") or ""))
     return jsonify(ok=True, veiculos=lista)
 
 
 @app.route("/api/migracao/clientes/<cliente_id>/veiculos/<veiculo_id>", methods=["PUT"])
-def atualizar_comando_veiculo_migracao(cliente_id, veiculo_id):
+def atualizar_veiculo_migracao(cliente_id, veiculo_id):
     ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("veiculos").document(veiculo_id)
     if not ref.get().exists:
         return jsonify(ok=False, error="Veículo não encontrado."), 404
     data = request.get_json(force=True) or {}
-    comando = str(data.get("comando", ""))
-    ref.update({"comando": comando})
-    return jsonify(ok=True, comando=comando)
+    atualizacoes = {}
+    if "comando" in data:
+        atualizacoes["comando"] = str(data.get("comando", ""))
+    if "status" in data:
+        status = str(data.get("status", "")).strip()
+        if status not in STATUS_VEICULO_VALIDOS:
+            return jsonify(ok=False, error="Status inválido."), 400
+        atualizacoes["status"] = status
+    if not atualizacoes:
+        return jsonify(ok=False, error="Nada para atualizar."), 400
+    ref.update(atualizacoes)
+    return jsonify(ok=True, **atualizacoes)
 
 
 @app.route("/api/list/<tipo>")
