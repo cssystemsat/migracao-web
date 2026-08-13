@@ -1,5 +1,20 @@
 const el = (id) => document.getElementById(id);
 
+// Lê a resposta como texto e só então tenta JSON.parse — se vier HTML (ex.: página
+// de erro do proxy quando o Render "acorda" do modo ocioso), mostra uma mensagem
+// clara em vez do erro cru "Unexpected token '<'".
+async function parseJsonResponse(resp) {
+  const texto = await resp.text();
+  try {
+    return JSON.parse(texto);
+  } catch (err) {
+    if (!resp.ok) {
+      throw new Error("O servidor demorou para responder (pode estar 'acordando' no plano gratuito). Tente novamente em alguns segundos.");
+    }
+    throw new Error("Resposta inesperada do servidor.");
+  }
+}
+
 const saida = el("saida");
 const overlay = el("overlay");
 const modalTitulo = el("modal-titulo");
@@ -88,7 +103,7 @@ function mostrarTabela(headers, rows) {
 
 async function atualizarStatus() {
   const r = await fetch("/api/status");
-  const data = await r.json();
+  const data = await parseJsonResponse(r);
   aplicarEstadoAuth(data.authenticated);
 }
 
@@ -120,7 +135,7 @@ async function autenticarComCampos(nomeCredencial) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ login, senha }),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (data.ok) {
       aplicarEstadoAuth(true);
       el("senha").value = "";
@@ -170,7 +185,7 @@ let editandoCredencialId = null;
 
 async function carregarCredenciais() {
   const r = await fetch("/api/credenciais");
-  const data = await r.json();
+  const data = await parseJsonResponse(r);
   credenciaisCache = data.credenciais || [];
   renderSelectCredenciais();
   renderListaCredenciais();
@@ -306,7 +321,7 @@ formCredencial.addEventListener("submit", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao salvar login.");
     resetFormCredencial();
     await carregarCredenciais();
@@ -318,7 +333,7 @@ formCredencial.addEventListener("submit", async (e) => {
 async function excluirCredencial(id) {
   if (!confirm("Remover este login salvo?")) return;
   const r = await fetch(`/api/credenciais/${id}`, { method: "DELETE" });
-  const data = await r.json();
+  const data = await parseJsonResponse(r);
   if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
   await carregarCredenciais();
 }
@@ -347,7 +362,7 @@ el("botoes-consultas").addEventListener("click", async (e) => {
   mostrarPlaceholder("Consultando...");
   try {
     const r = await fetch(`/api/list/${tipo}`);
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (data.ok) {
       mostrarTabela(data.headers, data.rows);
     } else {
@@ -387,7 +402,7 @@ async function carregarClientesMigracao() {
   mostrarPlaceholder("Carregando clientes em migração...");
   try {
     const r = await fetch("/api/migracao/clientes");
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao carregar.");
     mostrarTabelaMigracao(data.clientes);
   } catch (err) {
@@ -464,7 +479,7 @@ function mostrarTabelaMigracao(clientes) {
       if (!confirm(`Excluir o cliente "${c.nome}" e todos os veículos dele? Essa ação não pode ser desfeita.`)) return;
       try {
         const r = await fetch(`/api/migracao/clientes/${c.id}`, { method: "DELETE" });
-        const data = await r.json();
+        const data = await parseJsonResponse(r);
         if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
         await carregarClientesMigracao();
       } catch (err) {
@@ -491,7 +506,7 @@ async function adicionarClienteMigracao() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nome: nome.trim() }),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao criar cliente.");
     await carregarClientesMigracao();
   } catch (err) {
@@ -531,7 +546,7 @@ formMigracao.addEventListener("submit", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao salvar.");
     overlayMigracao.classList.add("hidden");
     await carregarClientesMigracao();
@@ -579,15 +594,32 @@ async function abrirVeiculosMigracao(cliente) {
   await recarregarVeiculosMigracao();
 }
 
+let contadorLinhaBrancoVeiculo = 0;
+
+function criarLinhaBrancoVeiculo() {
+  contadorLinhaBrancoVeiculo += 1;
+  return {
+    id: `novo-${contadorLinhaBrancoVeiculo}`,
+    cliente: "", veiculo: "", equipamento: "", id_equipamento: "", numero_linha: "", comando: "",
+    status: "Aguardando",
+  };
+}
+
 async function recarregarVeiculosMigracao() {
   try {
     const r = await fetch(`/api/migracao/clientes/${veiculosMigracaoClienteIdAtual}/veiculos`);
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) {
       veiculosMigracaoCorpo.innerHTML = "";
       return mostrarErro(data.error || "Falha ao carregar veículos.");
     }
-    veiculosMigracaoDadosAtuais = data.veiculos;
+    if (data.veiculos.length === 0) {
+      veiculosMigracaoDadosAtuais = Array.from({ length: 10 }, criarLinhaBrancoVeiculo);
+      modoEdicaoVeiculos = true;
+      btnEditarVeiculos.textContent = "Salvar";
+    } else {
+      veiculosMigracaoDadosAtuais = data.veiculos;
+    }
     renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
   } catch (err) {
     mostrarErro(String(err));
@@ -600,7 +632,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   if (veiculos.length === 0) {
     const p = document.createElement("p");
     p.className = "placeholder";
-    p.textContent = "Nenhum veículo importado para esse cliente ainda.";
+    p.textContent = "Nenhum veículo cadastrado para esse cliente ainda.";
     veiculosMigracaoCorpo.appendChild(p);
     return;
   }
@@ -633,6 +665,8 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     tdCheck.appendChild(checkbox);
     tr.appendChild(tdCheck);
 
+    const linhaNaoSalva = String(v.id).startsWith("novo-");
+
     const tdStatus = document.createElement("td");
     const selectStatus = document.createElement("select");
     selectStatus.className = "veiculo-status-select";
@@ -643,6 +677,10 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
       if (opcao === statusAtual) opt.selected = true;
       selectStatus.appendChild(opt);
     });
+    if (linhaNaoSalva) {
+      selectStatus.disabled = true;
+      selectStatus.title = "Salve a linha primeiro para definir o status";
+    }
     selectStatus.addEventListener("change", async () => {
       const novoStatus = selectStatus.value;
       try {
@@ -651,7 +689,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: novoStatus }),
         });
-        const data = await r.json();
+        const data = await parseJsonResponse(r);
         if (!data.ok) return mostrarErro(data.error || "Falha ao salvar status.");
         tr.className = STATUS_VEICULO_CLASSE[novoStatus] || "";
       } catch (err) {
@@ -692,7 +730,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ comando: inputComando.value }),
         });
-        const data = await r.json();
+        const data = await parseJsonResponse(r);
         if (!data.ok) return mostrarErro(data.error || "Falha ao salvar comando.");
         ultimoComandoSalvo = inputComando.value;
       } catch (err) {
@@ -703,14 +741,31 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     tr.appendChild(tdComando);
 
     const tdAcoes = document.createElement("td");
+    tdAcoes.className = "acoes-credencial";
+
     const btnEnviar = document.createElement("button");
     btnEnviar.className = "btn-enviar-icone";
     btnEnviar.textContent = "➤";
     btnEnviar.title = "Enviar comando para essa linha";
     btnEnviar.addEventListener("click", async () => {
-      await enviarComandoLinhaVeiculo(btnEnviar, v.numero_linha, inputComando.value);
+      const inputNumero = tr.querySelector('[data-campo="numero_linha"]');
+      const numero = inputNumero ? inputNumero.value : v.numero_linha;
+      await enviarComandoLinhaVeiculo(btnEnviar, numero, inputComando.value);
     });
     tdAcoes.appendChild(btnEnviar);
+
+    if (modoEdicaoVeiculos) {
+      const btnAdicionarLinha = document.createElement("button");
+      btnAdicionarLinha.className = "btn-enviar-icone btn-adicionar-linha";
+      btnAdicionarLinha.textContent = "+";
+      btnAdicionarLinha.title = "Adicionar nova linha";
+      btnAdicionarLinha.addEventListener("click", () => {
+        veiculosMigracaoDadosAtuais.push(criarLinhaBrancoVeiculo());
+        renderTabelaVeiculosMigracao(clienteId, veiculosMigracaoDadosAtuais);
+      });
+      tdAcoes.appendChild(btnAdicionarLinha);
+    }
+
     tr.appendChild(tdAcoes);
 
     tbody.appendChild(tr);
@@ -754,7 +809,7 @@ btnEditarVeiculos.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ veiculos: itens }),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao salvar edições.");
 
     // Atualiza os dados locais com o que acabou de ser salvo e já volta pro modo
@@ -791,7 +846,7 @@ async function enviarComandoLinhaVeiculo(botao, numeroLinha, comandoTexto) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ numero, conteudo, campaign_id: "Comando avulso - migração" }),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) {
       if (botao) botao.title = data.error || "Falha ao enviar.";
       return { ok: false, error: data.error || "Falha ao enviar SMS." };
@@ -857,7 +912,7 @@ async function abrirModalImport(tipo) {
   }
 
   const r = await fetch(`/api/import/params/${tipo}`);
-  const data = await r.json();
+  const data = await parseJsonResponse(r);
   if (!data.ok) return mostrarErro(data.error || "Tipo desconhecido.");
 
   modalTitulo.textContent = `Mapeamento: ${data.titulo}`;
@@ -913,7 +968,7 @@ inputArquivo.addEventListener("change", async () => {
   formData.append("arquivo", file);
   try {
     const r = await fetch("/api/import/upload", { method: "POST", body: formData });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) {
       arquivoNome.textContent = "Nenhum arquivo selecionado";
       return mostrarErro(data.error || "Falha ao enviar arquivo.");
@@ -943,7 +998,7 @@ function iniciarPollingImport(jobId, logContainer) {
   importPollTimer = setInterval(async () => {
     try {
       const r = await fetch(`/api/import/run/status/${jobId}`);
-      const job = await r.json();
+      const job = await parseJsonResponse(r);
       if (!job.ok) {
         pararPollingImport();
         return mostrarErro(job.error || "Falha ao consultar andamento.");
@@ -1029,7 +1084,7 @@ btnIniciarImport.addEventListener("click", async () => {
         nome_cliente_planilha: nomeClientePlanilha,
       }),
     });
-    const data = await resp.json();
+    const data = await parseJsonResponse(resp);
     if (!data.ok) throw new Error(data.error || "Falha ao iniciar importação.");
     iniciarPollingImport(data.job_id, logContainer);
   } catch (err) {
@@ -1134,7 +1189,7 @@ el("form-comando-auth").addEventListener("submit", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ usuario, senha }),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) {
       comandoSaldo.textContent = "Saldo: -";
       comandoSaldo.className = "status-pill status-off";
@@ -1163,7 +1218,7 @@ el("btn-comando-gerar").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     comandoPreview.textContent = data.ok ? data.texto : (data.error || "Comando não implementado para este modelo.");
   } catch (err) {
     mostrarErro(String(err));
@@ -1194,7 +1249,7 @@ async function enviarComandoSms(numero, conteudo, campaignId) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ numero, conteudo, campaign_id: campaignId }),
     });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao enviar SMS.");
     if (data.saldo !== undefined && data.saldo !== null) {
       comandoSaldo.textContent = `Saldo: ${data.saldo}`;
@@ -1229,7 +1284,7 @@ el("comando-input-arquivo").addEventListener("change", async () => {
   formData.append("arquivo", file);
   try {
     const r = await fetch("/api/comando/upload-massa", { method: "POST", body: formData });
-    const data = await r.json();
+    const data = await parseJsonResponse(r);
     if (!data.ok) {
       comandoArquivoNome.textContent = "Nenhum arquivo selecionado";
       return mostrarErro(data.error || "Falha ao enviar arquivo.");
@@ -1257,7 +1312,7 @@ function iniciarPollingMassa(jobId) {
   comandoMassaPollTimer = setInterval(async () => {
     try {
       const r = await fetch(`/api/comando/enviar-massa/status/${jobId}`);
-      const job = await r.json();
+      const job = await parseJsonResponse(r);
       if (!job.ok) {
         pararPollingMassa();
         return mostrarErro(job.error || "Falha ao consultar andamento.");
@@ -1315,7 +1370,7 @@ btnComandoEnviarMassa.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file_id: comandoMassaFileId, intervalo }),
     });
-    const data = await resp.json();
+    const data = await parseJsonResponse(resp);
     if (!data.ok) throw new Error(data.error || "Falha ao iniciar envio em massa.");
     iniciarPollingMassa(data.job_id);
   } catch (err) {

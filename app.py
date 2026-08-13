@@ -21,7 +21,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (1.0 -> 1.1 -> 1.2 ...); só vira 2.0 quando pedido.
-APP_VERSION = "1.4"
+APP_VERSION = "1.6"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -531,13 +531,33 @@ def salvar_lote_veiculos_migracao(cliente_id):
     body = request.get_json(force=True) or {}
     itens = body.get("veiculos") or []
     subcolecao = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("veiculos")
+
     for item in itens:
-        veiculo_id = item.get("id")
-        if not veiculo_id:
-            continue
-        atualizacoes = {campo: str(item.get(campo, "")) for campo in CAMPOS_VEICULO_EDITAVEIS if campo in item}
-        if atualizacoes:
-            subcolecao.document(veiculo_id).update(atualizacoes)
+        cliente = str(item.get("cliente", "")).strip()
+        veiculo = str(item.get("veiculo", "")).strip()
+        if not cliente or not veiculo:
+            continue  # linha em branco (não preenchida) — ignora
+
+        novo_id = _veiculo_doc_id(cliente, veiculo)
+        antigo_id = item.get("id")
+        dados = {campo: str(item.get(campo, "")) for campo in CAMPOS_VEICULO_EDITAVEIS}
+
+        novo_ref = subcolecao.document(novo_id)
+        if antigo_id and antigo_id != novo_id:
+            # Cliente/Veículo mudaram: era um registro existente (id real) —
+            # migra o status pro novo doc e remove o antigo pra não duplicar.
+            antigo_ref = subcolecao.document(antigo_id)
+            antigo_doc = antigo_ref.get()
+            if antigo_doc.exists:
+                status_existente = antigo_doc.to_dict().get("status")
+                if status_existente:
+                    dados["status"] = status_existente
+                antigo_ref.delete()
+        if "status" not in dados and not novo_ref.get().exists:
+            dados["status"] = STATUS_VEICULO_PADRAO
+
+        novo_ref.set(dados, merge=True)
+
     qtd_clientes, qtd_placas = recalcular_contagens_migracao(cliente_id)
     return jsonify(ok=True, qtd_clientes=qtd_clientes, qtd_placas=qtd_placas)
 
