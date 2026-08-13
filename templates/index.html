@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Migração 1.0 — Web</title>
+  <title>Migração {{ app_version }} — Web</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <header class="topbar">
-    <h1>Migração <span>1.0</span></h1>
+    <h1>Migração <span>{{ app_version }}</span></h1>
     <form id="form-login" class="login-form">
       <select id="select-credencial" class="select-credencial">
         <option value="">Cliente salvo...</option>

@@ -20,6 +20,9 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
+# Sobe 0.1 a cada edição publicada (1.0 -> 1.1 -> 1.2 ...); só vira 2.0 quando pedido.
+APP_VERSION = "1.1"
+
 BASE_URL = "https://integration.systemsatx.com.br"
 
 # --- FIREBASE / FIRESTORE (banco de dados) ---
@@ -61,7 +64,7 @@ def login_app():
             session["app_ok"] = True
             return redirect(url_for("index"))
         erro = "Senha incorreta."
-    return render_template("login_app.html", erro=erro)
+    return render_template("login_app.html", erro=erro, app_version=APP_VERSION)
 
 # --- DEFINIÇÃO DE TIPOS CONFORME DOCUMENTAÇÃO SSX ---
 # Comparado pelo caminho COMPLETO do parâmetro (com dot notation), não só pelo nome
@@ -276,7 +279,7 @@ def requisicao_padrao(endpoint, payload, token):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", app_version=APP_VERSION)
 
 
 @app.route("/api/status")

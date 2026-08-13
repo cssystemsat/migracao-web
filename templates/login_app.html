@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Acesso restrito — Migração 1.0</title>
+  <title>Acesso restrito — Migração {{ app_version }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <div class="tela-acesso">
     <form method="post" class="cartao-acesso">
-      <h1>Migração <span>1.0</span></h1>
+      <h1>Migração <span>{{ app_version }}</span></h1>
       <p class="acesso-subtitulo">Acesso restrito</p>
       {% if erro %}<p class="acesso-erro">{{ erro }}</p>{% endif %}
       <input type="password" name="senha" placeholder="Senha de acesso" autofocus required>
