@@ -396,6 +396,17 @@ async function carregarClientesMigracao() {
 }
 
 function mostrarTabelaMigracao(clientes) {
+  const wrapper = document.createElement("div");
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "migracao-toolbar";
+  const btnAdicionarCliente = document.createElement("button");
+  btnAdicionarCliente.className = "btn-primary";
+  btnAdicionarCliente.textContent = "Adicionar Cliente";
+  btnAdicionarCliente.addEventListener("click", adicionarClienteMigracao);
+  toolbar.appendChild(btnAdicionarCliente);
+  wrapper.appendChild(toolbar);
+
   const headers = ["Nome", "CS", "Plataforma de origem", "Quantidade de Clientes", "Quantidade de Placas", "Porcentagem da migração", ""];
   const table = document.createElement("table");
   table.className = "tabela-saida";
@@ -415,7 +426,7 @@ function mostrarTabelaMigracao(clientes) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = headers.length;
-    td.textContent = "Nenhum cliente ainda. Importe veículos com \"Criar planilha\" marcado para começar.";
+    td.textContent = "Nenhum cliente ainda. Adicione manualmente ou importe veículos com \"Criar planilha\" marcado.";
     td.style.color = "#6b7280";
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -432,6 +443,8 @@ function mostrarTabelaMigracao(clientes) {
     });
 
     const tdAcoes = document.createElement("td");
+    tdAcoes.className = "acoes-credencial";
+
     const btnConfig = document.createElement("button");
     btnConfig.className = "btn-engrenagem";
     btnConfig.textContent = "⚙";
@@ -441,12 +454,49 @@ function mostrarTabelaMigracao(clientes) {
       abrirModalMigracao(c);
     });
     tdAcoes.appendChild(btnConfig);
+
+    const btnExcluirCliente = document.createElement("button");
+    btnExcluirCliente.className = "btn-engrenagem btn-excluir";
+    btnExcluirCliente.textContent = "🗑";
+    btnExcluirCliente.title = "Excluir cliente";
+    btnExcluirCliente.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Excluir o cliente "${c.nome}" e todos os veículos dele? Essa ação não pode ser desfeita.`)) return;
+      try {
+        const r = await fetch(`/api/migracao/clientes/${c.id}`, { method: "DELETE" });
+        const data = await r.json();
+        if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
+        await carregarClientesMigracao();
+      } catch (err) {
+        mostrarErro(String(err));
+      }
+    });
+    tdAcoes.appendChild(btnExcluirCliente);
+
     tr.appendChild(tdAcoes);
 
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-  setSaida(table);
+  wrapper.appendChild(table);
+  setSaida(wrapper);
+}
+
+async function adicionarClienteMigracao() {
+  const nome = prompt("Nome do novo cliente:");
+  if (!nome || !nome.trim()) return;
+  try {
+    const r = await fetch("/api/migracao/clientes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome: nome.trim() }),
+    });
+    const data = await r.json();
+    if (!data.ok) return mostrarErro(data.error || "Falha ao criar cliente.");
+    await carregarClientesMigracao();
+  } catch (err) {
+    mostrarErro(String(err));
+  }
 }
 
 function abrirModalMigracao(cliente) {
@@ -706,9 +756,17 @@ btnEditarVeiculos.addEventListener("click", async () => {
     });
     const data = await r.json();
     if (!data.ok) return mostrarErro(data.error || "Falha ao salvar edições.");
+
+    // Atualiza os dados locais com o que acabou de ser salvo e já volta pro modo
+    // normal (sem depender do round-trip de um novo GET pra sair da edição).
+    itens.forEach((item) => {
+      const registro = veiculosMigracaoDadosAtuais.find((v) => v.id === item.id);
+      if (registro) Object.assign(registro, item);
+    });
     modoEdicaoVeiculos = false;
     btnEditarVeiculos.textContent = "Editar";
-    await recarregarVeiculosMigracao();
+    renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
+    recarregarVeiculosMigracao();
   } catch (err) {
     mostrarErro(String(err));
   } finally {

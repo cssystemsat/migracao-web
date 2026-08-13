@@ -21,7 +21,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (1.0 -> 1.1 -> 1.2 ...); só vira 2.0 quando pedido.
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -444,6 +444,28 @@ def listar_clientes_migracao():
     lista = [dict(d.to_dict(), id=d.id) for d in docs]
     lista.sort(key=lambda c: c["nome"].lower())
     return jsonify(ok=True, clientes=lista)
+
+
+@app.route("/api/migracao/clientes", methods=["POST"])
+def criar_cliente_migracao():
+    data = request.get_json(force=True) or {}
+    nome = str(data.get("nome", "")).strip()
+    if not nome:
+        return jsonify(ok=False, error="Informe o nome do cliente."), 400
+    cliente_id = obter_ou_criar_cliente_migracao(nome)
+    doc = db.collection(MIGRACAO_COLLECTION).document(cliente_id).get()
+    return jsonify(ok=True, cliente=dict(doc.to_dict(), id=cliente_id))
+
+
+@app.route("/api/migracao/clientes/<cliente_id>", methods=["DELETE"])
+def excluir_cliente_migracao(cliente_id):
+    doc_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    for v in doc_ref.collection("veiculos").stream():
+        v.reference.delete()
+    doc_ref.delete()
+    return jsonify(ok=True)
 
 
 @app.route("/api/migracao/clientes/<cliente_id>", methods=["PUT"])

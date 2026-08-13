@@ -411,6 +411,10 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
   line-height: 1;
 }
 .btn-engrenagem:hover:not(:disabled) { background: var(--cinza-200); }
+.btn-engrenagem.btn-excluir:hover:not(:disabled) { background: #fee2e2; border-color: #fecaca; color: var(--vermelho); }
+
+.migracao-toolbar { margin-bottom: 12px; }
+.migracao-toolbar .btn-primary { width: auto; padding: 8px 16px; margin-top: 0; }
 
 .veiculos-migracao-corpo { width: 100%; }
 
