@@ -29,6 +29,7 @@ const progressoPct = el("progresso-pct");
 const blocoCriarPlanilha = el("bloco-criar-planilha");
 const chkCriarPlanilha = el("chk-criar-planilha");
 const inputNomePlanilha = el("input-nome-planilha");
+const selectClientePlanilhaExistente = el("select-cliente-planilha-existente");
 
 document.querySelectorAll(".menu-cabecalho").forEach((cabecalho) => {
   cabecalho.addEventListener("click", () => {
@@ -921,6 +922,8 @@ async function abrirModalImport(tipo) {
     chkCriarPlanilha.checked = false;
     inputNomePlanilha.value = estado.credencialAtualNome || "";
     inputNomePlanilha.classList.add("hidden");
+    selectClientePlanilhaExistente.value = "";
+    carregarClientesExistentesPlanilha();
   } else {
     blocoCriarPlanilha.classList.add("hidden");
     chkCriarPlanilha.checked = false;
@@ -936,8 +939,32 @@ async function abrirModalImport(tipo) {
   overlay.classList.remove("hidden");
 }
 
+async function carregarClientesExistentesPlanilha() {
+  selectClientePlanilhaExistente.innerHTML = '<option value="">Cliente existente...</option>';
+  try {
+    const r = await fetch("/api/migracao/clientes");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return;
+    data.clientes.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = c.nome;
+      opt.textContent = c.nome;
+      selectClientePlanilhaExistente.appendChild(opt);
+    });
+  } catch (err) {
+    // silencioso: a lista é só uma conveniência, não bloqueia a importação
+  }
+}
+
 chkCriarPlanilha.addEventListener("change", () => {
   inputNomePlanilha.classList.toggle("hidden", !chkCriarPlanilha.checked);
+});
+
+selectClientePlanilhaExistente.addEventListener("change", () => {
+  if (!selectClientePlanilhaExistente.value) return;
+  chkCriarPlanilha.checked = true;
+  inputNomePlanilha.value = selectClientePlanilhaExistente.value;
+  inputNomePlanilha.classList.remove("hidden");
 });
 
 function renderMapaCampos() {

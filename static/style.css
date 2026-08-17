@@ -487,6 +487,21 @@ table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
   font-size: 0.9rem;
 }
 
+.criar-planilha-linha-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.select-cliente-existente {
+  padding: 6px 8px;
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  max-width: 220px;
+}
+
 .modal-grande { max-width: 980px; }
 .modal-grande .modal-body { padding: 10px 14px; }
 

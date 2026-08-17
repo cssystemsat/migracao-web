@@ -105,10 +105,15 @@
         <div id="mapa-campos" class="mapa-campos"></div>
 
         <div id="bloco-criar-planilha" class="bloco-criar-planilha hidden">
-          <label class="checkbox-linha">
-            <input type="checkbox" id="chk-criar-planilha">
-            Criar planilha
-          </label>
+          <div class="criar-planilha-linha-topo">
+            <label class="checkbox-linha">
+              <input type="checkbox" id="chk-criar-planilha">
+              Criar planilha
+            </label>
+            <select id="select-cliente-planilha-existente" class="select-cliente-existente">
+              <option value="">Cliente existente...</option>
+            </select>
+          </div>
           <input type="text" id="input-nome-planilha" class="hidden" placeholder="Nome do cliente (vai aparecer em Clientes em migração)">
         </div>
 
