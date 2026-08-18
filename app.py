@@ -14,14 +14,16 @@ import pandas as pd
 import requests
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
+
+import conversorkml
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (1.0 -> 1.1 -> 1.2 ...); só vira 2.0 quando pedido.
-APP_VERSION = "1.7"
+APP_VERSION = "1.8"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -562,6 +564,25 @@ def salvar_lote_veiculos_migracao(cliente_id):
     return jsonify(ok=True, qtd_clientes=qtd_clientes, qtd_placas=qtd_placas)
 
 
+@app.route("/api/dashboard")
+def dashboard_indicadores():
+    total_clientes = sum(1 for _ in db.collection(MIGRACAO_COLLECTION).stream())
+
+    por_status = {s: 0 for s in STATUS_VEICULO_VALIDOS}
+    total_veiculos = 0
+    for doc in db.collection_group("veiculos").stream():
+        total_veiculos += 1
+        status = doc.to_dict().get("status") or STATUS_VEICULO_PADRAO
+        por_status[status] = por_status.get(status, 0) + 1
+
+    return jsonify(
+        ok=True,
+        total_clientes=total_clientes,
+        total_veiculos=total_veiculos,
+        por_status=por_status,
+    )
+
+
 @app.route("/api/list/<tipo>")
 def listar(tipo):
     token = session.get("token")
@@ -1079,6 +1100,162 @@ def comando_enviar_massa_status(job_id):
             return jsonify(ok=False, error="Job não encontrado."), 404
         resultado = dict(job)
     return jsonify(ok=True, **resultado)
+
+
+# --- CONVERSOR KML -> SSX (Áreas/Rotas) ---
+# Motor de conversão em conversorkml.py (portado do projeto standalone "Conversor
+# de Áreas e Rotas"), aqui só a camada web em cima das mesmas funções puras.
+CONVERSOES = {}
+CONVERSOES_LOCK = threading.Lock()
+CONVERSOR_TAMANHO_PARTE = 1000  # abaixo do limite de importação do SSX, pra manter os arquivos leves
+
+# Avisos automáticos que aparecem em praticamente todo registro quando se força a
+# conversão Rota -> Área (cada anel é fechado automaticamente). Sem compactar,
+# um KML com milhares de Placemarks devolveria milhares de linhas "problemáticas"
+# pro navegador renderizar (mesmo travamento que a tela de migração já evita).
+CONVERSOR_AVISOS_COMPACTAVEIS = (
+    "GeoIntegrationCode truncado",
+    "Anel de área fechado automaticamente",
+    "Coordenadas excedem",
+)
+
+
+@app.route("/api/conversor/converter", methods=["POST"])
+def conversor_converter():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    arquivo = request.files["arquivo"]
+
+    tipo = request.form.get("tipo", "areas")
+    categoria = request.form.get("categoria", "").strip() or None
+    grupo = request.form.get("grupo", "").strip() or None
+    tolerancia_texto = request.form.get("tolerancia", "").strip()
+    tolerancia = None
+    if tolerancia_texto:
+        try:
+            tolerancia = int(tolerancia_texto)
+        except ValueError:
+            return jsonify(ok=False, error=f"Tolerância deve ser um número inteiro: '{tolerancia_texto}'"), 400
+
+    cor_texto = request.form.get("cor", "").strip()
+    cor = None
+    if cor_texto:
+        try:
+            cor = int(cor_texto)
+        except ValueError:
+            return jsonify(ok=False, error=f"Cor inválida: '{cor_texto}'"), 400
+        if cor not in range(1, 14):
+            return jsonify(ok=False, error="Cor deve ser um código de 1 a 13 (ver tabela do manual)."), 400
+
+    try:
+        kml_text = arquivo.read().decode("utf-8")
+    except UnicodeDecodeError:
+        return jsonify(ok=False, error="Arquivo KML não está em UTF-8."), 400
+
+    config = conversorkml.Config(
+        categoria=categoria,
+        grupo=grupo,
+        tolerancia=tolerancia,
+        cor=cor,
+        forcar_poligono=(tipo == "areas"),
+    )
+
+    try:
+        registros = conversorkml.processar(kml_text, config)
+    except ValueError as e:
+        return jsonify(ok=False, error=str(e)), 400
+
+    nome_base = os.path.splitext(arquivo.filename or "conversao")[0]
+    conv_id = uuid.uuid4().hex
+    with CONVERSOES_LOCK:
+        CONVERSOES[conv_id] = {"registros": registros, "nome_base": nome_base, "sufixo": tipo}
+
+    n_erro = sum(1 for r in registros if r["erros"])
+    n_ok = len(registros) - n_erro
+    n_partes = -(-n_ok // CONVERSOR_TAMANHO_PARTE) if n_ok > CONVERSOR_TAMANHO_PARTE else 1
+
+    avisos_compactados = {"geo_truncado": 0, "anel_fechado": 0, "coordenadas_longas": 0}
+    problematicos = []
+    for r in registros:
+        if not r["erros"] and not r["avisos"]:
+            continue
+        so_compactaveis = not r["erros"] and all(
+            any(chave in av for chave in CONVERSOR_AVISOS_COMPACTAVEIS) for av in r["avisos"]
+        )
+        if so_compactaveis:
+            for av in r["avisos"]:
+                if "GeoIntegrationCode truncado" in av:
+                    avisos_compactados["geo_truncado"] += 1
+                elif "Anel de área fechado automaticamente" in av:
+                    avisos_compactados["anel_fechado"] += 1
+                elif "Coordenadas excedem" in av:
+                    avisos_compactados["coordenadas_longas"] += 1
+            continue
+        problematicos.append({
+            "indice": r["indice"],
+            "nome": r["nome"],
+            "tipo_original": r["tipo_original"],
+            "convertido": r["convertido"],
+            "codigo": r["dados"].get("GeoIntegrationCode", ""),
+            "erros": r["erros"],
+            "avisos": r["avisos"],
+        })
+
+    # Teto de linhas detalhadas na tela: com KMLs de milhares de Placemarks e um
+    # aviso genérico (ex.: descrição longa) presente em quase todo registro, a
+    # lista completa ainda poderia estourar e travar o navegador ao renderizar.
+    LIMITE_PROBLEMATICOS = 500
+    problematicos_ocultos = max(0, len(problematicos) - LIMITE_PROBLEMATICOS)
+    problematicos = problematicos[:LIMITE_PROBLEMATICOS]
+
+    return jsonify(
+        ok=True,
+        conv_id=conv_id,
+        total=len(registros),
+        n_ok=n_ok,
+        n_erro=n_erro,
+        n_partes=n_partes,
+        tamanho_parte=CONVERSOR_TAMANHO_PARTE,
+        max_linhas_importacao=conversorkml.MAX_LINHAS_IMPORTACAO,
+        avisos_compactados=avisos_compactados,
+        problematicos=problematicos,
+        problematicos_ocultos=problematicos_ocultos,
+    )
+
+
+@app.route("/api/conversor/download/<conv_id>/<formato>/<int:parte>")
+def conversor_download(conv_id, formato, parte):
+    with CONVERSOES_LOCK:
+        dados = CONVERSOES.get(conv_id)
+    if not dados:
+        return jsonify(ok=False, error="Conversão não encontrada. Converta novamente."), 404
+    if formato not in ("kml", "csv"):
+        return jsonify(ok=False, error="Formato inválido."), 400
+
+    validos = [r for r in dados["registros"] if not r["erros"]]
+    inicio = (parte - 1) * CONVERSOR_TAMANHO_PARTE
+    fatia = validos[inicio:inicio + CONVERSOR_TAMANHO_PARTE]
+    if not fatia:
+        return jsonify(ok=False, error="Parte não encontrada."), 404
+
+    sufixo = dados["sufixo"]
+    n_partes = -(-len(validos) // CONVERSOR_TAMANHO_PARTE) if len(validos) > CONVERSOR_TAMANHO_PARTE else 1
+    sufixo_parte = f"_parte{parte}" if n_partes > 1 else ""
+
+    if formato == "kml":
+        conteudo = conversorkml.gerar_kml(fatia).encode("utf-8")
+        mimetype = "application/vnd.google-earth.kml+xml"
+        nome_arquivo = f"{dados['nome_base']}_SSX_{sufixo}{sufixo_parte}.kml"
+    else:
+        conteudo = conversorkml.gerar_csv(fatia).encode("ascii", errors="ignore")
+        mimetype = "text/csv"
+        nome_arquivo = f"{dados['nome_base']}_SSX_{sufixo}{sufixo_parte}.csv"
+
+    return Response(
+        conteudo,
+        mimetype=mimetype,
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
 
 
 if __name__ == "__main__":

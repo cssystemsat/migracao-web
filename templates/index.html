@@ -70,6 +70,30 @@
           </div>
         </div>
       </div>
+
+      <div class="menu-grupo" data-grupo="ferramentas">
+        <button type="button" class="menu-cabecalho titulo-ferramentas">
+          <span>Ferramentas</span>
+          <span class="menu-seta">▾</span>
+        </button>
+        <div class="menu-conteudo">
+          <div class="botoes" id="botoes-ferramentas">
+            <button data-tipo="conversor-kml">Conversor KML → SSX</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="menu-grupo" data-grupo="dashboard">
+        <button type="button" class="menu-cabecalho titulo-dashboard">
+          <span>Dashboard</span>
+          <span class="menu-seta">▾</span>
+        </button>
+        <div class="menu-conteudo">
+          <div class="botoes" id="botoes-dashboard">
+            <button data-tipo="dashboard-indicadores">Indicadores</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="panel saida-panel">
@@ -318,6 +342,58 @@
             <div id="comando-resposta" class="comando-resposta"></div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-conversor" class="overlay hidden">
+    <div class="modal modal-grande">
+      <div class="modal-header">
+        <h3>Conversor KML → SSX</h3>
+        <button id="conversor-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="passo">
+          <span class="passo-num">1</span>
+          <label for="conversor-input-arquivo" class="file-label">Carregar KML</label>
+          <input type="file" id="conversor-input-arquivo" accept=".kml">
+          <span id="conversor-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
+        </div>
+
+        <div class="passo">
+          <span class="passo-num">2</span>
+          <span>O que este KML representa? (valores padrão para campos ausentes)</span>
+        </div>
+        <div class="comando-grid">
+          <label class="campo-migracao">
+            <span>Tipo</span>
+            <select id="conversor-tipo">
+              <option value="areas">Áreas</option>
+              <option value="rotas">Rotas</option>
+            </select>
+          </label>
+          <label class="campo-migracao">
+            <span>Categoria padrão</span>
+            <input type="text" id="conversor-categoria">
+          </label>
+          <label class="campo-migracao">
+            <span>Grupo padrão</span>
+            <input type="text" id="conversor-grupo">
+          </label>
+          <label class="campo-migracao">
+            <span>Tolerância padrão (m, só p/ Pontos)</span>
+            <input type="number" id="conversor-tolerancia" min="0">
+          </label>
+        </div>
+
+        <div class="campo-migracao conversor-cor-campo">
+          <span>Cor padrão da área/rota (opcional — tabela do manual SSX)</span>
+          <div id="conversor-cores" class="conversor-cores"></div>
+        </div>
+
+        <button id="btn-conversor-converter" class="btn-primary" disabled>Converter arquivo</button>
+
+        <div id="conversor-resultado" class="conversor-resultado"></div>
       </div>
     </div>
   </div>

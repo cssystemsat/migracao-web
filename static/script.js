@@ -44,6 +44,8 @@ const estado = {
   colunas: [],
   campos: [],
   credencialAtualNome: null,
+  conversorArquivo: null,
+  conversorCor: null,
 };
 
 function setSaida(node) {
@@ -386,6 +388,105 @@ el("botoes-migracao").addEventListener("click", async (e) => {
   if (!btn) return;
   await carregarClientesMigracao();
 });
+
+// --- DASHBOARD ---
+const STATUS_COR = {
+  Aguardando: "var(--azul)",
+  Enviado: "var(--amarelo)",
+  Migrado: "var(--verde)",
+  Enviar: "var(--vermelho)",
+};
+const STATUS_ORDEM = ["Aguardando", "Enviado", "Migrado", "Enviar"];
+
+el("botoes-dashboard").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-tipo='dashboard-indicadores']");
+  if (!btn) return;
+  await carregarDashboard();
+});
+
+async function carregarDashboard() {
+  mostrarPlaceholder("Carregando indicadores...");
+  try {
+    const r = await fetch("/api/dashboard");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErro(data.error || "Falha ao carregar indicadores.");
+    renderDashboard(data);
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+}
+
+function renderDashboard(data) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "dashboard-wrapper";
+
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.total_clientes, label: "Clientes em migração" },
+    { valor: data.total_veiculos, label: "Veículos cadastrados" },
+  ].forEach(({ valor, label }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    tile.appendChild(v);
+    tile.appendChild(l);
+    tiles.appendChild(tile);
+  });
+  wrapper.appendChild(tiles);
+
+  const secaoStatus = document.createElement("div");
+  secaoStatus.className = "dashboard-secao";
+  const titulo = document.createElement("h3");
+  titulo.textContent = "Veículos por status";
+  secaoStatus.appendChild(titulo);
+
+  const total = data.total_veiculos || 0;
+  const bar = document.createElement("div");
+  bar.className = "status-bar";
+  const legenda = document.createElement("div");
+  legenda.className = "status-legenda";
+
+  STATUS_ORDEM.forEach((status) => {
+    const qtd = data.por_status[status] || 0;
+    const pct = total ? (qtd / total) * 100 : 0;
+
+    if (qtd > 0) {
+      const seg = document.createElement("div");
+      seg.className = "status-bar-seg";
+      seg.style.width = `${pct}%`;
+      seg.style.background = STATUS_COR[status];
+      seg.title = `${status}: ${qtd} (${pct.toFixed(1)}%)`;
+      bar.appendChild(seg);
+    }
+
+    const item = document.createElement("div");
+    item.className = "status-legenda-item";
+    const dot = document.createElement("span");
+    dot.className = "status-legenda-dot";
+    dot.style.background = STATUS_COR[status];
+    const texto = document.createElement("span");
+    texto.textContent = status;
+    const valor = document.createElement("span");
+    valor.className = "status-legenda-valor";
+    valor.textContent = `${qtd} (${pct.toFixed(1)}%)`;
+    item.appendChild(dot);
+    item.appendChild(texto);
+    item.appendChild(valor);
+    legenda.appendChild(item);
+  });
+
+  secaoStatus.appendChild(bar);
+  secaoStatus.appendChild(legenda);
+  wrapper.appendChild(secaoStatus);
+
+  setSaida(wrapper);
+}
 
 // --- CLIENTES EM MIGRAÇÃO ---
 const overlayMigracao = el("overlay-migracao");
@@ -1419,6 +1520,267 @@ btnComandoEnviarMassa.addEventListener("click", async () => {
     mostrarErro(String(err));
     btnComandoEnviarMassa.disabled = false;
     btnComandoEnviarMassa.textContent = "Enviar";
+  }
+});
+
+// --- CONVERSOR KML -> SSX (Áreas/Rotas) ---
+const overlayConversor = el("overlay-conversor");
+const conversorInputArquivo = el("conversor-input-arquivo");
+const conversorArquivoNome = el("conversor-arquivo-nome");
+const conversorTipo = el("conversor-tipo");
+const conversorCategoria = el("conversor-categoria");
+const conversorGrupo = el("conversor-grupo");
+const conversorTolerancia = el("conversor-tolerancia");
+const btnConversorConverter = el("btn-conversor-converter");
+const conversorResultado = el("conversor-resultado");
+const conversorCores = el("conversor-cores");
+
+// Tabela de cores do manual de importação SSX (pág. 8).
+const CORES_SSX = [
+  { codigo: 1, hex: "#988383" },
+  { codigo: 2, hex: "#D65E5E" },
+  { codigo: 3, hex: "#D97B4C" },
+  { codigo: 4, hex: "#D66B98" },
+  { codigo: 5, hex: "#936BD6" },
+  { codigo: 6, hex: "#608CE0" },
+  { codigo: 7, hex: "#65D6B7" },
+  { codigo: 8, hex: "#9FD96D" },
+  { codigo: 9, hex: "#F0B132" },
+  { codigo: 10, hex: "#949191" },
+  { codigo: 11, hex: "#C2C0C0" },
+  { codigo: 12, hex: "#555555" },
+  { codigo: 13, hex: "#F6F6F6" },
+];
+
+function renderConversorCores() {
+  conversorCores.innerHTML = "";
+
+  const btnNenhuma = document.createElement("button");
+  btnNenhuma.type = "button";
+  btnNenhuma.className = "conversor-cor-swatch-nenhuma";
+  btnNenhuma.textContent = "Padrão (1)";
+  btnNenhuma.title = "Não escolher cor: o SSX grava com a cor padrão (código 1)";
+  if (estado.conversorCor === null) btnNenhuma.classList.add("selecionada");
+  btnNenhuma.addEventListener("click", () => {
+    estado.conversorCor = null;
+    renderConversorCores();
+  });
+  conversorCores.appendChild(btnNenhuma);
+
+  CORES_SSX.forEach(({ codigo, hex }) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "conversor-cor-swatch";
+    btn.style.background = hex;
+    btn.title = `Código ${codigo} (${hex})`;
+    btn.textContent = String(codigo);
+    if (estado.conversorCor === codigo) btn.classList.add("selecionada");
+    btn.addEventListener("click", () => {
+      estado.conversorCor = codigo;
+      renderConversorCores();
+    });
+    conversorCores.appendChild(btn);
+  });
+}
+
+function abrirModalConversor() {
+  estado.conversorArquivo = null;
+  estado.conversorCor = null;
+  conversorInputArquivo.value = "";
+  conversorArquivoNome.textContent = "Nenhum arquivo selecionado";
+  conversorTipo.value = "areas";
+  conversorCategoria.value = "";
+  conversorGrupo.value = "";
+  conversorTolerancia.value = "";
+  conversorResultado.innerHTML = "";
+  renderConversorCores();
+  btnConversorConverter.disabled = true;
+  btnConversorConverter.textContent = "Converter arquivo";
+  overlayConversor.classList.remove("hidden");
+}
+
+el("botoes-ferramentas").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tipo='conversor-kml']");
+  if (!btn) return;
+  abrirModalConversor();
+});
+
+el("conversor-modal-fechar").addEventListener("click", () => overlayConversor.classList.add("hidden"));
+overlayConversor.addEventListener("click", (e) => {
+  if (e.target === overlayConversor) overlayConversor.classList.add("hidden");
+});
+
+conversorInputArquivo.addEventListener("change", () => {
+  const file = conversorInputArquivo.files[0];
+  estado.conversorArquivo = file || null;
+  conversorArquivoNome.textContent = file ? file.name : "Nenhum arquivo selecionado";
+  btnConversorConverter.disabled = !file;
+});
+
+function mostrarErroConversor(msg) {
+  conversorResultado.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  conversorResultado.appendChild(p);
+}
+
+function renderConversorResultado(convId, data) {
+  conversorResultado.innerHTML = "";
+
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.n_ok, label: "Prontos" },
+    { valor: data.n_erro, label: "Com erro" },
+  ].forEach(({ valor, label }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    tile.appendChild(v);
+    tile.appendChild(l);
+    tiles.appendChild(tile);
+  });
+  conversorResultado.appendChild(tiles);
+
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) prontos para importar.`;
+  conversorResultado.appendChild(legenda);
+
+  if (data.n_ok > data.tamanho_parte) {
+    const aviso = document.createElement("p");
+    aviso.className = "placeholder";
+    aviso.style.color = "#a16207";
+    aviso.textContent = `O SSX importa no máximo ${data.max_linhas_importacao} linhas por arquivo. Os ${data.n_ok} registros prontos foram divididos em ${data.n_partes} arquivo(s) de até ${data.tamanho_parte} cada — importe um de cada vez.`;
+    conversorResultado.appendChild(aviso);
+  }
+
+  if (data.n_ok > 0) {
+    const downloads = document.createElement("div");
+    downloads.className = "conversor-downloads";
+    for (let parte = 1; parte <= data.n_partes; parte++) {
+      const sufixoParte = data.n_partes > 1 ? ` (parte ${parte}/${data.n_partes})` : "";
+
+      const btnKml = document.createElement("button");
+      btnKml.className = "btn-secondary";
+      btnKml.textContent = `Baixar KML${sufixoParte}`;
+      btnKml.addEventListener("click", () => {
+        window.location.href = `/api/conversor/download/${convId}/kml/${parte}`;
+      });
+
+      const btnCsv = document.createElement("button");
+      btnCsv.className = "btn-secondary";
+      btnCsv.textContent = `Baixar CSV${sufixoParte}`;
+      btnCsv.addEventListener("click", () => {
+        window.location.href = `/api/conversor/download/${convId}/csv/${parte}`;
+      });
+
+      downloads.appendChild(btnKml);
+      downloads.appendChild(btnCsv);
+    }
+    conversorResultado.appendChild(downloads);
+  }
+
+  const ac = data.avisos_compactados || {};
+  const compactadosTextos = [
+    ac.anel_fechado ? `${ac.anel_fechado} anel(éis) de área fechados automaticamente` : null,
+    ac.geo_truncado ? `${ac.geo_truncado} GeoIntegrationCode(s) truncados` : null,
+    ac.coordenadas_longas ? `${ac.coordenadas_longas} registro(s) com coordenadas longas` : null,
+  ].filter(Boolean);
+  if (compactadosTextos.length > 0) {
+    const infoAvisos = document.createElement("p");
+    infoAvisos.className = "placeholder";
+    infoAvisos.textContent = `Informativos: ${compactadosTextos.join(" · ")}.`;
+    conversorResultado.appendChild(infoAvisos);
+  }
+
+  if (data.problematicos.length > 0) {
+    const titulo = document.createElement("h4");
+    titulo.textContent = `Registros com erro/aviso (${data.problematicos.length})`;
+    conversorResultado.appendChild(titulo);
+
+    const table = document.createElement("table");
+    table.className = "tabela-saida";
+    const thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th></th><th>Registro</th><th>Código</th><th>Mensagens</th></tr>";
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    data.problematicos.forEach((r) => {
+      const tr = document.createElement("tr");
+
+      const tdStatus = document.createElement("td");
+      tdStatus.textContent = r.erros.length ? "🔴" : "🟢";
+      tr.appendChild(tdStatus);
+
+      const tdInfo = document.createElement("td");
+      const nomeLinha = document.createElement("div");
+      nomeLinha.textContent = `#${r.indice} · ${r.nome}`;
+      const tipoLinha = document.createElement("div");
+      tipoLinha.className = "conversor-tipo-registro";
+      tipoLinha.textContent = (r.tipo_original || "sem geometria") + (r.convertido ? " → Área" : "");
+      tdInfo.appendChild(nomeLinha);
+      tdInfo.appendChild(tipoLinha);
+      tr.appendChild(tdInfo);
+
+      const tdCodigo = document.createElement("td");
+      tdCodigo.textContent = r.codigo;
+      tr.appendChild(tdCodigo);
+
+      const tdMsg = document.createElement("td");
+      tdMsg.className = "conversor-mensagens";
+      const msgs = [...r.erros.map((m) => `⛔ ${m}`), ...r.avisos.map((m) => `⚠️ ${m}`)];
+      tdMsg.textContent = msgs.join("\n");
+      tr.appendChild(tdMsg);
+
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    conversorResultado.appendChild(table);
+
+    if (data.problematicos_ocultos > 0) {
+      const oculto = document.createElement("p");
+      oculto.className = "placeholder";
+      oculto.textContent = `... e mais ${data.problematicos_ocultos} registro(s) com erro/aviso não exibido(s) aqui (os arquivos gerados já refletem todos).`;
+      conversorResultado.appendChild(oculto);
+    }
+  }
+}
+
+btnConversorConverter.addEventListener("click", async () => {
+  if (!estado.conversorArquivo) return;
+  btnConversorConverter.disabled = true;
+  btnConversorConverter.textContent = "Convertendo...";
+  conversorResultado.innerHTML = "";
+
+  try {
+    const formData = new FormData();
+    formData.append("arquivo", estado.conversorArquivo);
+    formData.append("tipo", conversorTipo.value);
+    formData.append("categoria", conversorCategoria.value.trim());
+    formData.append("grupo", conversorGrupo.value.trim());
+    formData.append("tolerancia", conversorTolerancia.value.trim());
+    formData.append("cor", estado.conversorCor === null ? "" : String(estado.conversorCor));
+
+    const r = await fetch("/api/conversor/converter", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConversor(data.error || "Falha ao converter arquivo.");
+      return;
+    }
+    renderConversorResultado(data.conv_id, data);
+  } catch (err) {
+    mostrarErroConversor(String(err));
+  } finally {
+    btnConversorConverter.disabled = false;
+    btnConversorConverter.textContent = "Converter arquivo";
   }
 });
 

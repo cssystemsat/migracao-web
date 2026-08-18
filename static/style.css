@@ -5,6 +5,9 @@
   --violeta: #6d28d9;
   --verde: #15803d;
   --verde-escuro: #166534;
+  --amarelo: #a16207;
+  --amarelo-escuro: #854d0e;
+  --turquesa: #0f766e;
   --cinza-100: #f4f5f7;
   --cinza-200: #e5e7eb;
   --cinza-300: #d1d5db;
@@ -143,6 +146,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .titulo-consultas { color: var(--azul); }
 .titulo-import { color: var(--vermelho); }
 .titulo-migracao { color: var(--violeta); }
+.titulo-dashboard { color: var(--turquesa); }
+.titulo-ferramentas { color: var(--amarelo); }
 
 .menu-seta {
   font-size: 0.7rem;
@@ -164,6 +169,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 #botoes-consultas button:hover:not(:disabled) { background: #dbeafe; border-color: #bfdbfe; }
 #botoes-import button:not(:disabled):hover { background: #fee2e2; border-color: #fecaca; }
 #botoes-migracao button:not(:disabled):hover { background: #ede9fe; border-color: #ddd6fe; }
+#botoes-dashboard button:not(:disabled):hover { background: #ccfbf1; border-color: #99f6e4; }
+#botoes-ferramentas button:not(:disabled):hover { background: #fef9c3; border-color: #fef08a; }
 
 .saida-panel { min-height: 60vh; display: flex; flex-direction: column; }
 .saida-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -207,6 +214,75 @@ table.tabela-saida tr:hover td { background: #f0f7ff; }
   color: var(--verde-escuro);
   font-weight: 600;
 }
+
+.dashboard-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.stat-tile {
+  background: var(--branco);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+.stat-tile-valor {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--cinza-900);
+  line-height: 1.1;
+}
+.stat-tile-label {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: var(--cinza-500);
+}
+
+.dashboard-secao { margin-bottom: 24px; }
+.dashboard-secao h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--cinza-700);
+  margin: 0 0 10px;
+}
+
+.status-bar {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--cinza-200);
+  gap: 2px;
+}
+.status-bar-seg {
+  height: 100%;
+  min-width: 2px;
+  transition: width 0.2s ease;
+}
+
+.status-legenda {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.status-legenda-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--cinza-700);
+}
+.status-legenda-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-legenda-valor { margin-left: auto; font-weight: 600; color: var(--cinza-900); }
 
 .overlay {
   position: fixed;
@@ -606,3 +682,41 @@ table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
 @media (max-width: 720px) {
   .comando-colunas { grid-template-columns: 1fr; }
 }
+
+.conversor-resultado { margin-top: 16px; }
+.conversor-resultado h4 { margin: 14px 0 8px; font-size: 0.85rem; color: var(--cinza-700); }
+.conversor-downloads { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.conversor-downloads button { width: auto; }
+.conversor-tipo-registro { color: var(--cinza-500); font-size: 0.8rem; margin-top: 2px; }
+.conversor-mensagens { white-space: pre-wrap; }
+
+.conversor-cor-campo { margin-top: 4px; }
+.conversor-cores { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.conversor-cor-swatch {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--cinza-300);
+  position: relative;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.35);
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+.conversor-cor-swatch:hover:not(:disabled) { border-color: var(--cinza-500); }
+.conversor-cor-swatch.selecionada {
+  border-color: var(--azul);
+  box-shadow: 0 0 0 2px var(--branco) inset, 0 0 0 3px var(--azul);
+}
+.conversor-cor-swatch-nenhuma {
+  border-radius: var(--radius);
+  width: auto;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--cinza-100);
+  color: var(--cinza-700);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.conversor-cor-swatch-nenhuma.selecionada { border-color: var(--azul); box-shadow: none; background: #dbeafe; }
