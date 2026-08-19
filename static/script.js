@@ -348,12 +348,6 @@ el("cred-fechar").addEventListener("click", () => {
   overlayCred.classList.add("hidden");
   resetFormCredencial();
 });
-overlayCred.addEventListener("click", (e) => {
-  if (e.target === overlayCred) {
-    overlayCred.classList.add("hidden");
-    resetFormCredencial();
-  }
-});
 
 carregarCredenciais();
 
@@ -628,10 +622,6 @@ function abrirModalMigracao(cliente) {
 }
 
 el("migracao-modal-fechar").addEventListener("click", () => overlayMigracao.classList.add("hidden"));
-overlayMigracao.addEventListener("click", (e) => {
-  if (e.target === overlayMigracao) overlayMigracao.classList.add("hidden");
-});
-
 formMigracao.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!clienteMigracaoAtualId) return;
@@ -680,10 +670,6 @@ let veiculosMigracaoDadosAtuais = [];
 let modoEdicaoVeiculos = false;
 
 el("veiculos-migracao-fechar").addEventListener("click", () => overlayVeiculosMigracao.classList.add("hidden"));
-overlayVeiculosMigracao.addEventListener("click", (e) => {
-  if (e.target === overlayVeiculosMigracao) overlayVeiculosMigracao.classList.add("hidden");
-});
-
 async function abrirVeiculosMigracao(cliente) {
   veiculosMigracaoClienteIdAtual = cliente.id;
   veiculosMigracaoTitulo.textContent = `Veículos — ${cliente.nome}`;
@@ -1099,10 +1085,6 @@ function renderMapaCampos() {
 }
 
 el("modal-fechar").addEventListener("click", () => overlay.classList.add("hidden"));
-overlay.addEventListener("click", (e) => {
-  if (e.target === overlay) overlay.classList.add("hidden");
-});
-
 inputArquivo.addEventListener("change", async () => {
   const file = inputArquivo.files[0];
   if (!file) return;
@@ -1317,10 +1299,6 @@ el("botoes-migracao").addEventListener("click", (e) => {
 });
 
 el("comando-modal-fechar").addEventListener("click", () => overlayComando.classList.add("hidden"));
-overlayComando.addEventListener("click", (e) => {
-  if (e.target === overlayComando) overlayComando.classList.add("hidden");
-});
-
 el("form-comando-auth").addEventListener("submit", async (e) => {
   e.preventDefault();
   const usuario = el("comando-usuario").value.trim();
@@ -1606,10 +1584,6 @@ el("botoes-ferramentas").addEventListener("click", (e) => {
 });
 
 el("conversor-modal-fechar").addEventListener("click", () => overlayConversor.classList.add("hidden"));
-overlayConversor.addEventListener("click", (e) => {
-  if (e.target === overlayConversor) overlayConversor.classList.add("hidden");
-});
-
 conversorInputArquivo.addEventListener("change", () => {
   const file = conversorInputArquivo.files[0];
   estado.conversorArquivo = file || null;
@@ -1845,10 +1819,6 @@ el("botoes-ferramentas").addEventListener("click", (e) => {
 });
 
 el("quebra-string-modal-fechar").addEventListener("click", () => overlayQuebraString.classList.add("hidden"));
-overlayQuebraString.addEventListener("click", (e) => {
-  if (e.target === overlayQuebraString) overlayQuebraString.classList.add("hidden");
-});
-
 quebraStringInput.addEventListener("input", () => {
   btnQuebraString.disabled = !quebraStringInput.value.trim();
 });

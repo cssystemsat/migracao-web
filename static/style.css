@@ -693,6 +693,15 @@ table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
 .conversor-tipo-registro { color: var(--cinza-500); font-size: 0.8rem; margin-top: 2px; }
 .conversor-mensagens { white-space: pre-wrap; }
 
+.modal-quebra-string { max-width: 1180px; }
+.modal-quebra-string .modal-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.modal-quebra-string .campo-migracao { gap: 2px; }
+.modal-quebra-string textarea { padding: 6px 8px; font-size: 0.82rem; }
+.modal-quebra-string .btn-primary { width: auto; padding: 6px 18px; margin-top: 2px; }
+.modal-quebra-string .conversor-resultado { margin-top: 0; }
+
+.quebra-string-tabela { font-size: 0.8rem; }
+.quebra-string-tabela th, .quebra-string-tabela td { padding: 4px 8px; }
 .quebra-string-tabela th:first-child, .quebra-string-tabela td:first-child { color: var(--cinza-700); width: 34%; }
 .quebra-string-tabela th:not(:first-child), .quebra-string-tabela td:not(:first-child) { width: 33%; }
 .quebra-string-tabela td:last-child { font-weight: 500; }
@@ -701,14 +710,14 @@ table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
 .quebra-string-bruto-ativo:hover { background: #fef3c7; }
 
 .quebra-string-bytes {
-  margin-top: 8px;
-  padding: 8px;
+  margin: 0;
+  padding: 6px 8px;
   border: 1px solid var(--cinza-200);
   border-radius: var(--radius);
   background: var(--cinza-100);
   font-family: monospace;
-  font-size: 0.85rem;
-  line-height: 1.8;
+  font-size: 0.78rem;
+  line-height: 1.6;
   word-break: break-all;
 }
 .quebra-string-byte {
