@@ -1617,6 +1617,236 @@ conversorInputArquivo.addEventListener("change", () => {
   btnConversorConverter.disabled = !file;
 });
 
+// --- QUEBRA STRING (rastreadores) ---
+const overlayQuebraString = el("overlay-quebra-string");
+const quebraStringInput = el("quebra-string-input");
+const quebraStringBytesView = el("quebra-string-bytes");
+const btnQuebraString = el("btn-quebra-string");
+const quebraStringResultado = el("quebra-string-resultado");
+
+// Conjunto padronizado de informações exibidas para qualquer rastreador.
+// chave = o que cada parser de protocolo (parseGT06Pacote22 etc.) deve preencher.
+const QUEBRA_STRING_CAMPOS = [
+  { chave: "possivelRastreador", label: "Possível rastreador" },
+  { chave: "tipoPacote", label: "Tipo de pacote" },
+  { chave: "idImei", label: "ID/IMEI" },
+  { chave: "data", label: "Data" },
+  { chave: "hora", label: "Hora" },
+  { chave: "latitude", label: "Latitude" },
+  { chave: "longitude", label: "Longitude" },
+  { chave: "velocidade", label: "Velocidade" },
+  { chave: "ignicao", label: "Ignição" },
+  { chave: "odometro", label: "Odômetro" },
+  { chave: "horimetro", label: "Horímetro" },
+  { chave: "motorista", label: "Motorista" },
+  { chave: "entrada1", label: "Entrada 1" },
+  { chave: "entrada2", label: "Entrada 2" },
+  { chave: "entrada3", label: "Entrada 3" },
+  { chave: "saida1", label: "Saída 1" },
+  { chave: "saida2", label: "Saída 2" },
+  { chave: "saida3", label: "Saída 3" },
+];
+
+function hexParaBytes(hexLimpo) {
+  const bytes = [];
+  for (let i = 0; i < hexLimpo.length; i += 2) {
+    bytes.push(hexLimpo.slice(i, i + 2));
+  }
+  return bytes;
+}
+
+function hexParaInt(hex) {
+  return parseInt(hex, 16);
+}
+
+function formatarDataBR(d) {
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getUTCFullYear()}`;
+}
+
+function formatarHoraBR(d) {
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mi = String(d.getUTCMinutes()).padStart(2, "0");
+  const ss = String(d.getUTCSeconds()).padStart(2, "0");
+  return `${hh}:${mi}:${ss}`;
+}
+
+// Formato brasileiro: vírgula decimal, sinal negativo quando aplicável (sul/oeste).
+function formatarCoordenada(valor) {
+  return valor.toFixed(6).replace(".", ",");
+}
+
+// Protocolo GT06 (Concox e compatíveis) — pacote de posição, Protocol Number 0x22.
+// Layout mapeado a partir de um exemplo de pacote real informado pelo usuário;
+// bytes sem correspondência num dos campos padronizados (curso/status e outros
+// ainda não mapeados) ficam de fora do resultado.
+function parseGT06Pacote22(bytes) {
+  const campos = {};
+
+  const marcar = (chave, inicioByte, qtdBytes, calcularFinal) => {
+    const bruto = bytes.slice(inicioByte, inicioByte + qtdBytes).join("");
+    campos[chave] = { bruto, final: calcularFinal(bruto), inicioByte, fimByte: inicioByte + qtdBytes };
+  };
+
+  // Início "7878" identifica a família de protocolo GT06.
+  campos.possivelRastreador = {
+    bruto: bytes.slice(0, 2).join(""),
+    final: "GT06 (Concox e compatíveis)",
+    inicioByte: 0,
+    fimByte: 2,
+  };
+
+  marcar("tipoPacote", 3, 1, () => "Pacote de posição x22");
+
+  // Bytes 4-9: Ano, Mês, Dia, Hora, Min, Seg — cada um é o valor hex direto (não BCD).
+  const anoB = hexParaInt(bytes[4]);
+  const mesB = hexParaInt(bytes[5]);
+  const diaB = hexParaInt(bytes[6]);
+  const horaB = hexParaInt(bytes[7]);
+  const minB = hexParaInt(bytes[8]);
+  const segB = hexParaInt(bytes[9]);
+  const dataUtc = new Date(Date.UTC(2000 + anoB, mesB - 1, diaB, horaB, minB, segB));
+  // Pacote vem em UTC; exibição em horário de Brasília (UTC-3).
+  const dataBrasilia = new Date(dataUtc.getTime() - 3 * 60 * 60 * 1000);
+
+  campos.data = {
+    bruto: bytes.slice(4, 7).join(""),
+    final: formatarDataBR(dataBrasilia),
+    inicioByte: 4,
+    fimByte: 7,
+  };
+  campos.hora = {
+    bruto: bytes.slice(7, 10).join(""),
+    final: formatarHoraBR(dataBrasilia),
+    inicioByte: 7,
+    fimByte: 10,
+  };
+
+  // Bytes 20-21 ("Course and Status"): bit10 = hemisfério da latitude (1=Norte, 0=Sul),
+  // bit11 = hemisfério da longitude (1=Oeste, 0=Leste). Não fazia parte da lista de
+  // campos que você mapeou — usei o layout padrão do protocolo GT06 para o sinal.
+  const cursoStatus = hexParaInt(bytes[20] + bytes[21]);
+  const sinalLat = cursoStatus & 0x0400 ? 1 : -1;
+  const sinalLon = cursoStatus & 0x0800 ? -1 : 1;
+
+  marcar("latitude", 11, 4, (bruto) => formatarCoordenada(sinalLat * (hexParaInt(bruto) / 1800000)));
+  marcar("longitude", 15, 4, (bruto) => formatarCoordenada(sinalLon * (hexParaInt(bruto) / 1800000)));
+  marcar("velocidade", 19, 1, (bruto) => `${hexParaInt(bruto)} km/h`);
+  marcar("ignicao", 30, 1, (bruto) => (hexParaInt(bruto) === 0 ? "Desligada" : "Ligada"));
+  marcar("odometro", 33, 4, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} km`);
+
+  return campos;
+}
+
+// Identifica o protocolo pelo cabeçalho e delega a extração dos campos.
+// Devolve { campos, bytes }: campos[chave] = { bruto, final, inicioByte, fimByte }
+// (inicioByte/fimByte faltando = campo não encontrado nessa string → exibe "-").
+function quebrarString(strBruta) {
+  const hexLimpo = (strBruta || "").replace(/\s+/g, "").toUpperCase();
+  if (!hexLimpo || hexLimpo.length % 2 !== 0 || !/^[0-9A-F]+$/.test(hexLimpo)) {
+    return { campos: {}, bytes: [] };
+  }
+
+  const bytes = hexParaBytes(hexLimpo);
+  let campos = {};
+
+  if (bytes[0] === "78" && bytes[1] === "78" && bytes[3] === "22") {
+    campos = parseGT06Pacote22(bytes);
+  }
+
+  return { campos, bytes };
+}
+
+function renderQuebraStringBytes(bytes) {
+  quebraStringBytesView.innerHTML = "";
+  bytes.forEach((byte, i) => {
+    const span = document.createElement("span");
+    span.className = "quebra-string-byte";
+    span.dataset.byteIndex = String(i);
+    span.textContent = byte;
+    quebraStringBytesView.appendChild(span);
+  });
+}
+
+function destacarBytes(inicioByte, fimByte, ligar) {
+  if (inicioByte === undefined) return;
+  for (let i = inicioByte; i < fimByte; i++) {
+    const span = quebraStringBytesView.querySelector(`[data-byte-index="${i}"]`);
+    if (span) span.classList.toggle("hl", ligar);
+  }
+}
+
+function renderQuebraStringResultado(campos) {
+  quebraStringResultado.innerHTML = "";
+
+  const tabela = document.createElement("table");
+  tabela.className = "tabela-saida quebra-string-tabela";
+
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th></th><th>Info no Pacote</th><th>Info final</th></tr>";
+  tabela.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+
+  QUEBRA_STRING_CAMPOS.forEach(({ chave, label }) => {
+    const campo = campos[chave] || {};
+    const tr = document.createElement("tr");
+
+    const tdLabel = document.createElement("td");
+    tdLabel.textContent = label;
+
+    const tdBruto = document.createElement("td");
+    tdBruto.textContent = campo.bruto ? campo.bruto : "-";
+
+    const tdFinal = document.createElement("td");
+    tdFinal.textContent = campo.final ? String(campo.final) : "-";
+
+    if (campo.inicioByte !== undefined) {
+      tdBruto.classList.add("quebra-string-bruto-ativo");
+      tdBruto.addEventListener("mouseenter", () => destacarBytes(campo.inicioByte, campo.fimByte, true));
+      tdBruto.addEventListener("mouseleave", () => destacarBytes(campo.inicioByte, campo.fimByte, false));
+    }
+
+    tr.appendChild(tdLabel);
+    tr.appendChild(tdBruto);
+    tr.appendChild(tdFinal);
+    tbody.appendChild(tr);
+  });
+
+  tabela.appendChild(tbody);
+  quebraStringResultado.appendChild(tabela);
+}
+
+function abrirModalQuebraString() {
+  quebraStringInput.value = "";
+  btnQuebraString.disabled = true;
+  quebraStringBytesView.innerHTML = "";
+  renderQuebraStringResultado({});
+  overlayQuebraString.classList.remove("hidden");
+}
+
+el("botoes-ferramentas").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tipo='quebra-string']");
+  if (!btn) return;
+  abrirModalQuebraString();
+});
+
+el("quebra-string-modal-fechar").addEventListener("click", () => overlayQuebraString.classList.add("hidden"));
+overlayQuebraString.addEventListener("click", (e) => {
+  if (e.target === overlayQuebraString) overlayQuebraString.classList.add("hidden");
+});
+
+quebraStringInput.addEventListener("input", () => {
+  btnQuebraString.disabled = !quebraStringInput.value.trim();
+});
+
+btnQuebraString.addEventListener("click", () => {
+  const { campos, bytes } = quebrarString(quebraStringInput.value);
+  renderQuebraStringBytes(bytes);
+  renderQuebraStringResultado(campos);
+});
+
 function mostrarErroConversor(msg) {
   conversorResultado.innerHTML = "";
   const p = document.createElement("p");

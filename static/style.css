@@ -470,11 +470,14 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 
 .form-migracao { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
 .campo-migracao { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--cinza-700); }
-.campo-migracao input {
+.campo-migracao input,
+.campo-migracao textarea {
   padding: 8px 10px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
   font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
 }
 .form-migracao .btn-primary { margin-top: 4px; }
 
@@ -689,6 +692,31 @@ table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
 .conversor-downloads button { width: auto; }
 .conversor-tipo-registro { color: var(--cinza-500); font-size: 0.8rem; margin-top: 2px; }
 .conversor-mensagens { white-space: pre-wrap; }
+
+.quebra-string-tabela th:first-child, .quebra-string-tabela td:first-child { color: var(--cinza-700); width: 34%; }
+.quebra-string-tabela th:not(:first-child), .quebra-string-tabela td:not(:first-child) { width: 33%; }
+.quebra-string-tabela td:last-child { font-weight: 500; }
+.quebra-string-tabela td:nth-child(2) { font-family: monospace; }
+.quebra-string-bruto-ativo { cursor: help; text-decoration: underline dotted var(--cinza-300); }
+.quebra-string-bruto-ativo:hover { background: #fef3c7; }
+
+.quebra-string-bytes {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  background: var(--cinza-100);
+  font-family: monospace;
+  font-size: 0.85rem;
+  line-height: 1.8;
+  word-break: break-all;
+}
+.quebra-string-byte {
+  display: inline-block;
+  padding: 1px 2px;
+  border-radius: 3px;
+}
+.quebra-string-byte.hl { background: #fbbf24; color: #1f2937; }
 
 .conversor-cor-campo { margin-top: 4px; }
 .conversor-cores { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
