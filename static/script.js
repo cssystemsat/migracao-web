@@ -1638,6 +1638,7 @@ const QUEBRA_STRING_CAMPOS = [
   { chave: "ignicao", label: "Ignição" },
   { chave: "odometro", label: "Odômetro" },
   { chave: "horimetro", label: "Horímetro" },
+  { chave: "tipoUpload", label: "Tipo de upload" },
   { chave: "motorista", label: "Motorista" },
   { chave: "entrada1", label: "Entrada 1" },
   { chave: "entrada2", label: "Entrada 2" },
@@ -1672,6 +1673,16 @@ function formatarHoraBR(d) {
   return `${hh}:${mi}:${ss}`;
 }
 
+// GPS data upload mode (não vale para a série 06).
+const GT06_TIPO_UPLOAD = {
+  "00": "Envio por intervalo de tempo",
+  "01": "Envio por intervalo de distância",
+  "02": "Envio por ponto de inflexão",
+  "03": "Envio por status do ACC",
+  "04": "Reenvio do último ponto GPS ao voltar a ficar parado",
+  "05": "Envio do último ponto válido ao recuperar a rede",
+};
+
 // Formato brasileiro: vírgula decimal, sinal negativo quando aplicável (sul/oeste).
 function formatarCoordenada(valor) {
   return valor.toFixed(6).replace(".", ",");
@@ -1692,7 +1703,7 @@ function parseGT06Pacote22(bytes) {
   // Início "7878" identifica a família de protocolo GT06.
   campos.possivelRastreador = {
     bruto: bytes.slice(0, 2).join(""),
-    final: "GT06 (Concox e compatíveis)",
+    final: "GT06 (J16, CRX, ETC)",
     inicioByte: 0,
     fimByte: 2,
   };
@@ -1734,6 +1745,7 @@ function parseGT06Pacote22(bytes) {
   marcar("longitude", 15, 4, (bruto) => formatarCoordenada(sinalLon * (hexParaInt(bruto) / 1800000)));
   marcar("velocidade", 19, 1, (bruto) => `${hexParaInt(bruto)} km/h`);
   marcar("ignicao", 30, 1, (bruto) => (hexParaInt(bruto) === 0 ? "Desligada" : "Ligada"));
+  marcar("tipoUpload", 31, 1, (bruto) => GT06_TIPO_UPLOAD[bruto] || `Desconhecido (0x${bruto})`);
   marcar("odometro", 33, 4, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} km`);
 
   return campos;
