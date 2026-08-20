@@ -201,9 +201,14 @@ table.tabela-saida th, table.tabela-saida td {
   text-align: left;
   padding: 8px 10px;
   border-bottom: 1px solid var(--cinza-200);
+  border-right: 1px solid var(--cinza-200);
   white-space: nowrap;
 }
+table.tabela-saida th:last-child, table.tabela-saida td:last-child { border-right: none; }
 table.tabela-saida th { background: var(--cinza-100); position: sticky; top: 0; }
+table.tabela-saida th.th-ordenavel { cursor: pointer; user-select: none; }
+table.tabela-saida th.th-ordenavel:hover { background: var(--cinza-200); }
+table.tabela-saida .seta-ordenacao { color: var(--azul); }
 table.tabela-saida tr:hover td { background: #f0f7ff; }
 
 .log-linha {

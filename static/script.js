@@ -72,14 +72,45 @@ function mostrarErro(msg) {
   setSaida(p);
 }
 
-function mostrarTabela(headers, rows, tipoExport) {
+// null/"" sempre vão pro fim, independente da direção; números comparam como número
+// e o resto vira texto (localeCompare com "numeric" pra ordenar "2" antes de "10").
+function valorOrdenavel(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  return v;
+}
+
+function ordenarLinhas(rows, coluna, direcao) {
+  return rows.slice().sort((a, b) => {
+    const va = valorOrdenavel(a[coluna]);
+    const vb = valorOrdenavel(b[coluna]);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * direcao;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * direcao;
+  });
+}
+
+function mostrarTabela(headers, rows, tipoExport, sortState) {
   const table = document.createElement("table");
   table.className = "tabela-saida";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  headers.forEach((h) => {
+  headers.forEach((h, i) => {
     const th = document.createElement("th");
+    th.className = "th-ordenavel";
     th.textContent = h;
+    if (sortState && sortState.coluna === i) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = sortState.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = sortState && sortState.coluna === i ? -sortState.direcao : 1;
+      mostrarTabela(headers, ordenarLinhas(rows, i, direcao), tipoExport, { coluna: i, direcao });
+    });
     trHead.appendChild(th);
   });
   thead.appendChild(trHead);
