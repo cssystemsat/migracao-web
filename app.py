@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.6"
+APP_VERSION = "2.7"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
