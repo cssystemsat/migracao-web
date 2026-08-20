@@ -80,6 +80,7 @@
           <div class="botoes" id="botoes-ferramentas">
             <button data-tipo="conversor-kml">Conversor KML → SSX</button>
             <button data-tipo="quebra-string">Quebra String</button>
+            <button data-tipo="comandos">Comandos</button>
           </div>
         </div>
       </div>
@@ -415,6 +416,52 @@
         <button id="btn-quebra-string" class="btn-primary" disabled>Quebrar string</button>
 
         <div id="quebra-string-resultado" class="conversor-resultado"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-comandos" class="overlay hidden">
+    <div class="modal modal-grande">
+      <div class="modal-header">
+        <h3>Comandos</h3>
+        <button id="comandos-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="comandos-modelo-linha">
+          <label class="campo-migracao comandos-modelo-select">
+            <span>Modelo de rastreador</span>
+            <select id="comandos-select-modelo">
+              <option value="">Selecione um modelo...</option>
+            </select>
+          </label>
+          <button type="button" id="btn-comandos-novo-modelo" class="btn-secondary">Novo modelo</button>
+          <button type="button" id="btn-comandos-renomear-modelo" class="btn-secondary" disabled>Renomear</button>
+          <button type="button" id="btn-comandos-excluir-modelo" class="btn-secondary" disabled>Excluir modelo</button>
+        </div>
+
+        <form id="form-comandos-modelo" class="form-credencial comandos-modelo-form hidden">
+          <input type="text" id="comandos-modelo-nome" placeholder="Nome do modelo (ex: GT06 J16)" required>
+          <div class="form-credencial-botoes">
+            <button type="submit" id="btn-comandos-modelo-salvar" class="btn-primary">Salvar</button>
+            <button type="button" id="btn-comandos-modelo-cancelar" class="btn-secondary">Cancelar</button>
+          </div>
+        </form>
+
+        <p id="comandos-placeholder" class="placeholder">Selecione um modelo para ver os comandos, ou clique em "Novo modelo" para cadastrar um.</p>
+
+        <div id="comandos-lista-bloco" class="hidden">
+          <div id="comandos-lista-itens" class="lista-credenciais"></div>
+
+          <h4 class="form-credencial-titulo" id="comandos-item-form-titulo">Adicionar comando</h4>
+          <form id="form-comando-item" class="form-credencial">
+            <input type="text" id="comando-item-nome" placeholder="Nome do comando (ex: Bloquear)" required>
+            <input type="text" id="comando-item-comando" placeholder="Comando" required>
+            <div class="form-credencial-botoes">
+              <button type="submit" id="btn-salvar-comando-item" class="btn-primary">Adicionar</button>
+              <button type="button" id="btn-cancelar-edicao-comando-item" class="btn-secondary hidden">Cancelar edição</button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>

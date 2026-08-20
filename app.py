@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -358,6 +358,107 @@ def excluir_credencial(cred_id):
     doc_ref = db.collection(CREDENCIAIS_COLLECTION).document(cred_id)
     if not doc_ref.get().exists:
         return jsonify(ok=False, error="Login não encontrado."), 404
+    doc_ref.delete()
+    return jsonify(ok=True)
+
+
+# --- COMANDOS DE RASTREADORES (Ferramentas > Comandos) ---
+# Catálogo próprio, guardado no Firestore: uma coleção de modelos de rastreador
+# e outra de comandos, cada comando amarrado a um modelo pelo campo modeloId.
+COMANDO_MODELOS_COLLECTION = "comando_modelos"
+COMANDO_ITENS_COLLECTION = "comando_itens"
+
+
+@app.route("/api/comando-modelos", methods=["GET"])
+def listar_comando_modelos():
+    docs = db.collection(COMANDO_MODELOS_COLLECTION).stream()
+    lista = [dict(d.to_dict(), id=d.id) for d in docs]
+    return jsonify(ok=True, modelos=lista)
+
+
+@app.route("/api/comando-modelos", methods=["POST"])
+def criar_comando_modelo():
+    data = request.get_json(force=True) or {}
+    nome = str(data.get("nome", "")).strip()
+    if not nome:
+        return jsonify(ok=False, error="Informe o nome do modelo."), 400
+    doc_ref = db.collection(COMANDO_MODELOS_COLLECTION).document()
+    dados = {"nome": nome}
+    doc_ref.set(dados)
+    return jsonify(ok=True, modelo=dict(dados, id=doc_ref.id))
+
+
+@app.route("/api/comando-modelos/<modelo_id>", methods=["PUT"])
+def editar_comando_modelo(modelo_id):
+    data = request.get_json(force=True) or {}
+    nome = str(data.get("nome", "")).strip()
+    if not nome:
+        return jsonify(ok=False, error="Informe o nome do modelo."), 400
+    doc_ref = db.collection(COMANDO_MODELOS_COLLECTION).document(modelo_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Modelo não encontrado."), 404
+    dados = {"nome": nome}
+    doc_ref.set(dados)
+    return jsonify(ok=True, modelo=dict(dados, id=modelo_id))
+
+
+@app.route("/api/comando-modelos/<modelo_id>", methods=["DELETE"])
+def excluir_comando_modelo(modelo_id):
+    doc_ref = db.collection(COMANDO_MODELOS_COLLECTION).document(modelo_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Modelo não encontrado."), 404
+    # Apaga também os comandos cadastrados para esse modelo, pra não deixar órfãos.
+    itens = db.collection(COMANDO_ITENS_COLLECTION).where(
+        filter=FieldFilter("modeloId", "==", modelo_id)
+    ).stream()
+    for item in itens:
+        item.reference.delete()
+    doc_ref.delete()
+    return jsonify(ok=True)
+
+
+@app.route("/api/comando-itens", methods=["GET"])
+def listar_comando_itens():
+    docs = db.collection(COMANDO_ITENS_COLLECTION).stream()
+    lista = [dict(d.to_dict(), id=d.id) for d in docs]
+    return jsonify(ok=True, itens=lista)
+
+
+@app.route("/api/comando-itens", methods=["POST"])
+def criar_comando_item():
+    data = request.get_json(force=True) or {}
+    modelo_id = str(data.get("modeloId", "")).strip()
+    nome = str(data.get("nome", "")).strip()
+    comando = str(data.get("comando", "")).strip()
+    if not modelo_id or not nome or not comando:
+        return jsonify(ok=False, error="Informe modelo, nome e comando."), 400
+    doc_ref = db.collection(COMANDO_ITENS_COLLECTION).document()
+    dados = {"modeloId": modelo_id, "nome": nome, "comando": comando}
+    doc_ref.set(dados)
+    return jsonify(ok=True, item=dict(dados, id=doc_ref.id))
+
+
+@app.route("/api/comando-itens/<item_id>", methods=["PUT"])
+def editar_comando_item(item_id):
+    data = request.get_json(force=True) or {}
+    modelo_id = str(data.get("modeloId", "")).strip()
+    nome = str(data.get("nome", "")).strip()
+    comando = str(data.get("comando", "")).strip()
+    if not modelo_id or not nome or not comando:
+        return jsonify(ok=False, error="Informe modelo, nome e comando."), 400
+    doc_ref = db.collection(COMANDO_ITENS_COLLECTION).document(item_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Comando não encontrado."), 404
+    dados = {"modeloId": modelo_id, "nome": nome, "comando": comando}
+    doc_ref.set(dados)
+    return jsonify(ok=True, item=dict(dados, id=item_id))
+
+
+@app.route("/api/comando-itens/<item_id>", methods=["DELETE"])
+def excluir_comando_item(item_id):
+    doc_ref = db.collection(COMANDO_ITENS_COLLECTION).document(item_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Comando não encontrado."), 404
     doc_ref.delete()
     return jsonify(ok=True)
 

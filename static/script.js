@@ -1996,4 +1996,269 @@ btnConversorConverter.addEventListener("click", async () => {
   }
 });
 
+// --- COMANDOS DE RASTREADORES (Ferramentas > Comandos) ---
+const overlayComandos = el("overlay-comandos");
+const comandosSelectModelo = el("comandos-select-modelo");
+const btnComandosNovoModelo = el("btn-comandos-novo-modelo");
+const btnComandosRenomearModelo = el("btn-comandos-renomear-modelo");
+const btnComandosExcluirModelo = el("btn-comandos-excluir-modelo");
+const formComandosModelo = el("form-comandos-modelo");
+const inputComandosModeloNome = el("comandos-modelo-nome");
+const btnComandosModeloCancelar = el("btn-comandos-modelo-cancelar");
+const comandosPlaceholder = el("comandos-placeholder");
+const comandosListaBloco = el("comandos-lista-bloco");
+const comandosListaItens = el("comandos-lista-itens");
+const formComandoItem = el("form-comando-item");
+const inputComandoItemNome = el("comando-item-nome");
+const inputComandoItemComando = el("comando-item-comando");
+const btnSalvarComandoItem = el("btn-salvar-comando-item");
+const btnCancelarEdicaoComandoItem = el("btn-cancelar-edicao-comando-item");
+const comandosItemFormTitulo = el("comandos-item-form-titulo");
+
+let comandosModelosCache = [];
+let comandosItensCache = [];
+let comandosEditandoModeloId = null; // null = criando modelo novo
+let comandosEditandoItemId = null; // null = criando comando novo
+
+async function carregarComandosModelos() {
+  const r = await fetch("/api/comando-modelos");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) return mostrarErro(data.error || "Falha ao carregar modelos.");
+  comandosModelosCache = data.modelos || [];
+  renderComandosSelectModelo();
+}
+
+function renderComandosSelectModelo() {
+  const atual = comandosSelectModelo.value;
+  comandosSelectModelo.innerHTML = '<option value="">Selecione um modelo...</option>';
+  comandosModelosCache
+    .slice()
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
+    .forEach((m) => {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.nome;
+      comandosSelectModelo.appendChild(opt);
+    });
+  comandosSelectModelo.value = comandosModelosCache.some((m) => m.id === atual) ? atual : "";
+  atualizarComandosBotoesModelo();
+}
+
+function atualizarComandosBotoesModelo() {
+  const temModelo = !!comandosSelectModelo.value;
+  btnComandosRenomearModelo.disabled = !temModelo;
+  btnComandosExcluirModelo.disabled = !temModelo;
+}
+
+async function carregarComandosItens() {
+  const r = await fetch("/api/comando-itens");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) return mostrarErro(data.error || "Falha ao carregar comandos.");
+  comandosItensCache = data.itens || [];
+  renderComandosLista();
+}
+
+function renderComandosLista() {
+  const modeloId = comandosSelectModelo.value;
+  if (!modeloId) {
+    comandosListaBloco.classList.add("hidden");
+    comandosPlaceholder.classList.remove("hidden");
+    return;
+  }
+  comandosPlaceholder.classList.add("hidden");
+  comandosListaBloco.classList.remove("hidden");
+
+  const itens = comandosItensCache.filter((i) => i.modeloId === modeloId);
+  comandosListaItens.innerHTML = "";
+
+  if (itens.length === 0) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhum comando cadastrado para este modelo ainda.";
+    comandosListaItens.appendChild(p);
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "tabela-credenciais";
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th>Nome</th><th>Comando</th><th></th></tr>";
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  itens
+    .slice()
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
+    .forEach((item) => {
+      const tr = document.createElement("tr");
+
+      const tdNome = document.createElement("td");
+      tdNome.textContent = item.nome;
+
+      const tdComando = document.createElement("td");
+      tdComando.textContent = item.comando;
+      tdComando.className = "comando-item-valor";
+
+      const tdAcoes = document.createElement("td");
+      tdAcoes.className = "acoes-credencial";
+
+      const btnEditar = document.createElement("button");
+      btnEditar.textContent = "Editar";
+      btnEditar.className = "btn-secondary";
+      btnEditar.addEventListener("click", () => abrirEdicaoComandoItem(item));
+
+      const btnExcluir = document.createElement("button");
+      btnExcluir.textContent = "Excluir";
+      btnExcluir.className = "btn-secondary";
+      btnExcluir.addEventListener("click", () => excluirComandoItem(item.id));
+
+      tdAcoes.appendChild(btnEditar);
+      tdAcoes.appendChild(btnExcluir);
+
+      tr.appendChild(tdNome);
+      tr.appendChild(tdComando);
+      tr.appendChild(tdAcoes);
+      tbody.appendChild(tr);
+    });
+  table.appendChild(tbody);
+  comandosListaItens.appendChild(table);
+}
+
+function resetFormComandoItem() {
+  formComandoItem.reset();
+  comandosEditandoItemId = null;
+  btnSalvarComandoItem.textContent = "Adicionar";
+  btnCancelarEdicaoComandoItem.classList.add("hidden");
+  comandosItemFormTitulo.textContent = "Adicionar comando";
+}
+
+function abrirEdicaoComandoItem(item) {
+  inputComandoItemNome.value = item.nome;
+  inputComandoItemComando.value = item.comando;
+  comandosEditandoItemId = item.id;
+  btnSalvarComandoItem.textContent = "Salvar edição";
+  btnCancelarEdicaoComandoItem.classList.remove("hidden");
+  comandosItemFormTitulo.textContent = "Editar comando";
+  inputComandoItemNome.focus();
+}
+
+btnCancelarEdicaoComandoItem.addEventListener("click", resetFormComandoItem);
+
+formComandoItem.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const modeloId = comandosSelectModelo.value;
+  if (!modeloId) return;
+  const payload = {
+    modeloId,
+    nome: inputComandoItemNome.value.trim(),
+    comando: inputComandoItemComando.value.trim(),
+  };
+  if (!payload.nome || !payload.comando) return;
+  try {
+    const url = comandosEditandoItemId ? `/api/comando-itens/${comandosEditandoItemId}` : "/api/comando-itens";
+    const method = comandosEditandoItemId ? "PUT" : "POST";
+    const r = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErro(data.error || "Falha ao salvar comando.");
+    resetFormComandoItem();
+    await carregarComandosItens();
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+});
+
+async function excluirComandoItem(id) {
+  if (!confirm("Excluir este comando?")) return;
+  const r = await fetch(`/api/comando-itens/${id}`, { method: "DELETE" });
+  const data = await parseJsonResponse(r);
+  if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
+  await carregarComandosItens();
+}
+
+function resetFormComandosModelo() {
+  formComandosModelo.reset();
+  formComandosModelo.classList.add("hidden");
+  comandosEditandoModeloId = null;
+}
+
+btnComandosNovoModelo.addEventListener("click", () => {
+  formComandosModelo.reset();
+  comandosEditandoModeloId = null;
+  formComandosModelo.classList.remove("hidden");
+  inputComandosModeloNome.focus();
+});
+
+btnComandosRenomearModelo.addEventListener("click", () => {
+  const modelo = comandosModelosCache.find((m) => m.id === comandosSelectModelo.value);
+  if (!modelo) return;
+  inputComandosModeloNome.value = modelo.nome;
+  comandosEditandoModeloId = modelo.id;
+  formComandosModelo.classList.remove("hidden");
+  inputComandosModeloNome.focus();
+});
+
+btnComandosModeloCancelar.addEventListener("click", resetFormComandosModelo);
+
+formComandosModelo.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const nome = inputComandosModeloNome.value.trim();
+  if (!nome) return;
+  try {
+    const url = comandosEditandoModeloId ? `/api/comando-modelos/${comandosEditandoModeloId}` : "/api/comando-modelos";
+    const method = comandosEditandoModeloId ? "PUT" : "POST";
+    const r = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErro(data.error || "Falha ao salvar modelo.");
+    const modeloId = data.modelo.id;
+    resetFormComandosModelo();
+    await carregarComandosModelos();
+    comandosSelectModelo.value = modeloId;
+    atualizarComandosBotoesModelo();
+    renderComandosLista();
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+});
+
+btnComandosExcluirModelo.addEventListener("click", async () => {
+  const modeloId = comandosSelectModelo.value;
+  const modelo = comandosModelosCache.find((m) => m.id === modeloId);
+  if (!modelo) return;
+  if (!confirm(`Excluir o modelo "${modelo.nome}" e todos os comandos cadastrados nele?`)) return;
+  const r = await fetch(`/api/comando-modelos/${modeloId}`, { method: "DELETE" });
+  const data = await parseJsonResponse(r);
+  if (!data.ok) return mostrarErro(data.error || "Falha ao excluir modelo.");
+  await carregarComandosModelos();
+  await carregarComandosItens();
+});
+
+comandosSelectModelo.addEventListener("change", () => {
+  atualizarComandosBotoesModelo();
+  resetFormComandoItem();
+  renderComandosLista();
+});
+
+el("botoes-ferramentas").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tipo='comandos']");
+  if (!btn) return;
+  overlayComandos.classList.remove("hidden");
+  resetFormComandosModelo();
+  resetFormComandoItem();
+  comandosSelectModelo.value = "";
+  atualizarComandosBotoesModelo();
+  renderComandosLista();
+  carregarComandosModelos();
+  carregarComandosItens();
+});
+
+el("comandos-modal-fechar").addEventListener("click", () => overlayComandos.classList.add("hidden"));
+
 atualizarStatus();

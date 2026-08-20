@@ -434,6 +434,12 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 .form-credencial-botoes { display: flex; gap: 8px; }
 .form-credencial-botoes .btn-primary { width: auto; margin-top: 0; }
 
+.comandos-modelo-linha { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-bottom: 14px; }
+.comandos-modelo-select { flex: 1; min-width: 220px; }
+.comandos-modelo-linha button { width: auto; white-space: nowrap; }
+.comandos-modelo-form { margin-bottom: 16px; }
+.comando-item-valor { font-family: monospace; }
+
 .tela-acesso {
   min-height: 100vh;
   display: flex;
