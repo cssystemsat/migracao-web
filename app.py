@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.5"
+APP_VERSION = "2.6"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -378,8 +378,8 @@ LISTAGENS = {
     "veiculos": dict(
         endpoint="/Administration/Vehicle/List",
         payload=None,
-        headers=["CLIENTE", "PLACA", "COD"],
-        campos=["ClientTrading", "Identification", "VehicleIntegrationCode"],
+        headers=["CLIENTE", "IDENTIFICAÇÃO", "ID DO RASTREADOR", "MODELO DO RASTREADOR", "TELEFONE DO CHIP"],
+        campos=["ClientTradingName", "Identification", "IdTracker", "IdModelTracker", "PhoneNumber"],
     ),
     "rastreadores": dict(
         endpoint="/Administration/Tracker/List",
