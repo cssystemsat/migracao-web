@@ -434,6 +434,22 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 .form-credencial-botoes { display: flex; gap: 8px; }
 .form-credencial-botoes .btn-primary { width: auto; margin-top: 0; }
 
+.usuario-admin-linha { flex: none; }
+.usuario-admin-linha input { flex: none; min-width: 0; width: 16px; height: 16px; padding: 0; border: none; }
+
+.topbar-direita { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.app-usuario-info { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--cinza-700); }
+.app-usuario-nome { font-weight: 600; }
+.btn-sair-app {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+
 .comandos-modelo-linha { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-bottom: 14px; }
 .comandos-modelo-select { flex: 1; min-width: 220px; }
 .comandos-modelo-linha button { width: auto; white-space: nowrap; }

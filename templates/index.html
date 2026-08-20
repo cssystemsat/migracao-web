@@ -9,17 +9,27 @@
 <body>
   <header class="topbar">
     <h1>Migração <span>{{ app_version }}</span></h1>
-    <form id="form-login" class="login-form">
-      <select id="select-credencial" class="select-credencial">
-        <option value="">Cliente salvo...</option>
-      </select>
-      <input type="text" id="login" name="login" placeholder="Login" autocomplete="username" required>
-      <input type="password" id="senha" name="senha" placeholder="Senha" autocomplete="current-password" required>
-      <button type="submit" id="btn-autenticar">Autenticar</button>
-      <button type="button" id="btn-logout" class="btn-secondary hidden">Sair</button>
-      <button type="button" id="btn-gerenciar-logins" class="btn-secondary">Gerenciar logins</button>
-      <span id="status-auth" class="status-pill status-off">Não autenticado</span>
-    </form>
+    <div class="topbar-direita">
+      <form id="form-login" class="login-form">
+        <select id="select-credencial" class="select-credencial">
+          <option value="">Cliente salvo...</option>
+        </select>
+        <input type="text" id="login" name="login" placeholder="Login" autocomplete="username" required>
+        <input type="password" id="senha" name="senha" placeholder="Senha" autocomplete="current-password" required>
+        <button type="submit" id="btn-autenticar">Autenticar</button>
+        <button type="button" id="btn-logout" class="btn-secondary hidden">Sair</button>
+        <button type="button" id="btn-gerenciar-logins" class="btn-secondary">Gerenciar logins</button>
+        <span id="status-auth" class="status-pill status-off">Não autenticado</span>
+      </form>
+      <div class="app-usuario-info">
+        <span class="app-usuario-nome">{{ app_usuario }}</span>
+        {% if app_usuario_admin %}
+          <button type="button" id="btn-gerenciar-usuarios" class="btn-secondary">Gerenciar usuários</button>
+        {% endif %}
+        <button type="button" id="btn-minha-senha" class="btn-secondary">Minha senha</button>
+        <a href="{{ url_for('logout_app') }}" class="btn-secondary btn-sair-app">Sair da ferramenta</a>
+      </div>
+    </div>
   </header>
 
   <main class="layout">
@@ -175,6 +185,51 @@
             <button type="button" id="btn-cancelar-edicao-credencial" class="btn-secondary hidden">Cancelar edição</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-usuarios" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Gerenciar usuários</h3>
+        <button id="usuarios-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div id="lista-usuarios" class="lista-credenciais"></div>
+
+        <h4 class="form-credencial-titulo" id="usuario-form-titulo">Adicionar usuário</h4>
+        <form id="form-novo-usuario" class="form-credencial">
+          <input type="text" id="usuario-nome" placeholder="Usuário" required>
+          <input type="password" id="usuario-senha" placeholder="Senha (deixe em branco pra manter, ao editar)">
+          <label class="checkbox-linha usuario-admin-linha">
+            <input type="checkbox" id="usuario-admin">
+            Administrador
+          </label>
+          <div class="form-credencial-botoes">
+            <button type="submit" id="btn-salvar-usuario" class="btn-primary">Adicionar</button>
+            <button type="button" id="btn-cancelar-edicao-usuario" class="btn-secondary hidden">Cancelar edição</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-minha-senha" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Minha senha</h3>
+        <button id="minha-senha-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-minha-senha" class="form-credencial">
+          <input type="password" id="minha-senha-atual" placeholder="Senha atual" required>
+          <input type="password" id="minha-senha-nova" placeholder="Nova senha" required>
+          <div class="form-credencial-botoes">
+            <button type="submit" id="btn-salvar-minha-senha" class="btn-primary">Salvar</button>
+          </div>
+        </form>
+        <p id="minha-senha-msg" class="placeholder"></p>
       </div>
     </div>
   </div>

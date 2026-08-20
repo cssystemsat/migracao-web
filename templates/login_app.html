@@ -10,10 +10,18 @@
   <div class="tela-acesso">
     <form method="post" class="cartao-acesso">
       <h1>Migração <span>{{ app_version }}</span></h1>
-      <p class="acesso-subtitulo">Acesso restrito</p>
+      {% if modo_setup %}
+        <p class="acesso-subtitulo">Primeiro acesso — crie o usuário administrador</p>
+      {% else %}
+        <p class="acesso-subtitulo">Acesso restrito</p>
+      {% endif %}
       {% if erro %}<p class="acesso-erro">{{ erro }}</p>{% endif %}
-      <input type="password" name="senha" placeholder="Senha de acesso" autofocus required>
-      <button type="submit" class="btn-primary">Entrar</button>
+      <input type="text" name="usuario" placeholder="Usuário" autocomplete="username" autofocus required>
+      <input type="password" name="senha" placeholder="Senha" autocomplete="{{ 'new-password' if modo_setup else 'current-password' }}" required>
+      {% if modo_setup %}
+        <input type="password" name="confirmar_senha" placeholder="Confirmar senha" autocomplete="new-password" required>
+      {% endif %}
+      <button type="submit" class="btn-primary">{{ 'Criar usuário e entrar' if modo_setup else 'Entrar' }}</button>
     </form>
   </div>
 </body>

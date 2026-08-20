@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import hmac
 import io
 import json
 import os
@@ -15,6 +14,7 @@ import requests
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import conversorkml
 
@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -41,17 +41,54 @@ firebase_admin.initialize_app(_firebase_cred)
 db = firestore.client()
 CREDENCIAIS_COLLECTION = "credenciais"
 
-# Senha de acesso ao PRÓPRIO app (protege a ferramenta quando publicada na internet).
-# Só é exigida se a variável de ambiente APP_ACCESS_PASSWORD estiver definida;
-# em uso local (sem a variável) o app funciona normalmente, sem tela de login extra.
-APP_ACCESS_PASSWORD = os.environ.get("APP_ACCESS_PASSWORD")
+# --- CONTAS DE ACESSO À PRÓPRIA FERRAMENTA (protege o app quando publicado na internet) ---
+# Guardadas no Firestore (coleção "app_usuarios"); cada uma tem usuário, hash de senha
+# (nunca a senha em texto puro) e uma flag admin (só admins gerenciam outros usuários).
+# Sem nenhum usuário cadastrado ainda, a tela de login vira um assistente de primeiro
+# acesso que cria o usuário administrador inicial.
+APP_USUARIOS_COLLECTION = "app_usuarios"
+
+
+def _sem_usuarios_cadastrados():
+    return len(list(db.collection(APP_USUARIOS_COLLECTION).limit(1).stream())) == 0
+
+
+def _buscar_usuario_app(usuario):
+    usuario_norm = usuario.strip().lower()
+    docs = db.collection(APP_USUARIOS_COLLECTION).where(
+        filter=FieldFilter("usuario_norm", "==", usuario_norm)
+    ).limit(1).stream()
+    for d in docs:
+        return dict(d.to_dict(), id=d.id)
+    return None
+
+
+def _criar_usuario_app(usuario, senha, admin=False):
+    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document()
+    dados = {
+        "usuario": usuario,
+        "usuario_norm": usuario.strip().lower(),
+        "senha_hash": generate_password_hash(senha),
+        "admin": admin,
+    }
+    doc_ref.set(dados)
+    return dict(dados, id=doc_ref.id)
+
+
+def _sessao_login_app(usuario_doc):
+    session["app_ok"] = True
+    session["app_usuario_id"] = usuario_doc["id"]
+    session["app_usuario_nome"] = usuario_doc["usuario"]
+    session["app_usuario_admin"] = bool(usuario_doc.get("admin"))
+
+
+def _sou_admin():
+    return session.get("app_usuario_admin") is True
 
 
 @app.before_request
-def exigir_senha_app():
-    if not APP_ACCESS_PASSWORD:
-        return
-    if request.endpoint in ("login_app", "static"):
+def exigir_login_app():
+    if request.endpoint in ("login_app", "logout_app", "static"):
         return
     if not session.get("app_ok"):
         return redirect(url_for("login_app"))
@@ -59,14 +96,154 @@ def exigir_senha_app():
 
 @app.route("/login-app", methods=["GET", "POST"])
 def login_app():
+    modo_setup = _sem_usuarios_cadastrados()
     erro = None
     if request.method == "POST":
+        usuario = request.form.get("usuario", "").strip()
         senha = request.form.get("senha", "")
-        if APP_ACCESS_PASSWORD and hmac.compare_digest(senha, APP_ACCESS_PASSWORD):
-            session["app_ok"] = True
-            return redirect(url_for("index"))
-        erro = "Senha incorreta."
-    return render_template("login_app.html", erro=erro, app_version=APP_VERSION)
+
+        if modo_setup:
+            confirmar = request.form.get("confirmar_senha", "")
+            if not usuario or not senha:
+                erro = "Informe usuário e senha."
+            elif senha != confirmar:
+                erro = "As senhas não conferem."
+            elif len(senha) < 4:
+                erro = "A senha deve ter pelo menos 4 caracteres."
+            else:
+                novo = _criar_usuario_app(usuario, senha, admin=True)
+                _sessao_login_app(novo)
+                return redirect(url_for("index"))
+        else:
+            doc = _buscar_usuario_app(usuario) if usuario else None
+            if doc and check_password_hash(doc["senha_hash"], senha):
+                _sessao_login_app(doc)
+                return redirect(url_for("index"))
+            erro = "Usuário ou senha incorretos."
+
+    return render_template("login_app.html", erro=erro, app_version=APP_VERSION, modo_setup=modo_setup)
+
+
+@app.route("/logout-app")
+def logout_app():
+    session.pop("app_ok", None)
+    session.pop("app_usuario_id", None)
+    session.pop("app_usuario_nome", None)
+    session.pop("app_usuario_admin", None)
+    return redirect(url_for("login_app"))
+
+
+@app.route("/api/app-usuarios", methods=["GET"])
+def listar_app_usuarios():
+    if not _sou_admin():
+        return jsonify(ok=False, error="Apenas administradores podem gerenciar usuários."), 403
+    docs = db.collection(APP_USUARIOS_COLLECTION).stream()
+    lista = [{"id": d.id, "usuario": d.to_dict().get("usuario"), "admin": bool(d.to_dict().get("admin"))} for d in docs]
+    return jsonify(ok=True, usuarios=lista)
+
+
+@app.route("/api/app-usuarios", methods=["POST"])
+def criar_app_usuario():
+    if not _sou_admin():
+        return jsonify(ok=False, error="Apenas administradores podem gerenciar usuários."), 403
+    data = request.get_json(force=True) or {}
+    usuario = str(data.get("usuario", "")).strip()
+    senha = str(data.get("senha", ""))
+    admin = bool(data.get("admin"))
+    if not usuario or not senha:
+        return jsonify(ok=False, error="Informe usuário e senha."), 400
+    if len(senha) < 4:
+        return jsonify(ok=False, error="A senha deve ter pelo menos 4 caracteres."), 400
+    if _buscar_usuario_app(usuario):
+        return jsonify(ok=False, error="Já existe um usuário com esse nome."), 400
+    novo = _criar_usuario_app(usuario, senha, admin)
+    return jsonify(ok=True, usuario=dict(id=novo["id"], usuario=novo["usuario"], admin=novo["admin"]))
+
+
+@app.route("/api/app-usuarios/<usuario_id>", methods=["PUT"])
+def editar_app_usuario(usuario_id):
+    if not _sou_admin():
+        return jsonify(ok=False, error="Apenas administradores podem gerenciar usuários."), 403
+    data = request.get_json(force=True) or {}
+    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return jsonify(ok=False, error="Usuário não encontrado."), 404
+
+    atual = doc.to_dict()
+    novo_nome = str(data.get("usuario", atual["usuario"])).strip()
+    nova_senha = str(data.get("senha", "")).strip()
+    novo_admin = bool(data.get("admin", atual.get("admin")))
+
+    if not novo_nome:
+        return jsonify(ok=False, error="Informe o nome do usuário."), 400
+
+    outro = _buscar_usuario_app(novo_nome)
+    if outro and outro["id"] != usuario_id:
+        return jsonify(ok=False, error="Já existe um usuário com esse nome."), 400
+
+    # Não deixa remover o último administrador (senão ninguém mais gerencia usuários).
+    if atual.get("admin") and not novo_admin:
+        outros_admins = db.collection(APP_USUARIOS_COLLECTION).where(filter=FieldFilter("admin", "==", True)).stream()
+        if sum(1 for a in outros_admins if a.id != usuario_id) == 0:
+            return jsonify(ok=False, error="Precisa existir pelo menos um administrador."), 400
+
+    dados = {
+        "usuario": novo_nome,
+        "usuario_norm": novo_nome.lower(),
+        "admin": novo_admin,
+        "senha_hash": atual["senha_hash"],
+    }
+    if nova_senha:
+        if len(nova_senha) < 4:
+            return jsonify(ok=False, error="A senha deve ter pelo menos 4 caracteres."), 400
+        dados["senha_hash"] = generate_password_hash(nova_senha)
+
+    doc_ref.set(dados)
+
+    if usuario_id == session.get("app_usuario_id"):
+        session["app_usuario_nome"] = novo_nome
+        session["app_usuario_admin"] = novo_admin
+
+    return jsonify(ok=True, usuario=dict(id=usuario_id, usuario=novo_nome, admin=novo_admin))
+
+
+@app.route("/api/app-usuarios/<usuario_id>", methods=["DELETE"])
+def excluir_app_usuario(usuario_id):
+    if not _sou_admin():
+        return jsonify(ok=False, error="Apenas administradores podem gerenciar usuários."), 403
+    if usuario_id == session.get("app_usuario_id"):
+        return jsonify(ok=False, error="Você não pode excluir o próprio usuário enquanto está logado."), 400
+    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return jsonify(ok=False, error="Usuário não encontrado."), 404
+    if doc.to_dict().get("admin"):
+        outros_admins = db.collection(APP_USUARIOS_COLLECTION).where(filter=FieldFilter("admin", "==", True)).stream()
+        if sum(1 for a in outros_admins if a.id != usuario_id) == 0:
+            return jsonify(ok=False, error="Precisa existir pelo menos um administrador."), 400
+    doc_ref.delete()
+    return jsonify(ok=True)
+
+
+@app.route("/api/app-usuario/senha", methods=["POST"])
+def trocar_minha_senha_app():
+    usuario_id = session.get("app_usuario_id")
+    if not usuario_id:
+        return jsonify(ok=False, error="Não autenticado."), 401
+    data = request.get_json(force=True) or {}
+    senha_atual = str(data.get("senha_atual", ""))
+    senha_nova = str(data.get("senha_nova", ""))
+    if len(senha_nova) < 4:
+        return jsonify(ok=False, error="A nova senha deve ter pelo menos 4 caracteres."), 400
+    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return jsonify(ok=False, error="Usuário não encontrado."), 404
+    if not check_password_hash(doc.to_dict()["senha_hash"], senha_atual):
+        return jsonify(ok=False, error="Senha atual incorreta."), 400
+    doc_ref.update({"senha_hash": generate_password_hash(senha_nova)})
+    return jsonify(ok=True)
 
 # --- DEFINIÇÃO DE TIPOS CONFORME DOCUMENTAÇÃO SSX ---
 # Comparado pelo caminho COMPLETO do parâmetro (com dot notation), não só pelo nome
@@ -281,7 +458,12 @@ def requisicao_padrao(endpoint, payload, token):
 
 @app.route("/")
 def index():
-    return render_template("index.html", app_version=APP_VERSION)
+    return render_template(
+        "index.html",
+        app_version=APP_VERSION,
+        app_usuario=session.get("app_usuario_nome"),
+        app_usuario_admin=session.get("app_usuario_admin", False),
+    )
 
 
 @app.route("/api/status")

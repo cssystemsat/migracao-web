@@ -2261,4 +2261,190 @@ el("botoes-ferramentas").addEventListener("click", (e) => {
 
 el("comandos-modal-fechar").addEventListener("click", () => overlayComandos.classList.add("hidden"));
 
+// --- USUÁRIOS DA FERRAMENTA (login próprio do app, não confundir com "Logins salvos" da SSX) ---
+const overlayUsuarios = el("overlay-usuarios");
+const listaUsuarios = el("lista-usuarios");
+const formNovoUsuario = el("form-novo-usuario");
+const inputUsuarioNome = el("usuario-nome");
+const inputUsuarioSenha = el("usuario-senha");
+const inputUsuarioAdmin = el("usuario-admin");
+const btnSalvarUsuario = el("btn-salvar-usuario");
+const btnCancelarEdicaoUsuario = el("btn-cancelar-edicao-usuario");
+const usuarioFormTitulo = el("usuario-form-titulo");
+const btnGerenciarUsuarios = el("btn-gerenciar-usuarios");
+
+let usuariosCache = [];
+let editandoUsuarioId = null;
+
+async function carregarAppUsuarios() {
+  const r = await fetch("/api/app-usuarios");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) return mostrarErro(data.error || "Falha ao carregar usuários.");
+  usuariosCache = data.usuarios || [];
+  renderListaUsuarios();
+}
+
+function renderListaUsuarios() {
+  listaUsuarios.innerHTML = "";
+  if (usuariosCache.length === 0) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhum usuário cadastrado ainda.";
+    listaUsuarios.appendChild(p);
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "tabela-credenciais";
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th>Usuário</th><th>Admin</th><th></th></tr>";
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  usuariosCache
+    .slice()
+    .sort((a, b) => a.usuario.localeCompare(b.usuario, "pt-BR"))
+    .forEach((u) => {
+      const tr = document.createElement("tr");
+
+      const tdNome = document.createElement("td");
+      tdNome.textContent = u.usuario;
+
+      const tdAdmin = document.createElement("td");
+      tdAdmin.textContent = u.admin ? "Sim" : "Não";
+
+      const tdAcoes = document.createElement("td");
+      tdAcoes.className = "acoes-credencial";
+
+      const btnEditar = document.createElement("button");
+      btnEditar.textContent = "Editar";
+      btnEditar.className = "btn-secondary";
+      btnEditar.addEventListener("click", () => abrirEdicaoUsuario(u));
+
+      const btnExcluir = document.createElement("button");
+      btnExcluir.textContent = "Excluir";
+      btnExcluir.className = "btn-secondary";
+      btnExcluir.addEventListener("click", () => excluirAppUsuario(u.id));
+
+      tdAcoes.appendChild(btnEditar);
+      tdAcoes.appendChild(btnExcluir);
+
+      tr.appendChild(tdNome);
+      tr.appendChild(tdAdmin);
+      tr.appendChild(tdAcoes);
+      tbody.appendChild(tr);
+    });
+  table.appendChild(tbody);
+  listaUsuarios.appendChild(table);
+}
+
+function resetFormUsuario() {
+  formNovoUsuario.reset();
+  editandoUsuarioId = null;
+  inputUsuarioSenha.placeholder = "Senha";
+  inputUsuarioSenha.required = true;
+  btnSalvarUsuario.textContent = "Adicionar";
+  btnCancelarEdicaoUsuario.classList.add("hidden");
+  usuarioFormTitulo.textContent = "Adicionar usuário";
+}
+
+function abrirEdicaoUsuario(u) {
+  inputUsuarioNome.value = u.usuario;
+  inputUsuarioSenha.value = "";
+  inputUsuarioSenha.placeholder = "Senha (deixe em branco pra manter)";
+  inputUsuarioSenha.required = false;
+  inputUsuarioAdmin.checked = !!u.admin;
+  editandoUsuarioId = u.id;
+  btnSalvarUsuario.textContent = "Salvar edição";
+  btnCancelarEdicaoUsuario.classList.remove("hidden");
+  usuarioFormTitulo.textContent = "Editar usuário";
+  inputUsuarioNome.focus();
+}
+
+btnCancelarEdicaoUsuario.addEventListener("click", resetFormUsuario);
+
+formNovoUsuario.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const payload = {
+    usuario: inputUsuarioNome.value.trim(),
+    senha: inputUsuarioSenha.value,
+    admin: inputUsuarioAdmin.checked,
+  };
+  if (!payload.usuario) return;
+  if (!editandoUsuarioId && !payload.senha) return;
+  try {
+    const url = editandoUsuarioId ? `/api/app-usuarios/${editandoUsuarioId}` : "/api/app-usuarios";
+    const method = editandoUsuarioId ? "PUT" : "POST";
+    const r = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErro(data.error || "Falha ao salvar usuário.");
+    resetFormUsuario();
+    await carregarAppUsuarios();
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+});
+
+async function excluirAppUsuario(id) {
+  if (!confirm("Excluir este usuário?")) return;
+  const r = await fetch(`/api/app-usuarios/${id}`, { method: "DELETE" });
+  const data = await parseJsonResponse(r);
+  if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
+  await carregarAppUsuarios();
+}
+
+if (btnGerenciarUsuarios) {
+  btnGerenciarUsuarios.addEventListener("click", () => {
+    resetFormUsuario();
+    overlayUsuarios.classList.remove("hidden");
+    carregarAppUsuarios();
+  });
+}
+el("usuarios-fechar").addEventListener("click", () => overlayUsuarios.classList.add("hidden"));
+
+// --- MINHA SENHA (troca a própria senha de acesso à ferramenta) ---
+const overlayMinhaSenha = el("overlay-minha-senha");
+const formMinhaSenha = el("form-minha-senha");
+const inputMinhaSenhaAtual = el("minha-senha-atual");
+const inputMinhaSenhaNova = el("minha-senha-nova");
+const minhaSenhaMsg = el("minha-senha-msg");
+
+el("btn-minha-senha").addEventListener("click", () => {
+  formMinhaSenha.reset();
+  minhaSenhaMsg.textContent = "";
+  overlayMinhaSenha.classList.remove("hidden");
+});
+el("minha-senha-fechar").addEventListener("click", () => overlayMinhaSenha.classList.add("hidden"));
+
+formMinhaSenha.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  minhaSenhaMsg.textContent = "";
+  try {
+    const r = await fetch("/api/app-usuario/senha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        senha_atual: inputMinhaSenhaAtual.value,
+        senha_nova: inputMinhaSenhaNova.value,
+      }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      minhaSenhaMsg.textContent = data.error || "Falha ao trocar senha.";
+      minhaSenhaMsg.style.color = "#b91c1c";
+      return;
+    }
+    formMinhaSenha.reset();
+    minhaSenhaMsg.textContent = "Senha alterada com sucesso.";
+    minhaSenhaMsg.style.color = "";
+  } catch (err) {
+    minhaSenhaMsg.textContent = String(err);
+    minhaSenhaMsg.style.color = "#b91c1c";
+  }
+});
+
 atualizarStatus();
