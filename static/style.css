@@ -175,6 +175,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .saida-panel { min-height: 60vh; display: flex; flex-direction: column; }
 .saida-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .saida-header h2 { margin: 0; font-size: 1rem; }
+.saida-header-botoes { display: flex; gap: 8px; }
 
 .saida-corpo {
   flex: 1;

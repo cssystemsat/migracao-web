@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -880,6 +880,32 @@ def listar(tipo):
         return jsonify(ok=False, error=f"Falha na consulta: {e}"), 400
     rows = [[item.get(c) for c in config["campos"]] for item in (data or [])]
     return jsonify(ok=True, headers=config["headers"], rows=rows)
+
+
+# Exportação genérica: recebe o headers/rows já carregado em tela (qualquer uma
+# das Consultas/Listagens) e devolve como planilha, sem precisar consultar a SSX de novo.
+@app.route("/api/exportar-excel", methods=["POST"])
+def exportar_excel():
+    data = request.get_json(force=True) or {}
+    headers = data.get("headers") or []
+    rows = data.get("rows") or []
+    nome = "".join(c for c in str(data.get("nome") or "") if c.isalnum() or c in "_-") or "exportacao"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(headers)
+    for row in rows:
+        ws.append(row)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}.xlsx"'},
+    )
 
 
 @app.route("/api/import/params/<tipo>")

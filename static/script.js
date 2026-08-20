@@ -30,6 +30,7 @@ const blocoCriarPlanilha = el("bloco-criar-planilha");
 const chkCriarPlanilha = el("chk-criar-planilha");
 const inputNomePlanilha = el("input-nome-planilha");
 const selectClientePlanilhaExistente = el("select-cliente-planilha-existente");
+const btnExportarExcel = el("btn-exportar-excel");
 
 document.querySelectorAll(".menu-cabecalho").forEach((cabecalho) => {
   cabecalho.addEventListener("click", () => {
@@ -46,11 +47,14 @@ const estado = {
   credencialAtualNome: null,
   conversorArquivo: null,
   conversorCor: null,
+  ultimaConsulta: null,
 };
 
 function setSaida(node) {
   saida.innerHTML = "";
   saida.appendChild(node);
+  estado.ultimaConsulta = null;
+  btnExportarExcel.classList.add("hidden");
 }
 
 function mostrarPlaceholder(msg) {
@@ -68,7 +72,7 @@ function mostrarErro(msg) {
   setSaida(p);
 }
 
-function mostrarTabela(headers, rows) {
+function mostrarTabela(headers, rows, tipoExport) {
   const table = document.createElement("table");
   table.className = "tabela-saida";
   const thead = document.createElement("thead");
@@ -102,7 +106,38 @@ function mostrarTabela(headers, rows) {
   });
   table.appendChild(tbody);
   setSaida(table);
+
+  if (tipoExport) {
+    estado.ultimaConsulta = { tipo: tipoExport, headers, rows };
+    btnExportarExcel.classList.remove("hidden");
+  }
 }
+
+btnExportarExcel.addEventListener("click", async () => {
+  if (!estado.ultimaConsulta) return;
+  btnExportarExcel.disabled = true;
+  try {
+    const r = await fetch("/api/exportar-excel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(estado.ultimaConsulta),
+    });
+    if (!r.ok) throw new Error("Falha ao gerar a planilha.");
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${estado.ultimaConsulta.tipo}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert(`Erro ao exportar: ${String(err)}`);
+  } finally {
+    btnExportarExcel.disabled = false;
+  }
+});
 
 async function atualizarStatus() {
   const r = await fetch("/api/status");
@@ -361,7 +396,7 @@ el("botoes-consultas").addEventListener("click", async (e) => {
     const r = await fetch(`/api/list/${tipo}`);
     const data = await parseJsonResponse(r);
     if (data.ok) {
-      mostrarTabela(data.headers, data.rows);
+      mostrarTabela(data.headers, data.rows, tipo);
     } else {
       mostrarErro(data.error || "Falha na consulta.");
     }
