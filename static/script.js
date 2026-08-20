@@ -2397,8 +2397,23 @@ async function excluirAppUsuario(id) {
   await carregarAppUsuarios();
 }
 
+// --- MENU DA ENGRENAGEM (perfil / usuários) ---
+const btnAppMenu = el("btn-app-menu");
+const appMenuDropdown = el("app-menu-dropdown");
+
+btnAppMenu.addEventListener("click", (e) => {
+  e.stopPropagation();
+  appMenuDropdown.classList.toggle("hidden");
+});
+document.addEventListener("click", (e) => {
+  if (!appMenuDropdown.classList.contains("hidden") && !appMenuDropdown.contains(e.target)) {
+    appMenuDropdown.classList.add("hidden");
+  }
+});
+
 if (btnGerenciarUsuarios) {
   btnGerenciarUsuarios.addEventListener("click", () => {
+    appMenuDropdown.classList.add("hidden");
     resetFormUsuario();
     overlayUsuarios.classList.remove("hidden");
     carregarAppUsuarios();
@@ -2414,6 +2429,7 @@ const inputMinhaSenhaNova = el("minha-senha-nova");
 const minhaSenhaMsg = el("minha-senha-msg");
 
 el("btn-minha-senha").addEventListener("click", () => {
+  appMenuDropdown.classList.add("hidden");
   formMinhaSenha.reset();
   minhaSenhaMsg.textContent = "";
   overlayMinhaSenha.classList.remove("hidden");

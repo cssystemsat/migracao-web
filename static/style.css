@@ -438,17 +438,68 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 .usuario-admin-linha input { flex: none; min-width: 0; width: 16px; height: 16px; padding: 0; border: none; }
 
 .topbar-direita { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.app-usuario-info { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--cinza-700); }
 .app-usuario-nome { font-weight: 600; }
-.btn-sair-app {
-  display: inline-flex;
+
+.app-usuario-menu { position: relative; }
+.btn-engrenagem-usuario {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--cinza-100);
+  color: var(--cinza-700);
+  font-size: 1.05rem;
+  display: flex;
   align-items: center;
+  justify-content: center;
+}
+.btn-engrenagem-usuario:hover { background: var(--cinza-200); }
+
+.app-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: var(--branco);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  z-index: 60;
+}
+.app-menu-usuario {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--cinza-200);
+  font-size: 0.85rem;
+}
+.app-usuario-badge {
+  background: var(--azul);
+  color: var(--branco);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.app-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--cinza-700);
+  font-size: 0.85rem;
   text-decoration: none;
   cursor: pointer;
-  border-radius: var(--radius);
-  padding: 8px 14px;
-  font-size: 0.9rem;
 }
+.app-menu-item:hover { background: var(--cinza-100); }
+.app-menu-sair { color: var(--vermelho); border-top: 1px solid var(--cinza-200); }
 
 .comandos-modelo-linha { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-bottom: 14px; }
 .comandos-modelo-select { flex: 1; min-width: 220px; }

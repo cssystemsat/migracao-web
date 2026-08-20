@@ -21,13 +21,19 @@
         <button type="button" id="btn-gerenciar-logins" class="btn-secondary">Gerenciar logins</button>
         <span id="status-auth" class="status-pill status-off">Não autenticado</span>
       </form>
-      <div class="app-usuario-info">
-        <span class="app-usuario-nome">{{ app_usuario }}</span>
-        {% if app_usuario_admin %}
-          <button type="button" id="btn-gerenciar-usuarios" class="btn-secondary">Gerenciar usuários</button>
-        {% endif %}
-        <button type="button" id="btn-minha-senha" class="btn-secondary">Minha senha</button>
-        <a href="{{ url_for('logout_app') }}" class="btn-secondary btn-sair-app">Sair da ferramenta</a>
+      <div class="app-usuario-menu">
+        <button type="button" id="btn-app-menu" class="btn-engrenagem-usuario" title="Perfil e configurações">⚙️</button>
+        <div id="app-menu-dropdown" class="app-menu-dropdown hidden">
+          <div class="app-menu-usuario">
+            <span class="app-usuario-nome">{{ app_usuario }}</span>
+            {% if app_usuario_admin %}<span class="app-usuario-badge">Admin</span>{% endif %}
+          </div>
+          <button type="button" id="btn-minha-senha" class="app-menu-item">Minha senha</button>
+          {% if app_usuario_admin %}
+            <button type="button" id="btn-gerenciar-usuarios" class="app-menu-item">Gerenciar usuários</button>
+          {% endif %}
+          <a href="{{ url_for('logout_app') }}" class="app-menu-item app-menu-sair">Sair da ferramenta</a>
+        </div>
       </div>
     </div>
   </header>
