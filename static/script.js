@@ -548,6 +548,171 @@ function renderDashboard(data) {
   setSaida(wrapper);
 }
 
+// --- CLIENTES EM IMPLANTAÇÃO ---
+const overlayImplantacaoCliente = el("overlay-implantacao-cliente");
+const formImplantacaoCliente = el("form-implantacao-cliente");
+const implantacaoClienteModalTitulo = el("implantacao-cliente-modal-titulo");
+const inputImplantacaoClienteNome = el("implantacao-cliente-nome");
+const inputImplantacaoClienteData = el("implantacao-cliente-data");
+const inputImplantacaoClienteObjetivo = el("implantacao-cliente-objetivo");
+const inputImplantacaoClienteValor = el("implantacao-cliente-valor");
+const inputImplantacaoClienteCsm = el("implantacao-cliente-csm");
+const btnSalvarImplantacaoCliente = el("btn-salvar-implantacao-cliente");
+
+let implantacaoClienteEditandoId = null;
+
+el("botoes-implantacao").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tipo='implantacao-clientes']");
+  if (!btn) return;
+  carregarImplantacaoClientes();
+});
+
+async function carregarImplantacaoClientes() {
+  mostrarPlaceholder("Carregando clientes em implantação...");
+  try {
+    const r = await fetch("/api/implantacao/clientes");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErro(data.error || "Falha ao carregar.");
+    mostrarTabelaImplantacaoClientes(data.clientes);
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+}
+
+function formatarMoedaBRL(valor) {
+  return (Number(valor) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function formatarDataBRSimples(iso) {
+  const partes = String(iso || "").split("-");
+  if (partes.length !== 3) return null;
+  const [ano, mes, dia] = partes;
+  return `${dia}/${mes}/${ano}`;
+}
+
+function mostrarTabelaImplantacaoClientes(clientes) {
+  const wrapper = document.createElement("div");
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "migracao-toolbar";
+  const btnAdicionar = document.createElement("button");
+  btnAdicionar.className = "btn-primary";
+  btnAdicionar.textContent = "+ Adicionar cliente";
+  btnAdicionar.addEventListener("click", () => abrirModalImplantacaoCliente(null));
+  toolbar.appendChild(btnAdicionar);
+  wrapper.appendChild(toolbar);
+
+  const headers = ["Cliente", "Data de entrada", "Objetivo", "Valor de contrato", "CSM", ""];
+  const table = document.createElement("table");
+  table.className = "tabela-saida";
+
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  headers.forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  if (clientes.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = headers.length;
+    td.textContent = "Nenhum cliente em implantação ainda.";
+    td.style.color = "#6b7280";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+  clientes.forEach((c) => {
+    const tr = document.createElement("tr");
+    [c.cliente, formatarDataBRSimples(c.data_entrada), c.objetivo, formatarMoedaBRL(c.valor_contrato), c.csm].forEach((v) => {
+      const td = document.createElement("td");
+      td.textContent = v === null || v === undefined || v === "" ? "-" : String(v);
+      tr.appendChild(td);
+    });
+
+    const tdAcoes = document.createElement("td");
+    tdAcoes.className = "acoes-credencial";
+
+    const btnEditar = document.createElement("button");
+    btnEditar.className = "btn-engrenagem";
+    btnEditar.textContent = "⚙";
+    btnEditar.title = "Editar cliente";
+    btnEditar.addEventListener("click", () => abrirModalImplantacaoCliente(c));
+    tdAcoes.appendChild(btnEditar);
+
+    const btnExcluir = document.createElement("button");
+    btnExcluir.className = "btn-engrenagem btn-excluir";
+    btnExcluir.textContent = "🗑";
+    btnExcluir.title = "Excluir cliente";
+    btnExcluir.addEventListener("click", async () => {
+      if (!confirm(`Excluir o cliente "${c.cliente}" da implantação?`)) return;
+      try {
+        const r = await fetch(`/api/implantacao/clientes/${c.id}`, { method: "DELETE" });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
+        await carregarImplantacaoClientes();
+      } catch (err) {
+        mostrarErro(String(err));
+      }
+    });
+    tdAcoes.appendChild(btnExcluir);
+
+    tr.appendChild(tdAcoes);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrapper.appendChild(table);
+  setSaida(wrapper);
+}
+
+function abrirModalImplantacaoCliente(cliente) {
+  implantacaoClienteEditandoId = cliente ? cliente.id : null;
+  implantacaoClienteModalTitulo.textContent = cliente ? "Editar cliente" : "Adicionar cliente";
+  inputImplantacaoClienteNome.value = cliente ? cliente.cliente : "";
+  inputImplantacaoClienteData.value = cliente ? cliente.data_entrada || "" : "";
+  inputImplantacaoClienteObjetivo.value = cliente ? cliente.objetivo || "" : "";
+  inputImplantacaoClienteValor.value = cliente && cliente.valor_contrato ? cliente.valor_contrato : "";
+  inputImplantacaoClienteCsm.value = cliente ? cliente.csm || "" : "";
+  btnSalvarImplantacaoCliente.textContent = cliente ? "Salvar edição" : "Adicionar";
+  overlayImplantacaoCliente.classList.remove("hidden");
+  inputImplantacaoClienteNome.focus();
+}
+
+el("implantacao-cliente-modal-fechar").addEventListener("click", () => overlayImplantacaoCliente.classList.add("hidden"));
+
+formImplantacaoCliente.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const payload = {
+    cliente: inputImplantacaoClienteNome.value.trim(),
+    data_entrada: inputImplantacaoClienteData.value,
+    objetivo: inputImplantacaoClienteObjetivo.value.trim(),
+    valor_contrato: inputImplantacaoClienteValor.value,
+    csm: inputImplantacaoClienteCsm.value.trim(),
+  };
+  if (!payload.cliente) return;
+  try {
+    const url = implantacaoClienteEditandoId
+      ? `/api/implantacao/clientes/${implantacaoClienteEditandoId}`
+      : "/api/implantacao/clientes";
+    const method = implantacaoClienteEditandoId ? "PUT" : "POST";
+    const r = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
+    overlayImplantacaoCliente.classList.add("hidden");
+    await carregarImplantacaoClientes();
+  } catch (err) {
+    alert(`Erro ao salvar: ${String(err)}`);
+  }
+});
+
 // --- CLIENTES EM MIGRAÇÃO ---
 const overlayMigracao = el("overlay-migracao");
 const formMigracao = el("form-migracao");

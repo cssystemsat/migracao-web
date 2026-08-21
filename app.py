@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.8"
+APP_VERSION = "2.9"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -641,6 +641,69 @@ def excluir_comando_item(item_id):
     doc_ref = db.collection(COMANDO_ITENS_COLLECTION).document(item_id)
     if not doc_ref.get().exists:
         return jsonify(ok=False, error="Comando não encontrado."), 404
+    doc_ref.delete()
+    return jsonify(ok=True)
+
+
+# --- CLIENTES EM IMPLANTAÇÃO (menu "Implantação") ---
+# Cadastro simples e independente do resto do app: acompanha clientes que estão
+# entrando na base (data de entrada, objetivo, valor do contrato, CSM responsável).
+IMPLANTACAO_CLIENTES_COLLECTION = "implantacao_clientes"
+
+
+def _dados_implantacao_cliente(data):
+    cliente = str(data.get("cliente", "")).strip()
+    if not cliente:
+        return None
+    try:
+        valor_contrato = float(data.get("valor_contrato") or 0)
+    except (TypeError, ValueError):
+        valor_contrato = 0
+    return {
+        "cliente": cliente,
+        "data_entrada": str(data.get("data_entrada", "")).strip(),
+        "objetivo": str(data.get("objetivo", "")).strip(),
+        "valor_contrato": valor_contrato,
+        "csm": str(data.get("csm", "")).strip(),
+    }
+
+
+@app.route("/api/implantacao/clientes", methods=["GET"])
+def listar_implantacao_clientes():
+    docs = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).stream()
+    lista = [dict(d.to_dict(), id=d.id) for d in docs]
+    return jsonify(ok=True, clientes=lista)
+
+
+@app.route("/api/implantacao/clientes", methods=["POST"])
+def criar_implantacao_cliente():
+    data = request.get_json(force=True) or {}
+    dados = _dados_implantacao_cliente(data)
+    if dados is None:
+        return jsonify(ok=False, error="Informe o nome do cliente."), 400
+    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document()
+    doc_ref.set(dados)
+    return jsonify(ok=True, cliente=dict(dados, id=doc_ref.id))
+
+
+@app.route("/api/implantacao/clientes/<cliente_id>", methods=["PUT"])
+def editar_implantacao_cliente(cliente_id):
+    data = request.get_json(force=True) or {}
+    dados = _dados_implantacao_cliente(data)
+    if dados is None:
+        return jsonify(ok=False, error="Informe o nome do cliente."), 400
+    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    doc_ref.set(dados)
+    return jsonify(ok=True, cliente=dict(dados, id=cliente_id))
+
+
+@app.route("/api/implantacao/clientes/<cliente_id>", methods=["DELETE"])
+def excluir_implantacao_cliente(cliente_id):
+    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
     doc_ref.delete()
     return jsonify(ok=True)
 

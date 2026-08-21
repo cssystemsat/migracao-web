@@ -40,6 +40,19 @@
 
   <main class="layout">
     <section class="panel menu-lateral">
+      <div class="menu-grupo" data-grupo="implantacao">
+        <button type="button" class="menu-cabecalho titulo-implantacao">
+          <span>Implantação</span>
+          <span class="menu-seta">▾</span>
+        </button>
+        <div class="menu-conteudo">
+          <div class="botoes" id="botoes-implantacao">
+            <button data-tipo="implantacao-clientes">Clientes em implantação</button>
+            <button disabled title="Em desenvolvimento — aguardando especificação">Processos</button>
+          </div>
+        </div>
+      </div>
+
       <div class="menu-grupo" data-grupo="consultas">
         <button type="button" class="menu-cabecalho titulo-consultas">
           <span>Consultas / Listagens</span>
@@ -239,6 +252,40 @@
           </div>
         </form>
         <p id="minha-senha-msg" class="placeholder"></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-implantacao-cliente" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="implantacao-cliente-modal-titulo">Adicionar cliente</h3>
+        <button id="implantacao-cliente-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-implantacao-cliente" class="form-migracao">
+          <label class="campo-migracao">
+            <span>Cliente</span>
+            <input type="text" id="implantacao-cliente-nome" required>
+          </label>
+          <label class="campo-migracao">
+            <span>Data de entrada</span>
+            <input type="date" id="implantacao-cliente-data">
+          </label>
+          <label class="campo-migracao">
+            <span>Objetivo</span>
+            <input type="text" id="implantacao-cliente-objetivo">
+          </label>
+          <label class="campo-migracao">
+            <span>Valor de contrato</span>
+            <input type="number" id="implantacao-cliente-valor" min="0" step="0.01">
+          </label>
+          <label class="campo-migracao">
+            <span>CSM</span>
+            <input type="text" id="implantacao-cliente-csm">
+          </label>
+          <button type="submit" id="btn-salvar-implantacao-cliente" class="btn-primary">Adicionar</button>
+        </form>
       </div>
     </div>
   </div>

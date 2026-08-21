@@ -176,6 +176,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .botoes button { text-align: left; background: var(--cinza-100); color: var(--cinza-900); border: 1px solid var(--cinza-200); }
 .botoes button:hover:not(:disabled) { background: var(--cinza-200); }
 #botoes-consultas button:hover:not(:disabled) { background: #dbeafe; border-color: #bfdbfe; }
+#botoes-implantacao button:not(:disabled):hover { background: #ffedd5; border-color: #fed7aa; }
 #botoes-import button:not(:disabled):hover { background: #fee2e2; border-color: #fecaca; }
 #botoes-migracao button:not(:disabled):hover { background: #ede9fe; border-color: #ddd6fe; }
 #botoes-dashboard button:not(:disabled):hover { background: #ccfbf1; border-color: #99f6e4; }
