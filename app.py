@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.13"
+APP_VERSION = "2.14"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -701,9 +701,14 @@ def listar_implantacao_clientes():
         if ultimo:
             ev = ultimo[0].to_dict()
             cliente["ultima_acao"] = f"[{ev.get('setor')}] {ev.get('titulo')}"
+            cliente["ultima_acao_data"] = ev.get("data") or ""
         else:
             cliente["ultima_acao"] = ""
+            cliente["ultima_acao_data"] = ""
         lista.append(cliente)
+
+    # Mais recente primeiro; "" (sem eventos ainda) sempre por último.
+    lista.sort(key=lambda c: c["ultima_acao_data"], reverse=True)
     return jsonify(ok=True, clientes=lista)
 
 
