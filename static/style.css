@@ -585,7 +585,6 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .migracao-toolbar { margin-bottom: 12px; }
 .migracao-toolbar .btn-primary { width: auto; padding: 8px 16px; margin-top: 0; }
 
-.modal-timeline { max-width: 1600px; width: 95vw; max-height: 92vh; }
 
 .modal-implantacao-cliente { max-width: 860px; }
 .form-implantacao-cliente-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px; }
