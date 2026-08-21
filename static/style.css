@@ -585,6 +585,36 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .migracao-toolbar { margin-bottom: 12px; }
 .migracao-toolbar .btn-primary { width: auto; padding: 8px 16px; margin-top: 0; }
 
+.modal-timeline { max-width: 1300px; }
+
+.timeline-setor { border-bottom: 1px solid var(--cinza-200); padding: 14px 0; }
+.timeline-setor:last-child { border-bottom: none; }
+.timeline-setor-cabecalho { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.timeline-setor-nome { font-weight: 700; font-size: 0.95rem; }
+.timeline-setor-cabecalho button { width: auto; padding: 4px 12px; }
+.timeline-setor-vazio { color: var(--cinza-500); font-size: 0.82rem; margin: 0; }
+
+.timeline-setor[data-setor="Implantação"] .timeline-setor-nome { color: var(--amarelo-escuro); }
+.timeline-setor[data-setor="Migração"] .timeline-setor-nome { color: var(--violeta); }
+.timeline-setor[data-setor="Suporte"] .timeline-setor-nome { color: var(--turquesa); }
+.timeline-setor[data-setor="Comercial"] .timeline-setor-nome { color: var(--azul); }
+
+.timeline-setor-cards { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.timeline-card {
+  flex: 0 0 220px;
+  background: var(--cinza-100);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  position: relative;
+}
+.timeline-card-titulo { font-weight: 600; font-size: 0.85rem; margin: 0 60px 4px 0; }
+.timeline-card-data { font-size: 0.72rem; color: var(--cinza-500); margin-bottom: 6px; }
+.timeline-card-descricao { font-size: 0.78rem; color: var(--cinza-700); white-space: pre-wrap; margin-bottom: 8px; }
+.timeline-card-responsavel { font-size: 0.72rem; color: var(--cinza-500); font-style: italic; }
+.timeline-card-acoes { display: flex; gap: 4px; position: absolute; top: 8px; right: 8px; }
+.timeline-card-acoes button { width: auto; padding: 2px 6px; font-size: 0.7rem; }
+
 .veiculos-migracao-corpo { width: 100%; }
 
 .veiculo-comando-input {

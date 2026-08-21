@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.11"
+APP_VERSION = "2.12"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -648,7 +648,11 @@ def excluir_comando_item(item_id):
 # --- CLIENTES EM IMPLANTAÇÃO (menu "Implantação") ---
 # Cadastro simples e independente do resto do app: acompanha clientes que estão
 # entrando na base (data de entrada, objetivo, valor do contrato, CSM responsável).
+# Cada cliente tem uma subcoleção "eventos" (a linha do tempo por setor); a
+# "última ação" exibida na listagem é sempre calculada a partir dela, nunca
+# digitada — é só o acontecimento mais recente entre os 4 setores.
 IMPLANTACAO_CLIENTES_COLLECTION = "implantacao_clientes"
+IMPLANTACAO_SETORES = ["Implantação", "Migração", "Suporte", "Comercial"]
 
 
 def _dados_implantacao_cliente(data):
@@ -664,15 +668,42 @@ def _dados_implantacao_cliente(data):
         "data_entrada": str(data.get("data_entrada", "")).strip(),
         "objetivo": str(data.get("objetivo", "")).strip(),
         "valor_contrato": valor_contrato,
-        "ultima_acao": str(data.get("ultima_acao", "")).strip(),
         "csm": str(data.get("csm", "")).strip(),
+    }
+
+
+def _dados_implantacao_evento(data):
+    setor = str(data.get("setor", "")).strip()
+    titulo = str(data.get("titulo", "")).strip()
+    if not titulo or setor not in IMPLANTACAO_SETORES:
+        return None
+    return {
+        "setor": setor,
+        "titulo": titulo,
+        "descricao": str(data.get("descricao", "")).strip(),
+        "data": str(data.get("data", "")).strip(),
+        "responsavel": str(data.get("responsavel", "")).strip(),
     }
 
 
 @app.route("/api/implantacao/clientes", methods=["GET"])
 def listar_implantacao_clientes():
-    docs = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).stream()
-    lista = [dict(d.to_dict(), id=d.id) for d in docs]
+    docs = list(db.collection(IMPLANTACAO_CLIENTES_COLLECTION).stream())
+    lista = []
+    for d in docs:
+        cliente = dict(d.to_dict(), id=d.id)
+        ultimo = list(
+            d.reference.collection("eventos")
+            .order_by("data", direction=firestore.Query.DESCENDING)
+            .limit(1)
+            .stream()
+        )
+        if ultimo:
+            ev = ultimo[0].to_dict()
+            cliente["ultima_acao"] = f"[{ev.get('setor')}] {ev.get('titulo')}"
+        else:
+            cliente["ultima_acao"] = ""
+        lista.append(cliente)
     return jsonify(ok=True, clientes=lista)
 
 
@@ -705,7 +736,55 @@ def excluir_implantacao_cliente(cliente_id):
     doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
     if not doc_ref.get().exists:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
+    for ev in doc_ref.collection("eventos").stream():
+        ev.reference.delete()
     doc_ref.delete()
+    return jsonify(ok=True)
+
+
+@app.route("/api/implantacao/clientes/<cliente_id>/eventos", methods=["GET"])
+def listar_implantacao_eventos(cliente_id):
+    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    docs = doc_ref.collection("eventos").stream()
+    lista = [dict(d.to_dict(), id=d.id) for d in docs]
+    return jsonify(ok=True, eventos=lista)
+
+
+@app.route("/api/implantacao/clientes/<cliente_id>/eventos", methods=["POST"])
+def criar_implantacao_evento(cliente_id):
+    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
+    if not doc_ref.get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    data = request.get_json(force=True) or {}
+    dados = _dados_implantacao_evento(data)
+    if dados is None:
+        return jsonify(ok=False, error="Informe o setor e o título."), 400
+    evento_ref = doc_ref.collection("eventos").document()
+    evento_ref.set(dados)
+    return jsonify(ok=True, evento=dict(dados, id=evento_ref.id))
+
+
+@app.route("/api/implantacao/clientes/<cliente_id>/eventos/<evento_id>", methods=["PUT"])
+def editar_implantacao_evento(cliente_id, evento_id):
+    data = request.get_json(force=True) or {}
+    dados = _dados_implantacao_evento(data)
+    if dados is None:
+        return jsonify(ok=False, error="Informe o setor e o título."), 400
+    evento_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id).collection("eventos").document(evento_id)
+    if not evento_ref.get().exists:
+        return jsonify(ok=False, error="Acontecimento não encontrado."), 404
+    evento_ref.set(dados)
+    return jsonify(ok=True, evento=dict(dados, id=evento_id))
+
+
+@app.route("/api/implantacao/clientes/<cliente_id>/eventos/<evento_id>", methods=["DELETE"])
+def excluir_implantacao_evento(cliente_id, evento_id):
+    evento_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id).collection("eventos").document(evento_id)
+    if not evento_ref.get().exists:
+        return jsonify(ok=False, error="Acontecimento não encontrado."), 404
+    evento_ref.delete()
     return jsonify(ok=True)
 
 

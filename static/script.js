@@ -556,7 +556,6 @@ const inputImplantacaoClienteNome = el("implantacao-cliente-nome");
 const inputImplantacaoClienteData = el("implantacao-cliente-data");
 const inputImplantacaoClienteObjetivo = el("implantacao-cliente-objetivo");
 const inputImplantacaoClienteValor = el("implantacao-cliente-valor");
-const inputImplantacaoClienteUltimaAcao = el("implantacao-cliente-ultima-acao");
 const inputImplantacaoClienteCsm = el("implantacao-cliente-csm");
 const btnSalvarImplantacaoCliente = el("btn-salvar-implantacao-cliente");
 
@@ -629,6 +628,9 @@ function mostrarTabelaImplantacaoClientes(clientes) {
   }
   clientes.forEach((c) => {
     const tr = document.createElement("tr");
+    tr.className = "linha-clicavel";
+    tr.title = "Clique para ver a linha do tempo";
+    tr.addEventListener("click", () => abrirTimelineImplantacao(c));
     [c.cliente, formatarDataBRSimples(c.data_entrada), c.objetivo, formatarMoedaBRL(c.valor_contrato), c.ultima_acao, c.csm].forEach((v) => {
       const td = document.createElement("td");
       td.textContent = v === null || v === undefined || v === "" ? "-" : String(v);
@@ -642,14 +644,18 @@ function mostrarTabelaImplantacaoClientes(clientes) {
     btnEditar.className = "btn-engrenagem";
     btnEditar.textContent = "⚙";
     btnEditar.title = "Editar cliente";
-    btnEditar.addEventListener("click", () => abrirModalImplantacaoCliente(c));
+    btnEditar.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirModalImplantacaoCliente(c);
+    });
     tdAcoes.appendChild(btnEditar);
 
     const btnExcluir = document.createElement("button");
     btnExcluir.className = "btn-engrenagem btn-excluir";
     btnExcluir.textContent = "🗑";
     btnExcluir.title = "Excluir cliente";
-    btnExcluir.addEventListener("click", async () => {
+    btnExcluir.addEventListener("click", async (e) => {
+      e.stopPropagation();
       if (!confirm(`Excluir o cliente "${c.cliente}" da implantação?`)) return;
       try {
         const r = await fetch(`/api/implantacao/clientes/${c.id}`, { method: "DELETE" });
@@ -677,7 +683,6 @@ function abrirModalImplantacaoCliente(cliente) {
   inputImplantacaoClienteData.value = cliente ? cliente.data_entrada || "" : "";
   inputImplantacaoClienteObjetivo.value = cliente ? cliente.objetivo || "" : "";
   inputImplantacaoClienteValor.value = cliente && cliente.valor_contrato ? cliente.valor_contrato : "";
-  inputImplantacaoClienteUltimaAcao.value = cliente ? cliente.ultima_acao || "" : "";
   inputImplantacaoClienteCsm.value = cliente ? cliente.csm || "" : "";
   btnSalvarImplantacaoCliente.textContent = cliente ? "Salvar edição" : "Adicionar";
   overlayImplantacaoCliente.classList.remove("hidden");
@@ -693,7 +698,6 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     data_entrada: inputImplantacaoClienteData.value,
     objetivo: inputImplantacaoClienteObjetivo.value.trim(),
     valor_contrato: inputImplantacaoClienteValor.value,
-    ultima_acao: inputImplantacaoClienteUltimaAcao.value.trim(),
     csm: inputImplantacaoClienteCsm.value.trim(),
   };
   if (!payload.cliente) return;
@@ -715,6 +719,208 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     alert(`Erro ao salvar: ${String(err)}`);
   }
 });
+
+// --- LINHA DO TEMPO DO CLIENTE EM IMPLANTAÇÃO ---
+// 4 setores fixos, cada um com cards de acontecimento (título/descrição/data/responsável)
+// ordenados cronologicamente. A ordem aqui precisa bater com IMPLANTACAO_SETORES no app.py.
+const IMPLANTACAO_SETORES = ["Implantação", "Migração", "Suporte", "Comercial"];
+
+const overlayImplantacaoTimeline = el("overlay-implantacao-timeline");
+const implantacaoTimelineTitulo = el("implantacao-timeline-titulo");
+const implantacaoTimelineSetores = el("implantacao-timeline-setores");
+
+const overlayImplantacaoEvento = el("overlay-implantacao-evento");
+const formImplantacaoEvento = el("form-implantacao-evento");
+const implantacaoEventoModalTitulo = el("implantacao-evento-modal-titulo");
+const inputImplantacaoEventoTitulo = el("implantacao-evento-titulo");
+const inputImplantacaoEventoDescricao = el("implantacao-evento-descricao");
+const inputImplantacaoEventoData = el("implantacao-evento-data");
+const inputImplantacaoEventoResponsavel = el("implantacao-evento-responsavel");
+const btnSalvarImplantacaoEvento = el("btn-salvar-implantacao-evento");
+
+let implantacaoTimelineClienteAtual = null;
+let implantacaoTimelineEventosCache = [];
+let implantacaoEventoEditandoId = null;
+let implantacaoEventoSetorAtual = null;
+
+async function abrirTimelineImplantacao(cliente) {
+  implantacaoTimelineClienteAtual = cliente;
+  implantacaoTimelineTitulo.textContent = `Linha do tempo — ${cliente.cliente}`;
+  implantacaoTimelineSetores.innerHTML = '<p class="placeholder">Carregando...</p>';
+  overlayImplantacaoTimeline.classList.remove("hidden");
+  await carregarImplantacaoEventos();
+}
+
+function mostrarErroEmNode(node, msg) {
+  node.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  node.appendChild(p);
+}
+
+async function carregarImplantacaoEventos() {
+  if (!implantacaoTimelineClienteAtual) return;
+  try {
+    const r = await fetch(`/api/implantacao/clientes/${implantacaoTimelineClienteAtual.id}/eventos`);
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroEmNode(implantacaoTimelineSetores, data.error || "Falha ao carregar.");
+    implantacaoTimelineEventosCache = data.eventos || [];
+    renderTimelineSetores();
+  } catch (err) {
+    mostrarErroEmNode(implantacaoTimelineSetores, String(err));
+  }
+}
+
+function construirCardEvento(ev) {
+  const card = document.createElement("div");
+  card.className = "timeline-card";
+
+  const acoes = document.createElement("div");
+  acoes.className = "timeline-card-acoes";
+  const btnEditar = document.createElement("button");
+  btnEditar.className = "btn-engrenagem";
+  btnEditar.textContent = "⚙";
+  btnEditar.title = "Editar";
+  btnEditar.addEventListener("click", () => abrirModalImplantacaoEvento(ev.setor, ev));
+  const btnExcluir = document.createElement("button");
+  btnExcluir.className = "btn-engrenagem btn-excluir";
+  btnExcluir.textContent = "🗑";
+  btnExcluir.title = "Excluir";
+  btnExcluir.addEventListener("click", async () => {
+    if (!confirm(`Excluir "${ev.titulo}"?`)) return;
+    try {
+      const r = await fetch(`/api/implantacao/clientes/${implantacaoTimelineClienteAtual.id}/eventos/${ev.id}`, { method: "DELETE" });
+      const data = await parseJsonResponse(r);
+      if (!data.ok) return alert(data.error || "Falha ao excluir.");
+      await carregarImplantacaoEventos();
+      await carregarImplantacaoClientes();
+    } catch (err) {
+      alert(String(err));
+    }
+  });
+  acoes.appendChild(btnEditar);
+  acoes.appendChild(btnExcluir);
+  card.appendChild(acoes);
+
+  const titulo = document.createElement("div");
+  titulo.className = "timeline-card-titulo";
+  titulo.textContent = ev.titulo;
+  card.appendChild(titulo);
+
+  const data = document.createElement("div");
+  data.className = "timeline-card-data";
+  data.textContent = formatarDataBRSimples(ev.data) || "Sem data";
+  card.appendChild(data);
+
+  if (ev.descricao) {
+    const desc = document.createElement("div");
+    desc.className = "timeline-card-descricao";
+    desc.textContent = ev.descricao;
+    card.appendChild(desc);
+  }
+
+  if (ev.responsavel) {
+    const resp = document.createElement("div");
+    resp.className = "timeline-card-responsavel";
+    resp.textContent = `Responsável: ${ev.responsavel}`;
+    card.appendChild(resp);
+  }
+
+  return card;
+}
+
+function renderTimelineSetores() {
+  implantacaoTimelineSetores.innerHTML = "";
+  IMPLANTACAO_SETORES.forEach((setor) => {
+    const linha = document.createElement("div");
+    linha.className = "timeline-setor";
+    linha.dataset.setor = setor;
+
+    const cabecalho = document.createElement("div");
+    cabecalho.className = "timeline-setor-cabecalho";
+    const nome = document.createElement("span");
+    nome.className = "timeline-setor-nome";
+    nome.textContent = setor;
+    const btnAdd = document.createElement("button");
+    btnAdd.className = "btn-secondary";
+    btnAdd.textContent = "+";
+    btnAdd.title = `Adicionar acontecimento em ${setor}`;
+    btnAdd.addEventListener("click", () => abrirModalImplantacaoEvento(setor, null));
+    cabecalho.appendChild(nome);
+    cabecalho.appendChild(btnAdd);
+    linha.appendChild(cabecalho);
+
+    const cardsDoSetor = implantacaoTimelineEventosCache
+      .filter((ev) => ev.setor === setor)
+      .slice()
+      .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+
+    if (cardsDoSetor.length === 0) {
+      const vazio = document.createElement("p");
+      vazio.className = "timeline-setor-vazio";
+      vazio.textContent = "Nenhum acontecimento registrado.";
+      linha.appendChild(vazio);
+    } else {
+      const cardsWrap = document.createElement("div");
+      cardsWrap.className = "timeline-setor-cards";
+      cardsDoSetor.forEach((ev) => cardsWrap.appendChild(construirCardEvento(ev)));
+      linha.appendChild(cardsWrap);
+    }
+
+    implantacaoTimelineSetores.appendChild(linha);
+  });
+}
+
+function abrirModalImplantacaoEvento(setor, evento) {
+  implantacaoEventoEditandoId = evento ? evento.id : null;
+  implantacaoEventoSetorAtual = setor;
+  implantacaoEventoModalTitulo.textContent = evento ? `Editar acontecimento — ${setor}` : `Adicionar acontecimento — ${setor}`;
+  inputImplantacaoEventoTitulo.value = evento ? evento.titulo : "";
+  inputImplantacaoEventoDescricao.value = evento ? evento.descricao || "" : "";
+  inputImplantacaoEventoData.value = evento ? evento.data || "" : "";
+  inputImplantacaoEventoResponsavel.value = evento ? evento.responsavel || "" : "";
+  btnSalvarImplantacaoEvento.textContent = evento ? "Salvar edição" : "Adicionar";
+  overlayImplantacaoEvento.classList.remove("hidden");
+  inputImplantacaoEventoTitulo.focus();
+}
+
+el("implantacao-evento-modal-fechar").addEventListener("click", () => overlayImplantacaoEvento.classList.add("hidden"));
+
+formImplantacaoEvento.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!implantacaoTimelineClienteAtual || !implantacaoEventoSetorAtual) return;
+  const payload = {
+    setor: implantacaoEventoSetorAtual,
+    titulo: inputImplantacaoEventoTitulo.value.trim(),
+    descricao: inputImplantacaoEventoDescricao.value.trim(),
+    data: inputImplantacaoEventoData.value,
+    responsavel: inputImplantacaoEventoResponsavel.value.trim(),
+  };
+  if (!payload.titulo) return;
+  try {
+    const clienteId = implantacaoTimelineClienteAtual.id;
+    const url = implantacaoEventoEditandoId
+      ? `/api/implantacao/clientes/${clienteId}/eventos/${implantacaoEventoEditandoId}`
+      : `/api/implantacao/clientes/${clienteId}/eventos`;
+    const method = implantacaoEventoEditandoId ? "PUT" : "POST";
+    const r = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
+    overlayImplantacaoEvento.classList.add("hidden");
+    await carregarImplantacaoEventos();
+    await carregarImplantacaoClientes();
+  } catch (err) {
+    alert(`Erro ao salvar: ${String(err)}`);
+  }
+});
+
+el("implantacao-timeline-fechar").addEventListener("click", () => overlayImplantacaoTimeline.classList.add("hidden"));
 
 // --- CLIENTES EM MIGRAÇÃO ---
 const overlayMigracao = el("overlay-migracao");
