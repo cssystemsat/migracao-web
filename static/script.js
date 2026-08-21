@@ -556,6 +556,7 @@ const inputImplantacaoClienteNome = el("implantacao-cliente-nome");
 const inputImplantacaoClienteData = el("implantacao-cliente-data");
 const inputImplantacaoClienteObjetivo = el("implantacao-cliente-objetivo");
 const inputImplantacaoClienteValor = el("implantacao-cliente-valor");
+const inputImplantacaoClienteUltimaAcao = el("implantacao-cliente-ultima-acao");
 const inputImplantacaoClienteCsm = el("implantacao-cliente-csm");
 const btnSalvarImplantacaoCliente = el("btn-salvar-implantacao-cliente");
 
@@ -602,7 +603,7 @@ function mostrarTabelaImplantacaoClientes(clientes) {
   toolbar.appendChild(btnAdicionar);
   wrapper.appendChild(toolbar);
 
-  const headers = ["Cliente", "Data de entrada", "Objetivo", "Valor de contrato", "CSM", ""];
+  const headers = ["Cliente", "Data de entrada", "Objetivo", "Valor de contrato", "Última ação", "CSM", ""];
   const table = document.createElement("table");
   table.className = "tabela-saida";
 
@@ -628,7 +629,7 @@ function mostrarTabelaImplantacaoClientes(clientes) {
   }
   clientes.forEach((c) => {
     const tr = document.createElement("tr");
-    [c.cliente, formatarDataBRSimples(c.data_entrada), c.objetivo, formatarMoedaBRL(c.valor_contrato), c.csm].forEach((v) => {
+    [c.cliente, formatarDataBRSimples(c.data_entrada), c.objetivo, formatarMoedaBRL(c.valor_contrato), c.ultima_acao, c.csm].forEach((v) => {
       const td = document.createElement("td");
       td.textContent = v === null || v === undefined || v === "" ? "-" : String(v);
       tr.appendChild(td);
@@ -676,6 +677,7 @@ function abrirModalImplantacaoCliente(cliente) {
   inputImplantacaoClienteData.value = cliente ? cliente.data_entrada || "" : "";
   inputImplantacaoClienteObjetivo.value = cliente ? cliente.objetivo || "" : "";
   inputImplantacaoClienteValor.value = cliente && cliente.valor_contrato ? cliente.valor_contrato : "";
+  inputImplantacaoClienteUltimaAcao.value = cliente ? cliente.ultima_acao || "" : "";
   inputImplantacaoClienteCsm.value = cliente ? cliente.csm || "" : "";
   btnSalvarImplantacaoCliente.textContent = cliente ? "Salvar edição" : "Adicionar";
   overlayImplantacaoCliente.classList.remove("hidden");
@@ -691,6 +693,7 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     data_entrada: inputImplantacaoClienteData.value,
     objetivo: inputImplantacaoClienteObjetivo.value.trim(),
     valor_contrato: inputImplantacaoClienteValor.value,
+    ultima_acao: inputImplantacaoClienteUltimaAcao.value.trim(),
     csm: inputImplantacaoClienteCsm.value.trim(),
   };
   if (!payload.cliente) return;
