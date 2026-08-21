@@ -560,6 +560,8 @@ const inputImplantacaoClienteCsm = el("implantacao-cliente-csm");
 const btnSalvarImplantacaoCliente = el("btn-salvar-implantacao-cliente");
 
 let implantacaoClienteEditandoId = null;
+let implantacaoClientesCache = [];
+let implantacaoFiltroTexto = "";
 
 el("botoes-implantacao").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-tipo='implantacao-clientes']");
@@ -573,7 +575,8 @@ async function carregarImplantacaoClientes() {
     const r = await fetch("/api/implantacao/clientes");
     const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao carregar.");
-    mostrarTabelaImplantacaoClientes(data.clientes);
+    implantacaoClientesCache = data.clientes || [];
+    mostrarTabelaImplantacaoClientes();
   } catch (err) {
     mostrarErro(String(err));
   }
@@ -590,18 +593,9 @@ function formatarDataBRSimples(iso) {
   return `${dia}/${mes}/${ano}`;
 }
 
-function mostrarTabelaImplantacaoClientes(clientes) {
-  const wrapper = document.createElement("div");
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "migracao-toolbar";
-  const btnAdicionar = document.createElement("button");
-  btnAdicionar.className = "btn-primary";
-  btnAdicionar.textContent = "+ Adicionar cliente";
-  btnAdicionar.addEventListener("click", () => abrirModalImplantacaoCliente(null));
-  toolbar.appendChild(btnAdicionar);
-  wrapper.appendChild(toolbar);
-
+// Monta só o <table>, sem tocar na barra de busca — assim o campo de busca
+// nunca é recriado a cada tecla digitada (senão perde o foco/cursor).
+function construirTabelaImplantacao(clientes, mensagemVazia) {
   const headers = ["Cliente", "Data de entrada", "Objetivo", "Valor de contrato", "Última ação", "CSM", ""];
   const table = document.createElement("table");
   table.className = "tabela-saida";
@@ -621,7 +615,7 @@ function mostrarTabelaImplantacaoClientes(clientes) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = headers.length;
-    td.textContent = "Nenhum cliente em implantação ainda.";
+    td.textContent = mensagemVazia;
     td.style.color = "#6b7280";
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -672,7 +666,51 @@ function mostrarTabelaImplantacaoClientes(clientes) {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-  wrapper.appendChild(table);
+  return table;
+}
+
+function mostrarTabelaImplantacaoClientes() {
+  const wrapper = document.createElement("div");
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "migracao-toolbar implantacao-toolbar";
+
+  const btnAdicionar = document.createElement("button");
+  btnAdicionar.className = "btn-primary";
+  btnAdicionar.textContent = "+ Adicionar cliente";
+  btnAdicionar.addEventListener("click", () => abrirModalImplantacaoCliente(null));
+  toolbar.appendChild(btnAdicionar);
+
+  const inputBusca = document.createElement("input");
+  inputBusca.type = "text";
+  inputBusca.className = "implantacao-busca";
+  inputBusca.placeholder = "Buscar cliente...";
+  inputBusca.value = implantacaoFiltroTexto;
+  toolbar.appendChild(inputBusca);
+
+  wrapper.appendChild(toolbar);
+
+  const tabelaContainer = document.createElement("div");
+  wrapper.appendChild(tabelaContainer);
+
+  function atualizarTabela() {
+    const filtro = implantacaoFiltroTexto.trim().toLowerCase();
+    const filtrados = filtro
+      ? implantacaoClientesCache.filter((c) => (c.cliente || "").toLowerCase().includes(filtro))
+      : implantacaoClientesCache;
+    const mensagemVazia = implantacaoClientesCache.length === 0
+      ? "Nenhum cliente em implantação ainda."
+      : "Nenhum cliente encontrado com esse nome.";
+    tabelaContainer.innerHTML = "";
+    tabelaContainer.appendChild(construirTabelaImplantacao(filtrados, mensagemVazia));
+  }
+
+  inputBusca.addEventListener("input", () => {
+    implantacaoFiltroTexto = inputBusca.value;
+    atualizarTabela();
+  });
+
+  atualizarTabela();
   setSaida(wrapper);
 }
 
