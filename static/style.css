@@ -152,6 +152,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   cursor: pointer;
 }
 .menu-cabecalho:hover:not(:disabled) { background: none; opacity: 0.8; }
+.titulo-implantacao { color: var(--amarelo-escuro); }
 .titulo-consultas { color: var(--azul); }
 .titulo-import { color: var(--vermelho); }
 .titulo-migracao { color: var(--violeta); }
