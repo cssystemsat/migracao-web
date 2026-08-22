@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.17"
+APP_VERSION = "2.18"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -664,6 +664,7 @@ def _dados_implantacao_cliente(data):
     except (TypeError, ValueError):
         valor_contrato = 0
     return {
+        "idcentral": str(data.get("idcentral", "")).strip(),
         "cliente": cliente,
         "data_entrada": str(data.get("data_entrada", "")).strip(),
         "objetivo": str(data.get("objetivo", "")).strip(),

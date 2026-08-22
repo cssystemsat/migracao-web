@@ -552,6 +552,7 @@ function renderDashboard(data) {
 const overlayImplantacaoCliente = el("overlay-implantacao-cliente");
 const formImplantacaoCliente = el("form-implantacao-cliente");
 const implantacaoClienteModalTitulo = el("implantacao-cliente-modal-titulo");
+const inputImplantacaoClienteIdcentral = el("implantacao-cliente-idcentral");
 const inputImplantacaoClienteNome = el("implantacao-cliente-nome");
 const inputImplantacaoClienteData = el("implantacao-cliente-data");
 const inputImplantacaoClienteObjetivo = el("implantacao-cliente-objetivo");
@@ -598,7 +599,7 @@ function formatarDataBRSimples(iso) {
 // ordemClienteDir/onClickOrdenarCliente controlam a ordenação A-Z da coluna Cliente
 // (a ordem padrão da lista continua sendo por Última ação, vinda do backend).
 function construirTabelaImplantacao(clientes, mensagemVazia, ordemClienteDir, onClickOrdenarCliente) {
-  const headers = ["Cliente", "Data de entrada", "Objetivo", "Valor de contrato", "Última ação", "CSM", ""];
+  const headers = ["IdCentral", "Cliente", "Data de entrada", "Objetivo", "Valor de contrato", "Última ação", "CSM", ""];
   const table = document.createElement("table");
   table.className = "tabela-saida";
 
@@ -637,7 +638,7 @@ function construirTabelaImplantacao(clientes, mensagemVazia, ordemClienteDir, on
     tr.className = "linha-clicavel";
     tr.title = "Clique para ver a linha do tempo";
     tr.addEventListener("click", () => abrirTimelineImplantacao(c));
-    [c.cliente, formatarDataBRSimples(c.data_entrada), c.objetivo, formatarMoedaBRL(c.valor_contrato), c.ultima_acao, c.csm].forEach((v) => {
+    [c.idcentral, c.cliente, formatarDataBRSimples(c.data_entrada), c.objetivo, formatarMoedaBRL(c.valor_contrato), c.ultima_acao, c.csm].forEach((v) => {
       const td = document.createElement("td");
       td.textContent = v === null || v === undefined || v === "" ? "-" : String(v);
       tr.appendChild(td);
@@ -741,6 +742,7 @@ function mostrarTabelaImplantacaoClientes() {
 function abrirModalImplantacaoCliente(cliente) {
   implantacaoClienteEditandoId = cliente ? cliente.id : null;
   implantacaoClienteModalTitulo.textContent = cliente ? "Editar cliente" : "Adicionar cliente";
+  inputImplantacaoClienteIdcentral.value = cliente ? cliente.idcentral || "" : "";
   inputImplantacaoClienteNome.value = cliente ? cliente.cliente : "";
   inputImplantacaoClienteData.value = cliente ? cliente.data_entrada || "" : "";
   inputImplantacaoClienteObjetivo.value = cliente ? cliente.objetivo || "" : "";
@@ -756,6 +758,7 @@ el("implantacao-cliente-modal-fechar").addEventListener("click", () => overlayIm
 formImplantacaoCliente.addEventListener("submit", async (e) => {
   e.preventDefault();
   const payload = {
+    idcentral: inputImplantacaoClienteIdcentral.value.trim(),
     cliente: inputImplantacaoClienteNome.value.trim(),
     data_entrada: inputImplantacaoClienteData.value,
     objetivo: inputImplantacaoClienteObjetivo.value.trim(),
