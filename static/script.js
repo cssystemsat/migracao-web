@@ -595,7 +595,9 @@ function formatarDataBRSimples(iso) {
 
 // Monta só o <table>, sem tocar na barra de busca — assim o campo de busca
 // nunca é recriado a cada tecla digitada (senão perde o foco/cursor).
-function construirTabelaImplantacao(clientes, mensagemVazia) {
+// ordemClienteDir/onClickOrdenarCliente controlam a ordenação A-Z da coluna Cliente
+// (a ordem padrão da lista continua sendo por Última ação, vinda do backend).
+function construirTabelaImplantacao(clientes, mensagemVazia, ordemClienteDir, onClickOrdenarCliente) {
   const headers = ["Cliente", "Data de entrada", "Objetivo", "Valor de contrato", "Última ação", "CSM", ""];
   const table = document.createElement("table");
   table.className = "tabela-saida";
@@ -605,6 +607,16 @@ function construirTabelaImplantacao(clientes, mensagemVazia) {
   headers.forEach((h) => {
     const th = document.createElement("th");
     th.textContent = h;
+    if (h === "Cliente") {
+      th.className = "th-ordenavel";
+      if (ordemClienteDir) {
+        const seta = document.createElement("span");
+        seta.className = "seta-ordenacao";
+        seta.textContent = ordemClienteDir === 1 ? " ▲" : " ▼";
+        th.appendChild(seta);
+      }
+      th.addEventListener("click", onClickOrdenarCliente);
+    }
     trHead.appendChild(th);
   });
   thead.appendChild(trHead);
@@ -693,16 +705,28 @@ function mostrarTabelaImplantacaoClientes() {
   const tabelaContainer = document.createElement("div");
   wrapper.appendChild(tabelaContainer);
 
+  let ordemClienteDir = null; // null = ordem padrão (Última ação); 1 = A-Z; -1 = Z-A
+
   function atualizarTabela() {
     const filtro = implantacaoFiltroTexto.trim().toLowerCase();
-    const filtrados = filtro
+    let filtrados = filtro
       ? implantacaoClientesCache.filter((c) => (c.cliente || "").toLowerCase().includes(filtro))
-      : implantacaoClientesCache;
+      : implantacaoClientesCache.slice();
+    if (ordemClienteDir) {
+      filtrados = filtrados
+        .slice()
+        .sort((a, b) => (a.cliente || "").localeCompare(b.cliente || "", "pt-BR") * ordemClienteDir);
+    }
     const mensagemVazia = implantacaoClientesCache.length === 0
       ? "Nenhum cliente em implantação ainda."
       : "Nenhum cliente encontrado com esse nome.";
     tabelaContainer.innerHTML = "";
-    tabelaContainer.appendChild(construirTabelaImplantacao(filtrados, mensagemVazia));
+    tabelaContainer.appendChild(
+      construirTabelaImplantacao(filtrados, mensagemVazia, ordemClienteDir, () => {
+        ordemClienteDir = ordemClienteDir === 1 ? -1 : 1;
+        atualizarTabela();
+      })
+    );
   }
 
   inputBusca.addEventListener("input", () => {
