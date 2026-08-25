@@ -561,6 +561,7 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .form-migracao { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
 .campo-migracao { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--cinza-700); }
 .campo-migracao input,
+.campo-migracao select,
 .campo-migracao textarea {
   padding: 8px 10px;
   border: 1px solid var(--cinza-300);
@@ -591,13 +592,15 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .form-implantacao-cliente-grid button[type="submit"] { grid-column: 1 / -1; }
 
 .implantacao-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.implantacao-busca {
+.implantacao-busca,
+.implantacao-filtro-csm {
   padding: 8px 10px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
   font-size: 0.85rem;
-  min-width: 240px;
 }
+.implantacao-busca { min-width: 240px; }
+.implantacao-filtro-csm { background: var(--cinza-100); }
 
 .timeline-setor { border-bottom: 1px solid var(--cinza-200); padding: 14px 0; }
 .timeline-setor:last-child { border-bottom: none; }

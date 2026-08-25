@@ -563,6 +563,9 @@ const btnSalvarImplantacaoCliente = el("btn-salvar-implantacao-cliente");
 let implantacaoClienteEditandoId = null;
 let implantacaoClientesCache = [];
 let implantacaoFiltroTexto = "";
+let implantacaoFiltroCsm = "";
+// Precisa bater com as opções do <select id="implantacao-cliente-csm"> no index.html.
+const IMPLANTACAO_CSMS = ["Duda", "Juan", "João Pedro"];
 
 el("botoes-implantacao").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-tipo='implantacao-clientes']");
@@ -701,6 +704,21 @@ function mostrarTabelaImplantacaoClientes() {
   inputBusca.value = implantacaoFiltroTexto;
   toolbar.appendChild(inputBusca);
 
+  const selectFiltroCsm = document.createElement("select");
+  selectFiltroCsm.className = "implantacao-filtro-csm";
+  const optTodos = document.createElement("option");
+  optTodos.value = "";
+  optTodos.textContent = "Todos os CSMs";
+  selectFiltroCsm.appendChild(optTodos);
+  IMPLANTACAO_CSMS.forEach((nome) => {
+    const opt = document.createElement("option");
+    opt.value = nome;
+    opt.textContent = nome;
+    selectFiltroCsm.appendChild(opt);
+  });
+  selectFiltroCsm.value = implantacaoFiltroCsm;
+  toolbar.appendChild(selectFiltroCsm);
+
   wrapper.appendChild(toolbar);
 
   const tabelaContainer = document.createElement("div");
@@ -713,6 +731,9 @@ function mostrarTabelaImplantacaoClientes() {
     let filtrados = filtro
       ? implantacaoClientesCache.filter((c) => (c.cliente || "").toLowerCase().includes(filtro))
       : implantacaoClientesCache.slice();
+    if (implantacaoFiltroCsm) {
+      filtrados = filtrados.filter((c) => c.csm === implantacaoFiltroCsm);
+    }
     if (ordemClienteDir) {
       filtrados = filtrados
         .slice()
@@ -720,7 +741,7 @@ function mostrarTabelaImplantacaoClientes() {
     }
     const mensagemVazia = implantacaoClientesCache.length === 0
       ? "Nenhum cliente em implantação ainda."
-      : "Nenhum cliente encontrado com esse nome.";
+      : "Nenhum cliente encontrado com esse filtro.";
     tabelaContainer.innerHTML = "";
     tabelaContainer.appendChild(
       construirTabelaImplantacao(filtrados, mensagemVazia, ordemClienteDir, () => {
@@ -732,6 +753,11 @@ function mostrarTabelaImplantacaoClientes() {
 
   inputBusca.addEventListener("input", () => {
     implantacaoFiltroTexto = inputBusca.value;
+    atualizarTabela();
+  });
+
+  selectFiltroCsm.addEventListener("change", () => {
+    implantacaoFiltroCsm = selectFiltroCsm.value;
     atualizarTabela();
   });
 
