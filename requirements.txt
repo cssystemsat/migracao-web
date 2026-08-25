@@ -4,3 +4,13 @@ requests==2.34.2
 openpyxl==3.1.5
 gunicorn==23.0.0
 firebase-admin==7.5.0
+
+# Fixadas explicitamente: uma versao mais nova do google-cloud-firestore (puxada
+# sozinha pelo firebase-admin, que nao fixa suas proprias dependencias) quebrou
+# o Firestore em produção com "Invalid database id (default)". Essas sao as
+# versões confirmadas funcionando.
+google-cloud-firestore==2.28.0
+google-api-core==2.33.0
+grpcio==1.83.0
+google-auth==2.47.0
+protobuf==7.35.1
