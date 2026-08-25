@@ -597,6 +597,30 @@ function formatarDataBRSimples(iso) {
   return `${dia}/${mes}/${ano}`;
 }
 
+// Largura da coluna Objetivo, ajustável arrastando a alça no cabeçalho —
+// guardada no navegador (localStorage) pra continuar do jeito que a pessoa deixou.
+let implantacaoLarguraObjetivo = Number(localStorage.getItem("implantacaoLarguraObjetivo")) || 260;
+
+function iniciarResizeObjetivo(e, th, tds) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startWidth = th.offsetWidth;
+
+  function aoMover(ev) {
+    const novaLargura = Math.max(100, startWidth + (ev.clientX - startX));
+    th.style.width = `${novaLargura}px`;
+    tds.forEach((td) => { td.style.width = `${novaLargura}px`; });
+  }
+  function aoSoltar() {
+    document.removeEventListener("mousemove", aoMover);
+    document.removeEventListener("mouseup", aoSoltar);
+    implantacaoLarguraObjetivo = th.offsetWidth;
+    localStorage.setItem("implantacaoLarguraObjetivo", String(implantacaoLarguraObjetivo));
+  }
+  document.addEventListener("mousemove", aoMover);
+  document.addEventListener("mouseup", aoSoltar);
+}
+
 // Monta só o <table>, sem tocar na barra de busca — assim o campo de busca
 // nunca é recriado a cada tecla digitada (senão perde o foco/cursor).
 // ordemClienteDir/onClickOrdenarCliente controlam a ordenação A-Z da coluna Cliente
@@ -604,7 +628,10 @@ function formatarDataBRSimples(iso) {
 function construirTabelaImplantacao(clientes, mensagemVazia, ordemClienteDir, onClickOrdenarCliente) {
   const headers = ["IdCentral", "Cliente", "Data de entrada", "Objetivo", "Valor de contrato", "Última ação", "CSM", ""];
   const table = document.createElement("table");
-  table.className = "tabela-saida";
+  table.className = "tabela-saida tabela-implantacao-clientes";
+
+  const thObjetivoTds = [];
+  let thObjetivo = null;
 
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
@@ -620,6 +647,16 @@ function construirTabelaImplantacao(clientes, mensagemVazia, ordemClienteDir, on
         th.appendChild(seta);
       }
       th.addEventListener("click", onClickOrdenarCliente);
+    }
+    if (h === "Objetivo") {
+      th.classList.add("th-redimensionavel");
+      th.style.width = `${implantacaoLarguraObjetivo}px`;
+      const alca = document.createElement("span");
+      alca.className = "col-resize-handle";
+      alca.title = "Arraste para redimensionar";
+      alca.addEventListener("mousedown", (e) => iniciarResizeObjetivo(e, thObjetivo, thObjetivoTds));
+      th.appendChild(alca);
+      thObjetivo = th;
     }
     trHead.appendChild(th);
   });
@@ -641,9 +678,14 @@ function construirTabelaImplantacao(clientes, mensagemVazia, ordemClienteDir, on
     tr.className = "linha-clicavel";
     tr.title = "Clique para ver a linha do tempo";
     tr.addEventListener("click", () => abrirTimelineImplantacao(c));
-    [c.idcentral, c.cliente, formatarDataBRSimples(c.data_entrada), c.objetivo, formatarMoedaBRL(c.valor_contrato), c.ultima_acao, c.csm].forEach((v) => {
+    [c.idcentral, c.cliente, formatarDataBRSimples(c.data_entrada), c.objetivo, formatarMoedaBRL(c.valor_contrato), c.ultima_acao, c.csm].forEach((v, i) => {
       const td = document.createElement("td");
       td.textContent = v === null || v === undefined || v === "" ? "-" : String(v);
+      if (headers[i] === "Objetivo") {
+        td.classList.add("td-objetivo-implantacao");
+        td.style.width = `${implantacaoLarguraObjetivo}px`;
+        thObjetivoTds.push(td);
+      }
       tr.appendChild(td);
     });
 
