@@ -444,6 +444,10 @@ el("botoes-import").addEventListener("click", async (e) => {
     abrirModalDeletarVeiculos();
     return;
   }
+  if (btn.dataset.tipo === "associar-rastreadores") {
+    abrirModalAssociarRastreadores();
+    return;
+  }
   abrirModalImport(btn.dataset.tipo);
 });
 
@@ -2206,6 +2210,137 @@ btnDeletarVeiculosIniciar.addEventListener("click", async () => {
     mostrarErro(String(err));
     btnDeletarVeiculosIniciar.disabled = false;
     btnDeletarVeiculosIniciar.textContent = "Excluir veículos";
+  }
+});
+
+// --- ASSOCIAR RASTREADORES EM MASSA ---
+const overlayAssociarRastreadores = el("overlay-associar-rastreadores");
+const associarRastreadoresInputArquivo = el("associar-rastreadores-input-arquivo");
+const associarRastreadoresArquivoNome = el("associar-rastreadores-arquivo-nome");
+const btnAssociarRastreadoresIniciar = el("btn-associar-rastreadores-iniciar");
+const associarRastreadoresProgresso = el("associar-rastreadores-progresso");
+const associarRastreadoresBar = el("associar-rastreadores-bar");
+const associarRastreadoresStatus = el("associar-rastreadores-status");
+const associarRastreadoresPct = el("associar-rastreadores-pct");
+const associarRastreadoresLog = el("associar-rastreadores-log");
+
+let associarRastreadoresFileId = null;
+let associarRastreadoresTotalLinhas = 0;
+
+function abrirModalAssociarRastreadores() {
+  associarRastreadoresFileId = null;
+  associarRastreadoresTotalLinhas = 0;
+  associarRastreadoresInputArquivo.value = "";
+  associarRastreadoresArquivoNome.textContent = "Nenhum arquivo selecionado";
+  btnAssociarRastreadoresIniciar.disabled = true;
+  btnAssociarRastreadoresIniciar.textContent = "Associar rastreadores";
+  associarRastreadoresProgresso.classList.add("hidden");
+  associarRastreadoresLog.innerHTML = "";
+  overlayAssociarRastreadores.classList.remove("hidden");
+}
+
+el("associar-rastreadores-fechar").addEventListener("click", () => overlayAssociarRastreadores.classList.add("hidden"));
+
+associarRastreadoresInputArquivo.addEventListener("change", async () => {
+  const file = associarRastreadoresInputArquivo.files[0];
+  if (!file) return;
+  associarRastreadoresArquivoNome.textContent = "Enviando...";
+  const formData = new FormData();
+  formData.append("arquivo", file);
+  try {
+    const r = await fetch("/api/associar-rastreadores/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      associarRastreadoresArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErro(data.error || "Falha ao enviar arquivo.");
+    }
+    associarRastreadoresFileId = data.file_id;
+    associarRastreadoresTotalLinhas = data.total_linhas;
+    associarRastreadoresArquivoNome.textContent = `${file.name} (${data.total_linhas} par(es))`;
+    btnAssociarRastreadoresIniciar.disabled = false;
+  } catch (err) {
+    associarRastreadoresArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErro(String(err));
+  }
+});
+
+let associarRastreadoresLogsMostrados = 0;
+let associarRastreadoresPollTimer = null;
+
+function pararPollingAssociarRastreadores() {
+  if (associarRastreadoresPollTimer) {
+    clearInterval(associarRastreadoresPollTimer);
+    associarRastreadoresPollTimer = null;
+  }
+}
+
+function iniciarPollingAssociarRastreadores(jobId) {
+  associarRastreadoresPollTimer = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/associar-rastreadores/status/${jobId}`);
+      const job = await parseJsonResponse(r);
+      if (!job.ok) {
+        pararPollingAssociarRastreadores();
+        return mostrarErro(job.error || "Falha ao consultar andamento.");
+      }
+
+      const pct = job.total ? Math.min(Math.round((job.atual / job.total) * 100), 100) : 0;
+      associarRastreadoresBar.style.width = pct + "%";
+      associarRastreadoresPct.textContent = pct + "%";
+      associarRastreadoresStatus.textContent = `Linha ${job.atual} de ${job.total} (sucessos: ${job.sucessos}, erros: ${job.erros})`;
+
+      for (let i = associarRastreadoresLogsMostrados; i < job.logs.length; i++) {
+        const div = document.createElement("div");
+        div.className = "log-linha";
+        div.textContent = job.logs[i];
+        associarRastreadoresLog.appendChild(div);
+      }
+      associarRastreadoresLogsMostrados = job.logs.length;
+
+      if (job.status === "concluido") {
+        pararPollingAssociarRastreadores();
+        const div = document.createElement("div");
+        div.className = "resumo-final";
+        div.textContent = `Concluído! Associados: ${job.sucessos} | Erros: ${job.erros}`;
+        associarRastreadoresLog.appendChild(div);
+        btnAssociarRastreadoresIniciar.disabled = false;
+        btnAssociarRastreadoresIniciar.textContent = "Associar rastreadores";
+        associarRastreadoresFileId = null;
+        associarRastreadoresArquivoNome.textContent = "Nenhum arquivo selecionado";
+        associarRastreadoresInputArquivo.value = "";
+      }
+    } catch (err) {
+      pararPollingAssociarRastreadores();
+      mostrarErro(String(err));
+    }
+  }, 1500);
+}
+
+btnAssociarRastreadoresIniciar.addEventListener("click", async () => {
+  if (!associarRastreadoresFileId) return;
+  if (!confirm(`Isso vai associar ${associarRastreadoresTotalLinhas} par(es) de veículo/rastreador na SSX. Confirma?`)) return;
+
+  btnAssociarRastreadoresIniciar.disabled = true;
+  btnAssociarRastreadoresIniciar.textContent = "Associando...";
+  associarRastreadoresProgresso.classList.remove("hidden");
+  associarRastreadoresBar.style.width = "0%";
+  associarRastreadoresPct.textContent = "0%";
+  associarRastreadoresLog.innerHTML = "";
+  associarRastreadoresLogsMostrados = 0;
+
+  try {
+    const resp = await fetch("/api/associar-rastreadores/executar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: associarRastreadoresFileId }),
+    });
+    const data = await parseJsonResponse(resp);
+    if (!data.ok) throw new Error(data.error || "Falha ao iniciar associação em massa.");
+    iniciarPollingAssociarRastreadores(data.job_id);
+  } catch (err) {
+    mostrarErro(String(err));
+    btnAssociarRastreadoresIniciar.disabled = false;
+    btnAssociarRastreadoresIniciar.textContent = "Associar rastreadores";
   }
 });
 

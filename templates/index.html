@@ -84,7 +84,7 @@
             <button data-tipo="usuario">Importar Usuário</button>
             <button disabled title="Ainda não implementado">Importar SimCard</button>
             <button data-tipo="deletar-veiculos">Deletar veículos</button>
-            <button disabled title="Em desenvolvimento — aguardando especificação">Associar rastreadores</button>
+            <button data-tipo="associar-rastreadores">Associar rastreadores</button>
           </div>
         </div>
       </div>
@@ -215,6 +215,35 @@
           </div>
         </div>
         <div id="deletar-veiculos-log" class="log-massa"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-associar-rastreadores" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Associar rastreadores em massa</h3>
+        <button id="associar-rastreadores-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <p class="placeholder">Planilha: coluna A = Código de integração do veículo, coluna B = Código de integração do rastreador.</p>
+        <div class="passo">
+          <span class="passo-num">1</span>
+          <label for="associar-rastreadores-input-arquivo" class="file-label">Carregar Excel</label>
+          <input type="file" id="associar-rastreadores-input-arquivo" accept=".xlsx,.xls">
+          <span id="associar-rastreadores-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
+        </div>
+
+        <button id="btn-associar-rastreadores-iniciar" class="btn-primary" disabled>Associar rastreadores</button>
+
+        <div id="associar-rastreadores-progresso" class="progresso-container hidden">
+          <div class="progresso-bar-bg"><div id="associar-rastreadores-bar" class="progresso-bar"></div></div>
+          <div class="progresso-info">
+            <span id="associar-rastreadores-status">Iniciando...</span>
+            <span id="associar-rastreadores-pct">0%</span>
+          </div>
+        </div>
+        <div id="associar-rastreadores-log" class="log-massa"></div>
       </div>
     </div>
   </div>

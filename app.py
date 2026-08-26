@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.22"
+APP_VERSION = "2.23"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -1659,6 +1659,114 @@ def deletar_veiculos_executar():
 def deletar_veiculos_status(job_id):
     with DELETAR_VEICULOS_JOBS_LOCK:
         job = DELETAR_VEICULOS_JOBS.get(job_id)
+        if not job:
+            return jsonify(ok=False, error="Job não encontrado."), 404
+        resultado = dict(job)
+    return jsonify(ok=True, **resultado)
+
+
+# --- ASSOCIAR RASTREADORES EM MASSA (Área de Importação) ---
+# Planilha de entrada: coluna A = VehicleIntegrationCode, coluna B =
+# TrackerIntegrationCode. "Number" (posição do rastreador no veículo) é
+# sempre 1 nesse fluxo. Mesmo padrão de job/thread/polling dos outros dois.
+ASSOCIAR_RASTREADORES_UPLOADS = {}
+ASSOCIAR_RASTREADORES_UPLOADS_LOCK = threading.Lock()
+ASSOCIAR_RASTREADORES_JOBS = {}
+ASSOCIAR_RASTREADORES_JOBS_LOCK = threading.Lock()
+
+
+@app.route("/api/associar-rastreadores/upload", methods=["POST"])
+def associar_rastreadores_upload():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    conteudo = request.files["arquivo"].read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(conteudo))
+        sheet = wb.active
+        col_a = [cell.value for cell in sheet["A"]]
+        col_b = [cell.value for cell in sheet["B"]]
+        pares = []
+        for veiculo, rastreador in zip(col_a, col_b):
+            veiculo = str(veiculo).strip() if veiculo is not None else ""
+            rastreador = str(rastreador).strip() if rastreador is not None else ""
+            if veiculo and rastreador:
+                pares.append((veiculo, rastreador))
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler Excel: {e}"), 400
+    if not pares:
+        return jsonify(ok=False, error="Nenhum par veículo/rastreador encontrado nas colunas A e B."), 400
+    file_id = uuid.uuid4().hex
+    with ASSOCIAR_RASTREADORES_UPLOADS_LOCK:
+        ASSOCIAR_RASTREADORES_UPLOADS[file_id] = pares
+    return jsonify(ok=True, file_id=file_id, total_linhas=len(pares))
+
+
+def _executar_associar_rastreadores(job_id, pares, token):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    sucessos = erros = 0
+    for i, (veiculo, rastreador) in enumerate(pares):
+        try:
+            r = requests.post(
+                f"{BASE_URL}/Administration/Vehicle/AssociateTracker",
+                json={"VehicleIntegrationCode": veiculo, "Number": 1, "TrackerIntegrationCode": rastreador},
+                headers=headers,
+                timeout=20,
+            )
+            if r.status_code in (200, 201):
+                sucessos += 1
+                mensagem = f"Linha {i + 1}: veículo {veiculo} associado ao rastreador {rastreador}."
+            else:
+                erros += 1
+                mensagem = f"Erro linha {i + 1} (veículo {veiculo}, rastreador {rastreador}): HTTP {r.status_code} — {r.text[:200]}"
+        except requests.exceptions.RequestException as e:
+            erros += 1
+            mensagem = f"Erro linha {i + 1} (veículo {veiculo}, rastreador {rastreador}): {e}"
+
+        with ASSOCIAR_RASTREADORES_JOBS_LOCK:
+            job = ASSOCIAR_RASTREADORES_JOBS[job_id]
+            job["logs"].append(mensagem)
+            job["atual"] = i + 1
+            job["sucessos"] = sucessos
+            job["erros"] = erros
+
+    with ASSOCIAR_RASTREADORES_JOBS_LOCK:
+        ASSOCIAR_RASTREADORES_JOBS[job_id]["status"] = "concluido"
+
+
+@app.route("/api/associar-rastreadores/executar", methods=["POST"])
+def associar_rastreadores_executar():
+    token = session.get("token")
+    if not token:
+        return jsonify(ok=False, error="Autentique-se primeiro."), 401
+
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with ASSOCIAR_RASTREADORES_UPLOADS_LOCK:
+        pares = ASSOCIAR_RASTREADORES_UPLOADS.pop(file_id, None)
+    if pares is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+
+    job_id = uuid.uuid4().hex
+    with ASSOCIAR_RASTREADORES_JOBS_LOCK:
+        ASSOCIAR_RASTREADORES_JOBS[job_id] = {
+            "status": "rodando", "atual": 0, "total": len(pares),
+            "sucessos": 0, "erros": 0, "logs": [],
+        }
+
+    threading.Thread(
+        target=_executar_associar_rastreadores,
+        args=(job_id, pares, token),
+        daemon=True,
+    ).start()
+
+    return jsonify(ok=True, job_id=job_id, total=len(pares))
+
+
+@app.route("/api/associar-rastreadores/status/<job_id>")
+def associar_rastreadores_status(job_id):
+    with ASSOCIAR_RASTREADORES_JOBS_LOCK:
+        job = ASSOCIAR_RASTREADORES_JOBS.get(job_id)
         if not job:
             return jsonify(ok=False, error="Job não encontrado."), 404
         resultado = dict(job)
