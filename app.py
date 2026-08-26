@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.23"
+APP_VERSION = "2.24"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -1578,15 +1578,16 @@ def deletar_veiculos_upload():
     try:
         wb = openpyxl.load_workbook(io.BytesIO(conteudo))
         sheet = wb.active
+        # Primeira linha é cabeçalho (mesma convenção das outras importações do app).
         codigos = [
             str(cell.value).strip()
-            for cell in sheet["A"]
+            for cell in list(sheet["A"])[1:]
             if cell.value is not None and str(cell.value).strip()
         ]
     except Exception as e:
         return jsonify(ok=False, error=f"Falha ao ler Excel: {e}"), 400
     if not codigos:
-        return jsonify(ok=False, error="Nenhum código de integração encontrado na coluna A."), 400
+        return jsonify(ok=False, error="Nenhum código de integração encontrado na coluna A (a partir da linha 2)."), 400
     file_id = uuid.uuid4().hex
     with DELETAR_VEICULOS_UPLOADS_LOCK:
         DELETAR_VEICULOS_UPLOADS[file_id] = codigos
@@ -1683,8 +1684,9 @@ def associar_rastreadores_upload():
     try:
         wb = openpyxl.load_workbook(io.BytesIO(conteudo))
         sheet = wb.active
-        col_a = [cell.value for cell in sheet["A"]]
-        col_b = [cell.value for cell in sheet["B"]]
+        # Primeira linha é cabeçalho (mesma convenção das outras importações do app).
+        col_a = [cell.value for cell in list(sheet["A"])[1:]]
+        col_b = [cell.value for cell in list(sheet["B"])[1:]]
         pares = []
         for veiculo, rastreador in zip(col_a, col_b):
             veiculo = str(veiculo).strip() if veiculo is not None else ""
@@ -1694,7 +1696,7 @@ def associar_rastreadores_upload():
     except Exception as e:
         return jsonify(ok=False, error=f"Falha ao ler Excel: {e}"), 400
     if not pares:
-        return jsonify(ok=False, error="Nenhum par veículo/rastreador encontrado nas colunas A e B."), 400
+        return jsonify(ok=False, error="Nenhum par veículo/rastreador encontrado nas colunas A e B (a partir da linha 2)."), 400
     file_id = uuid.uuid4().hex
     with ASSOCIAR_RASTREADORES_UPLOADS_LOCK:
         ASSOCIAR_RASTREADORES_UPLOADS[file_id] = pares
