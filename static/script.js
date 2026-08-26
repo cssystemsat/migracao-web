@@ -2121,7 +2121,7 @@ deletarVeiculosInputArquivo.addEventListener("change", async () => {
     const data = await parseJsonResponse(r);
     if (!data.ok) {
       deletarVeiculosArquivoNome.textContent = "Nenhum arquivo selecionado";
-      return mostrarErro(data.error || "Falha ao enviar arquivo.");
+      return alert(`Erro ao enviar arquivo: ${data.error || "falha desconhecida"}`);
     }
     deletarVeiculosFileId = data.file_id;
     deletarVeiculosTotalLinhas = data.total_linhas;
@@ -2129,7 +2129,7 @@ deletarVeiculosInputArquivo.addEventListener("change", async () => {
     btnDeletarVeiculosIniciar.disabled = false;
   } catch (err) {
     deletarVeiculosArquivoNome.textContent = "Nenhum arquivo selecionado";
-    mostrarErro(String(err));
+    alert(`Erro ao enviar arquivo: ${String(err)}`);
   }
 });
 
@@ -2150,7 +2150,7 @@ function iniciarPollingDeletarVeiculos(jobId) {
       const job = await parseJsonResponse(r);
       if (!job.ok) {
         pararPollingDeletarVeiculos();
-        return mostrarErro(job.error || "Falha ao consultar andamento.");
+        return alert(`Erro ao consultar andamento: ${job.error || "falha desconhecida"}`);
       }
 
       const pct = job.total ? Math.min(Math.round((job.atual / job.total) * 100), 100) : 0;
@@ -2180,7 +2180,7 @@ function iniciarPollingDeletarVeiculos(jobId) {
       }
     } catch (err) {
       pararPollingDeletarVeiculos();
-      mostrarErro(String(err));
+      alert(`Erro ao consultar andamento: ${String(err)}`);
     }
   }, 1500);
 }
@@ -2207,7 +2207,7 @@ btnDeletarVeiculosIniciar.addEventListener("click", async () => {
     if (!data.ok) throw new Error(data.error || "Falha ao iniciar exclusão em massa.");
     iniciarPollingDeletarVeiculos(data.job_id);
   } catch (err) {
-    mostrarErro(String(err));
+    alert(`Erro: ${String(err)}`);
     btnDeletarVeiculosIniciar.disabled = false;
     btnDeletarVeiculosIniciar.textContent = "Excluir veículos";
   }
@@ -2252,7 +2252,7 @@ associarRastreadoresInputArquivo.addEventListener("change", async () => {
     const data = await parseJsonResponse(r);
     if (!data.ok) {
       associarRastreadoresArquivoNome.textContent = "Nenhum arquivo selecionado";
-      return mostrarErro(data.error || "Falha ao enviar arquivo.");
+      return alert(`Erro ao enviar arquivo: ${data.error || "falha desconhecida"}`);
     }
     associarRastreadoresFileId = data.file_id;
     associarRastreadoresTotalLinhas = data.total_linhas;
@@ -2260,7 +2260,7 @@ associarRastreadoresInputArquivo.addEventListener("change", async () => {
     btnAssociarRastreadoresIniciar.disabled = false;
   } catch (err) {
     associarRastreadoresArquivoNome.textContent = "Nenhum arquivo selecionado";
-    mostrarErro(String(err));
+    alert(`Erro ao enviar arquivo: ${String(err)}`);
   }
 });
 
@@ -2281,7 +2281,7 @@ function iniciarPollingAssociarRastreadores(jobId) {
       const job = await parseJsonResponse(r);
       if (!job.ok) {
         pararPollingAssociarRastreadores();
-        return mostrarErro(job.error || "Falha ao consultar andamento.");
+        return alert(`Erro ao consultar andamento: ${job.error || "falha desconhecida"}`);
       }
 
       const pct = job.total ? Math.min(Math.round((job.atual / job.total) * 100), 100) : 0;
@@ -2311,7 +2311,7 @@ function iniciarPollingAssociarRastreadores(jobId) {
       }
     } catch (err) {
       pararPollingAssociarRastreadores();
-      mostrarErro(String(err));
+      alert(`Erro ao consultar andamento: ${String(err)}`);
     }
   }, 1500);
 }
@@ -2338,7 +2338,7 @@ btnAssociarRastreadoresIniciar.addEventListener("click", async () => {
     if (!data.ok) throw new Error(data.error || "Falha ao iniciar associação em massa.");
     iniciarPollingAssociarRastreadores(data.job_id);
   } catch (err) {
-    mostrarErro(String(err));
+    alert(`Erro: ${String(err)}`);
     btnAssociarRastreadoresIniciar.disabled = false;
     btnAssociarRastreadoresIniciar.textContent = "Associar rastreadores";
   }
