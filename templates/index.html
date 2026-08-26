@@ -83,6 +83,8 @@
             <button data-tipo="uo">Importar UO</button>
             <button data-tipo="usuario">Importar Usuário</button>
             <button disabled title="Ainda não implementado">Importar SimCard</button>
+            <button data-tipo="deletar-veiculos">Deletar veículos</button>
+            <button disabled title="Em desenvolvimento — aguardando especificação">Associar rastreadores</button>
           </div>
         </div>
       </div>
@@ -184,6 +186,35 @@
         </div>
 
         <button id="btn-iniciar-import" class="btn-primary" disabled>Iniciar Importação</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-deletar-veiculos" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Deletar veículos em massa</h3>
+        <button id="deletar-veiculos-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <p class="placeholder">Planilha: uma única coluna (A), com o Código de integração de um veículo por linha.</p>
+        <div class="passo">
+          <span class="passo-num">1</span>
+          <label for="deletar-veiculos-input-arquivo" class="file-label">Carregar Excel</label>
+          <input type="file" id="deletar-veiculos-input-arquivo" accept=".xlsx,.xls">
+          <span id="deletar-veiculos-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
+        </div>
+
+        <button id="btn-deletar-veiculos-iniciar" class="btn-primary" disabled>Excluir veículos</button>
+
+        <div id="deletar-veiculos-progresso" class="progresso-container hidden">
+          <div class="progresso-bar-bg"><div id="deletar-veiculos-bar" class="progresso-bar"></div></div>
+          <div class="progresso-info">
+            <span id="deletar-veiculos-status">Iniciando...</span>
+            <span id="deletar-veiculos-pct">0%</span>
+          </div>
+        </div>
+        <div id="deletar-veiculos-log" class="log-massa"></div>
       </div>
     </div>
   </div>

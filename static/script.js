@@ -440,6 +440,10 @@ el("botoes-import").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-tipo]");
   if (!btn) return;
   if (!estado.autenticado) return mostrarErro("Autentique-se primeiro.");
+  if (btn.dataset.tipo === "deletar-veiculos") {
+    abrirModalDeletarVeiculos();
+    return;
+  }
   abrirModalImport(btn.dataset.tipo);
 });
 
@@ -2071,6 +2075,137 @@ btnComandoEnviarMassa.addEventListener("click", async () => {
     mostrarErro(String(err));
     btnComandoEnviarMassa.disabled = false;
     btnComandoEnviarMassa.textContent = "Enviar";
+  }
+});
+
+// --- DELETAR VEÍCULOS EM MASSA ---
+const overlayDeletarVeiculos = el("overlay-deletar-veiculos");
+const deletarVeiculosInputArquivo = el("deletar-veiculos-input-arquivo");
+const deletarVeiculosArquivoNome = el("deletar-veiculos-arquivo-nome");
+const btnDeletarVeiculosIniciar = el("btn-deletar-veiculos-iniciar");
+const deletarVeiculosProgresso = el("deletar-veiculos-progresso");
+const deletarVeiculosBar = el("deletar-veiculos-bar");
+const deletarVeiculosStatus = el("deletar-veiculos-status");
+const deletarVeiculosPct = el("deletar-veiculos-pct");
+const deletarVeiculosLog = el("deletar-veiculos-log");
+
+let deletarVeiculosFileId = null;
+let deletarVeiculosTotalLinhas = 0;
+
+function abrirModalDeletarVeiculos() {
+  deletarVeiculosFileId = null;
+  deletarVeiculosTotalLinhas = 0;
+  deletarVeiculosInputArquivo.value = "";
+  deletarVeiculosArquivoNome.textContent = "Nenhum arquivo selecionado";
+  btnDeletarVeiculosIniciar.disabled = true;
+  btnDeletarVeiculosIniciar.textContent = "Excluir veículos";
+  deletarVeiculosProgresso.classList.add("hidden");
+  deletarVeiculosLog.innerHTML = "";
+  overlayDeletarVeiculos.classList.remove("hidden");
+}
+
+el("deletar-veiculos-fechar").addEventListener("click", () => overlayDeletarVeiculos.classList.add("hidden"));
+
+deletarVeiculosInputArquivo.addEventListener("change", async () => {
+  const file = deletarVeiculosInputArquivo.files[0];
+  if (!file) return;
+  deletarVeiculosArquivoNome.textContent = "Enviando...";
+  const formData = new FormData();
+  formData.append("arquivo", file);
+  try {
+    const r = await fetch("/api/deletar-veiculos/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      deletarVeiculosArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErro(data.error || "Falha ao enviar arquivo.");
+    }
+    deletarVeiculosFileId = data.file_id;
+    deletarVeiculosTotalLinhas = data.total_linhas;
+    deletarVeiculosArquivoNome.textContent = `${file.name} (${data.total_linhas} código(s))`;
+    btnDeletarVeiculosIniciar.disabled = false;
+  } catch (err) {
+    deletarVeiculosArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErro(String(err));
+  }
+});
+
+let deletarVeiculosLogsMostrados = 0;
+let deletarVeiculosPollTimer = null;
+
+function pararPollingDeletarVeiculos() {
+  if (deletarVeiculosPollTimer) {
+    clearInterval(deletarVeiculosPollTimer);
+    deletarVeiculosPollTimer = null;
+  }
+}
+
+function iniciarPollingDeletarVeiculos(jobId) {
+  deletarVeiculosPollTimer = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/deletar-veiculos/status/${jobId}`);
+      const job = await parseJsonResponse(r);
+      if (!job.ok) {
+        pararPollingDeletarVeiculos();
+        return mostrarErro(job.error || "Falha ao consultar andamento.");
+      }
+
+      const pct = job.total ? Math.min(Math.round((job.atual / job.total) * 100), 100) : 0;
+      deletarVeiculosBar.style.width = pct + "%";
+      deletarVeiculosPct.textContent = pct + "%";
+      deletarVeiculosStatus.textContent = `Linha ${job.atual} de ${job.total} (sucessos: ${job.sucessos}, erros: ${job.erros})`;
+
+      for (let i = deletarVeiculosLogsMostrados; i < job.logs.length; i++) {
+        const div = document.createElement("div");
+        div.className = "log-linha";
+        div.textContent = job.logs[i];
+        deletarVeiculosLog.appendChild(div);
+      }
+      deletarVeiculosLogsMostrados = job.logs.length;
+
+      if (job.status === "concluido") {
+        pararPollingDeletarVeiculos();
+        const div = document.createElement("div");
+        div.className = "resumo-final";
+        div.textContent = `Concluído! Excluídos: ${job.sucessos} | Erros: ${job.erros}`;
+        deletarVeiculosLog.appendChild(div);
+        btnDeletarVeiculosIniciar.disabled = false;
+        btnDeletarVeiculosIniciar.textContent = "Excluir veículos";
+        deletarVeiculosFileId = null;
+        deletarVeiculosArquivoNome.textContent = "Nenhum arquivo selecionado";
+        deletarVeiculosInputArquivo.value = "";
+      }
+    } catch (err) {
+      pararPollingDeletarVeiculos();
+      mostrarErro(String(err));
+    }
+  }, 1500);
+}
+
+btnDeletarVeiculosIniciar.addEventListener("click", async () => {
+  if (!deletarVeiculosFileId) return;
+  if (!confirm(`Isso vai excluir permanentemente ${deletarVeiculosTotalLinhas} veículo(s) da SSX. Essa ação NÃO pode ser desfeita. Confirma?`)) return;
+
+  btnDeletarVeiculosIniciar.disabled = true;
+  btnDeletarVeiculosIniciar.textContent = "Excluindo...";
+  deletarVeiculosProgresso.classList.remove("hidden");
+  deletarVeiculosBar.style.width = "0%";
+  deletarVeiculosPct.textContent = "0%";
+  deletarVeiculosLog.innerHTML = "";
+  deletarVeiculosLogsMostrados = 0;
+
+  try {
+    const resp = await fetch("/api/deletar-veiculos/executar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: deletarVeiculosFileId }),
+    });
+    const data = await parseJsonResponse(resp);
+    if (!data.ok) throw new Error(data.error || "Falha ao iniciar exclusão em massa.");
+    iniciarPollingDeletarVeiculos(data.job_id);
+  } catch (err) {
+    mostrarErro(String(err));
+    btnDeletarVeiculosIniciar.disabled = false;
+    btnDeletarVeiculosIniciar.textContent = "Excluir veículos";
   }
 });
 

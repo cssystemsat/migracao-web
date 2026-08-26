@@ -825,6 +825,7 @@ table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
 }
 
 .comando-massa-log { max-height: 70px; overflow-y: auto; margin-top: 4px; font-size: 0.74rem; }
+.log-massa { max-height: 260px; overflow-y: auto; margin-top: 12px; font-size: 0.8rem; }
 
 .comando-resposta {
   font-size: 0.78rem;
