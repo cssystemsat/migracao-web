@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.25"
+APP_VERSION = "2.26"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -1601,7 +1601,7 @@ def _executar_deletar_veiculos(job_id, codigos, token):
         try:
             r = requests.post(
                 f"{BASE_URL}/Administration/Vehicle/Delete",
-                json={"VehicleIntegrationCode": codigo},
+                json=codigo,
                 headers=headers,
                 timeout=20,
             )
