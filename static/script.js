@@ -1245,6 +1245,9 @@ const STATUS_VEICULO_CLASSE = {
   Enviar: "linha-status-enviar",
 };
 const CAMPOS_VEICULO_EDITAVEIS = ["cliente", "veiculo", "equipamento", "id_equipamento", "numero_linha"];
+// APN e L/S apn não entram nessa lista de propósito: ficam sempre editáveis
+// (autosave ao sair do campo), igual a coluna Comando — não só durante o modo
+// de edição em massa como os campos acima.
 
 let veiculosMigracaoClienteIdAtual = null;
 let veiculosMigracaoDadosAtuais = [];
@@ -1269,7 +1272,7 @@ function criarLinhaBrancoVeiculo() {
   contadorLinhaBrancoVeiculo += 1;
   return {
     id: `novo-${contadorLinhaBrancoVeiculo}`,
-    cliente: "", veiculo: "", equipamento: "", id_equipamento: "", numero_linha: "", comando: "",
+    cliente: "", veiculo: "", equipamento: "", id_equipamento: "", apn: "", ls_apn: "", numero_linha: "", comando: "",
     status: "Aguardando",
   };
 }
@@ -1309,7 +1312,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     return;
   }
 
-  const headers = ["", "Status", "Cliente", "Veículo", "Equipamento", "ID do equipamento", "Número da linha", "Comando", "Ações"];
+  const headers = ["", "Status", "Cliente", "Veículo", "Equipamento", "ID do equipamento", "APN", "L/S apn", "Número da linha", "Comando", "Ações"];
   const table = document.createElement("table");
   table.className = "tabela-saida";
 
@@ -1371,7 +1374,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     tdStatus.appendChild(selectStatus);
     tr.appendChild(tdStatus);
 
-    CAMPOS_VEICULO_EDITAVEIS.forEach((campo) => {
+    function criarCelulaCampoEditavel(campo) {
       const td = document.createElement("td");
       if (modoEdicaoVeiculos) {
         const input = document.createElement("input");
@@ -1381,10 +1384,46 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
         input.value = v[campo] || "";
         td.appendChild(input);
       } else {
+        td.dataset.campo = campo;
         td.textContent = v[campo] || "-";
       }
       tr.appendChild(td);
+    }
+
+    // Cliente, Veículo, Equipamento, ID do equipamento — só editáveis no modo de edição em massa.
+    CAMPOS_VEICULO_EDITAVEIS.slice(0, 4).forEach(criarCelulaCampoEditavel);
+
+    // APN e L/S apn — sempre editáveis com autosave ao sair do campo, igual a coluna Comando.
+    [["apn", "APN"], ["ls_apn", "L/S apn"]].forEach(([campo, rotulo]) => {
+      const td = document.createElement("td");
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "veiculo-comando-input";
+      input.dataset.campo = campo;
+      input.placeholder = rotulo;
+      input.value = v[campo] || "";
+      let ultimoValorSalvo = input.value;
+      input.addEventListener("blur", async () => {
+        if (modoEdicaoVeiculos || input.value === ultimoValorSalvo) return;
+        try {
+          const r = await fetch(`/api/migracao/clientes/${clienteId}/veiculos/${v.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ [campo]: input.value }),
+          });
+          const data = await parseJsonResponse(r);
+          if (!data.ok) return alert(`Erro ao salvar ${rotulo}: ${data.error || "falha desconhecida"}`);
+          ultimoValorSalvo = input.value;
+        } catch (err) {
+          alert(`Erro ao salvar ${rotulo}: ${String(err)}`);
+        }
+      });
+      td.appendChild(input);
+      tr.appendChild(td);
     });
+
+    // Número da linha — volta a fazer parte do mesmo grupo editável em massa.
+    CAMPOS_VEICULO_EDITAVEIS.slice(4).forEach(criarCelulaCampoEditavel);
 
     const tdComando = document.createElement("td");
     const inputComando = document.createElement("input");
@@ -1476,6 +1515,10 @@ btnEditarVeiculos.addEventListener("click", async () => {
     });
     const inputComando = tr.querySelector('[data-campo="comando"]');
     if (inputComando) item.comando = inputComando.value;
+    const inputApn = tr.querySelector('[data-campo="apn"]');
+    if (inputApn) item.apn = inputApn.value;
+    const inputLsApn = tr.querySelector('[data-campo="ls_apn"]');
+    if (inputLsApn) item.ls_apn = inputLsApn.value;
     return item;
   });
 
@@ -1555,9 +1598,9 @@ btnEnviarSelecionados.addEventListener("click", async () => {
     const tr = linhas[i];
     veiculosMigracaoEnvioStatus.textContent = `Enviando ${i + 1} de ${linhas.length}...`;
     const inputComando = tr.querySelector('[data-campo="comando"]');
-    const inputNumero = tr.querySelector('[data-campo="numero_linha"]');
+    const campoNumero = tr.querySelector('[data-campo="numero_linha"]');
     const btnLinha = tr.querySelector(".btn-enviar-icone");
-    const numeroLinha = inputNumero ? inputNumero.value : (tr.children[6]?.textContent || "");
+    const numeroLinha = campoNumero ? (campoNumero.value ?? campoNumero.textContent) || "" : "";
     const resultado = await enviarComandoLinhaVeiculo(btnLinha, numeroLinha, inputComando ? inputComando.value : "");
     if (resultado.ok) {
       sucessos++;

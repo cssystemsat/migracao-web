@@ -22,8 +22,8 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
-# Sobe 0.1 a cada edição publicada (2.0 -> 2.1 -> 2.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "2.26"
+# Sobe 0.1 a cada edição publicada (3.0 -> 3.1 -> 3.2 ...); só sobe o inteiro quando pedido.
+APP_VERSION = "3.0"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -929,6 +929,8 @@ def listar_veiculos_migracao(cliente_id):
     for d in docs:
         dados = d.to_dict()
         dados.setdefault("comando", "")
+        dados.setdefault("apn", "")
+        dados.setdefault("ls_apn", "")
         dados.setdefault("status", STATUS_VEICULO_PADRAO)
         lista.append(dict(dados, id=d.id))
     lista.sort(key=lambda v: (v.get("cliente") or "", v.get("veiculo") or ""))
@@ -944,6 +946,10 @@ def atualizar_veiculo_migracao(cliente_id, veiculo_id):
     atualizacoes = {}
     if "comando" in data:
         atualizacoes["comando"] = str(data.get("comando", ""))
+    if "apn" in data:
+        atualizacoes["apn"] = str(data.get("apn", ""))
+    if "ls_apn" in data:
+        atualizacoes["ls_apn"] = str(data.get("ls_apn", ""))
     if "status" in data:
         status = str(data.get("status", "")).strip()
         if status not in STATUS_VEICULO_VALIDOS:
@@ -955,7 +961,7 @@ def atualizar_veiculo_migracao(cliente_id, veiculo_id):
     return jsonify(ok=True, **atualizacoes)
 
 
-CAMPOS_VEICULO_EDITAVEIS = ["cliente", "veiculo", "equipamento", "id_equipamento", "numero_linha", "comando"]
+CAMPOS_VEICULO_EDITAVEIS = ["cliente", "veiculo", "equipamento", "id_equipamento", "apn", "ls_apn", "numero_linha", "comando"]
 
 
 @app.route("/api/migracao/clientes/<cliente_id>/veiculos/salvar-lote", methods=["POST"])
