@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (3.0 -> 3.1 -> 3.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -962,6 +962,24 @@ def _preencher_comandos_por_modelo(cliente_migracao_id, veiculos):
             v["comando"] = _resolver_comando_modelo(modelo.get("comando_template"), modelo.get("porta"))
 
 
+def _reaplicar_comando_em_veiculos_existentes(cliente_id, modelo, porta, comando_template):
+    """Ao criar/editar um modelo, atualiza na hora o 'comando' de veículos já
+    cadastrados nesse cliente cujo 'equipamento' bate (case-insensitive) com ele.
+    Retorna quantos veículos foram atualizados."""
+    modelo_norm = str(modelo or "").strip().lower()
+    if not modelo_norm:
+        return 0
+    comando_resolvido = _resolver_comando_modelo(comando_template, porta)
+    subcolecao = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("veiculos")
+    atualizados = 0
+    for v in subcolecao.stream():
+        dados = v.to_dict()
+        if str(dados.get("equipamento", "")).strip().lower() == modelo_norm:
+            v.reference.update({"comando": comando_resolvido})
+            atualizados += 1
+    return atualizados
+
+
 @app.route("/api/migracao/clientes/<cliente_id>/modelos", methods=["GET"])
 def listar_modelos_comando_migracao(cliente_id):
     if not db.collection(MIGRACAO_COLLECTION).document(cliente_id).get().exists:
@@ -983,7 +1001,10 @@ def criar_modelo_comando_migracao(cliente_id):
         return jsonify(ok=False, error="Informe o modelo do rastreador."), 400
     doc_ref = cliente_ref.collection("modelos_comando").document()
     doc_ref.set(dados)
-    return jsonify(ok=True, modelo=dict(dados, id=doc_ref.id))
+    atualizados = _reaplicar_comando_em_veiculos_existentes(
+        cliente_id, dados["modelo"], dados["porta"], dados["comando_template"]
+    )
+    return jsonify(ok=True, modelo=dict(dados, id=doc_ref.id), veiculos_atualizados=atualizados)
 
 
 @app.route("/api/migracao/clientes/<cliente_id>/modelos/<modelo_id>", methods=["PUT"])
@@ -996,7 +1017,10 @@ def editar_modelo_comando_migracao(cliente_id, modelo_id):
     if dados is None:
         return jsonify(ok=False, error="Informe o modelo do rastreador."), 400
     ref.set(dados)
-    return jsonify(ok=True, modelo=dict(dados, id=modelo_id))
+    atualizados = _reaplicar_comando_em_veiculos_existentes(
+        cliente_id, dados["modelo"], dados["porta"], dados["comando_template"]
+    )
+    return jsonify(ok=True, modelo=dict(dados, id=modelo_id), veiculos_atualizados=atualizados)
 
 
 @app.route("/api/migracao/clientes/<cliente_id>/modelos/<modelo_id>", methods=["DELETE"])

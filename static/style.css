@@ -459,6 +459,7 @@ table.tabela-credenciais th { background: var(--cinza-100); }
   padding: 1px 5px;
   font-size: 0.85em;
 }
+.migracao-modelo-status { margin-top: 10px; color: var(--verde-escuro); font-size: 0.82rem; }
 
 .form-credencial {
   display: flex;

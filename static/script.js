@@ -1321,6 +1321,7 @@ function resetFormMigracaoModelo() {
   migracaoModeloEditandoId = null;
   btnSalvarMigracaoModelo.textContent = "Adicionar";
   btnCancelarEdicaoMigracaoModelo.classList.add("hidden");
+  el("migracao-modelo-status").textContent = "";
 }
 
 function abrirEdicaoMigracaoModelo(m) {
@@ -1358,6 +1359,12 @@ formMigracaoModelo.addEventListener("submit", async (e) => {
     if (!data.ok) return alert(`Erro ao salvar modelo: ${data.error || "falha desconhecida"}`);
     resetFormMigracaoModelo();
     await carregarMigracaoModelos();
+    const migracaoModeloStatus = el("migracao-modelo-status");
+    if (data.veiculos_atualizados > 0) {
+      migracaoModeloStatus.textContent = `Comando atualizado em ${data.veiculos_atualizados} veículo(s) já cadastrado(s) com esse modelo.`;
+    } else {
+      migracaoModeloStatus.textContent = "";
+    }
   } catch (err) {
     alert(`Erro ao salvar modelo: ${String(err)}`);
   }
