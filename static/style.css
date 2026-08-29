@@ -213,7 +213,7 @@ table.tabela-saida th.th-ordenavel:hover { background: var(--cinza-200); }
 table.tabela-saida .seta-ordenacao { color: var(--azul); }
 table.tabela-saida tr:hover td { background: #f0f7ff; }
 
-.tabela-implantacao-clientes th.th-redimensionavel { position: relative; padding-right: 16px; }
+table.tabela-saida th.th-redimensionavel { position: sticky; top: 0; padding-right: 16px; }
 .tabela-implantacao-clientes td.td-objetivo-implantacao {
   white-space: normal;
   word-break: break-word;

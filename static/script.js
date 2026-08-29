@@ -1467,6 +1467,52 @@ async function recarregarVeiculosMigracao(permitirLinhasBranco = false) {
   }
 }
 
+// Deixa TODAS as colunas de uma tabela redimensionáveis arrastando a borda do
+// cabeçalho (não só uma coluna específica) — largura de cada uma fica salva no
+// navegador (localStorage) por chaveArmazenamento, pra continuar do jeito que a
+// pessoa deixou da próxima vez que abrir essa tabela.
+function tornarColunasRedimensionaveis(table, chaveArmazenamento) {
+  const ths = Array.from(table.querySelectorAll("thead th"));
+  const linhas = Array.from(table.querySelectorAll("tbody tr"));
+  let larguras = {};
+  try {
+    larguras = JSON.parse(localStorage.getItem(chaveArmazenamento) || "{}");
+  } catch (err) {
+    larguras = {};
+  }
+
+  ths.forEach((th, i) => {
+    const tds = linhas.map((tr) => tr.children[i]).filter(Boolean);
+    if (larguras[i]) {
+      th.style.width = `${larguras[i]}px`;
+      tds.forEach((td) => { td.style.width = `${larguras[i]}px`; });
+    }
+    th.classList.add("th-redimensionavel");
+    const alca = document.createElement("span");
+    alca.className = "col-resize-handle";
+    alca.title = "Arraste para redimensionar";
+    th.appendChild(alca);
+    alca.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = th.offsetWidth;
+      function aoMover(ev) {
+        const nova = Math.max(40, startWidth + (ev.clientX - startX));
+        th.style.width = `${nova}px`;
+        tds.forEach((td) => { td.style.width = `${nova}px`; });
+      }
+      function aoSoltar() {
+        document.removeEventListener("mousemove", aoMover);
+        document.removeEventListener("mouseup", aoSoltar);
+        larguras[i] = th.offsetWidth;
+        localStorage.setItem(chaveArmazenamento, JSON.stringify(larguras));
+      }
+      document.addEventListener("mousemove", aoMover);
+      document.addEventListener("mouseup", aoSoltar);
+    });
+  });
+}
+
 function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   veiculosMigracaoCorpo.innerHTML = "";
 
@@ -1681,6 +1727,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   });
   table.appendChild(tbody);
   veiculosMigracaoCorpo.appendChild(table);
+  tornarColunasRedimensionaveis(table, "larguraColunas_veiculosMigracao");
 }
 
 btnSelecionarTodosVeiculos.addEventListener("click", () => {
