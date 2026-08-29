@@ -23,7 +23,7 @@ app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Sobe 0.1 a cada edição publicada (3.0 -> 3.1 -> 3.2 ...); só sobe o inteiro quando pedido.
-APP_VERSION = "3.0"
+APP_VERSION = "3.1"
 
 BASE_URL = "https://integration.systemsatx.com.br"
 
@@ -898,6 +898,8 @@ def excluir_cliente_migracao(cliente_id):
         return jsonify(ok=False, error="Cliente não encontrado."), 404
     for v in doc_ref.collection("veiculos").stream():
         v.reference.delete()
+    for m in doc_ref.collection("modelos_comando").stream():
+        m.reference.delete()
     doc_ref.delete()
     return jsonify(ok=True)
 
@@ -918,6 +920,92 @@ def atualizar_cliente_migracao(cliente_id):
     }
     doc_ref.update(dados)
     return jsonify(ok=True, dados=dict(atual.to_dict(), **dados))
+
+
+# --- MODELOS DE RASTREADOR POR CLIENTE (padroniza o Comando pelo Equipamento) ---
+# Cada cliente em migração tem sua própria tabela de {modelo, porta, comando_template}.
+# O comando_template usa o placeholder literal "{porta}", substituído pela porta
+# cadastrada pra esse modelo nesse cliente — ex.: "ip,200.152.62.20,{porta}" com
+# porta "123456" vira "ip,200.152.62.20,123456". Usado tanto na tela (quando o
+# Equipamento de um veículo é selecionado) quanto na importação com "Criar planilha".
+def _resolver_comando_modelo(template, porta):
+    return (template or "").replace("{porta}", porta or "")
+
+
+def _dados_modelo_comando(data):
+    modelo = str(data.get("modelo", "")).strip()
+    if not modelo:
+        return None
+    return {
+        "modelo": modelo,
+        "porta": str(data.get("porta", "")).strip(),
+        "comando_template": str(data.get("comando_template", "")).strip(),
+    }
+
+
+def _preencher_comandos_por_modelo(cliente_migracao_id, veiculos):
+    """Preenche 'comando' em cada dict de veiculos (in-place) cujo 'equipamento'
+    bata (case-insensitive) com um modelo cadastrado pra esse cliente."""
+    docs = db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).collection("modelos_comando").stream()
+    mapa = {}
+    for d in docs:
+        m = d.to_dict()
+        modelo = str(m.get("modelo", "")).strip().lower()
+        if modelo:
+            mapa[modelo] = m
+    if not mapa:
+        return
+    for v in veiculos:
+        equipamento = str(v.get("equipamento", "")).strip().lower()
+        modelo = mapa.get(equipamento)
+        if modelo:
+            v["comando"] = _resolver_comando_modelo(modelo.get("comando_template"), modelo.get("porta"))
+
+
+@app.route("/api/migracao/clientes/<cliente_id>/modelos", methods=["GET"])
+def listar_modelos_comando_migracao(cliente_id):
+    if not db.collection(MIGRACAO_COLLECTION).document(cliente_id).get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    docs = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("modelos_comando").stream()
+    lista = [dict(d.to_dict(), id=d.id) for d in docs]
+    lista.sort(key=lambda m: (m.get("modelo") or "").lower())
+    return jsonify(ok=True, modelos=lista)
+
+
+@app.route("/api/migracao/clientes/<cliente_id>/modelos", methods=["POST"])
+def criar_modelo_comando_migracao(cliente_id):
+    cliente_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
+    if not cliente_ref.get().exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    data = request.get_json(force=True) or {}
+    dados = _dados_modelo_comando(data)
+    if dados is None:
+        return jsonify(ok=False, error="Informe o modelo do rastreador."), 400
+    doc_ref = cliente_ref.collection("modelos_comando").document()
+    doc_ref.set(dados)
+    return jsonify(ok=True, modelo=dict(dados, id=doc_ref.id))
+
+
+@app.route("/api/migracao/clientes/<cliente_id>/modelos/<modelo_id>", methods=["PUT"])
+def editar_modelo_comando_migracao(cliente_id, modelo_id):
+    ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("modelos_comando").document(modelo_id)
+    if not ref.get().exists:
+        return jsonify(ok=False, error="Modelo não encontrado."), 404
+    data = request.get_json(force=True) or {}
+    dados = _dados_modelo_comando(data)
+    if dados is None:
+        return jsonify(ok=False, error="Informe o modelo do rastreador."), 400
+    ref.set(dados)
+    return jsonify(ok=True, modelo=dict(dados, id=modelo_id))
+
+
+@app.route("/api/migracao/clientes/<cliente_id>/modelos/<modelo_id>", methods=["DELETE"])
+def excluir_modelo_comando_migracao(cliente_id, modelo_id):
+    ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("modelos_comando").document(modelo_id)
+    if not ref.get().exists:
+        return jsonify(ok=False, error="Modelo não encontrado."), 404
+    ref.delete()
+    return jsonify(ok=True)
 
 
 @app.route("/api/migracao/clientes/<cliente_id>/veiculos", methods=["GET"])
@@ -1150,6 +1238,9 @@ def _executar_import(job_id, tipo_config, mapping, df, endpoint, token, criar_pl
     if criar_planilha:
         cliente_migracao_id = obter_ou_criar_cliente_migracao(nome_cliente_planilha)
         if veiculos_para_planilha:
+            # Preenche o Comando sozinho quando o Equipamento bate com um modelo
+            # já cadastrado pra esse cliente (Modelo de rastreador / Porta / Comando).
+            _preencher_comandos_por_modelo(cliente_migracao_id, veiculos_para_planilha)
             salvar_veiculos_migracao(cliente_migracao_id, veiculos_para_planilha)
         qtd_clientes, qtd_placas = recalcular_contagens_migracao(cliente_migracao_id)
         resultado_planilha = {"nome": nome_cliente_planilha, "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas}

@@ -451,6 +451,15 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 
 .form-credencial-titulo { font-size: 0.9rem; margin: 6px 0 10px; }
 
+.migracao-modelos-bloco { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--cinza-200); }
+.migracao-modelos-dica { font-size: 0.8rem; margin-bottom: 12px; }
+.migracao-modelos-dica code {
+  background: var(--cinza-100);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.85em;
+}
+
 .form-credencial {
   display: flex;
   flex-wrap: wrap;

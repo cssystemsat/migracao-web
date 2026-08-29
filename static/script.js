@@ -1074,6 +1074,7 @@ const inputMigracaoQtdPlacas = el("migracao-qtd-placas");
 const inputMigracaoPercentual = el("migracao-percentual");
 
 let clienteMigracaoAtualId = null;
+let veiculosMigracaoModelosCache = []; // {modelo, porta, comando_template}[] do cliente atual
 
 async function carregarClientesMigracao() {
   mostrarPlaceholder("Carregando clientes em migração...");
@@ -1186,6 +1187,8 @@ async function adicionarClienteMigracao() {
     const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao criar cliente.");
     await carregarClientesMigracao();
+    // Já abre o cliente recém-criado pra preencher CSM/plataforma/modelos na hora.
+    abrirModalMigracao(data.cliente);
   } catch (err) {
     mostrarErro(String(err));
   }
@@ -1200,6 +1203,8 @@ function abrirModalMigracao(cliente) {
   inputMigracaoQtdPlacas.value = cliente.qtd_placas || 0;
   inputMigracaoPercentual.value = cliente.percentual_migracao || 0;
   overlayMigracao.classList.remove("hidden");
+  resetFormMigracaoModelo();
+  carregarMigracaoModelos();
 }
 
 el("migracao-modal-fechar").addEventListener("click", () => overlayMigracao.classList.add("hidden"));
@@ -1228,6 +1233,149 @@ formMigracao.addEventListener("submit", async (e) => {
   }
 });
 
+// --- MODELOS DE RASTREADOR POR CLIENTE (padroniza o Comando pelo Equipamento) ---
+const migracaoModelosLista = el("migracao-modelos-lista");
+const formMigracaoModelo = el("form-migracao-modelo");
+const inputMigracaoModeloNome = el("migracao-modelo-nome");
+const inputMigracaoModeloPorta = el("migracao-modelo-porta");
+const inputMigracaoModeloComando = el("migracao-modelo-comando");
+const btnSalvarMigracaoModelo = el("btn-salvar-migracao-modelo");
+const btnCancelarEdicaoMigracaoModelo = el("btn-cancelar-edicao-migracao-modelo");
+
+let migracaoModeloEditandoId = null;
+
+function resolverComandoModelo(template, porta) {
+  return (template || "").replace("{porta}", porta || "");
+}
+
+async function carregarMigracaoModelos() {
+  if (!clienteMigracaoAtualId) return;
+  try {
+    const r = await fetch(`/api/migracao/clientes/${clienteMigracaoAtualId}/modelos`);
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroEmNode(migracaoModelosLista, data.error || "Falha ao carregar modelos.");
+    veiculosMigracaoModelosCache = data.modelos || [];
+    renderMigracaoModelosLista();
+  } catch (err) {
+    mostrarErroEmNode(migracaoModelosLista, String(err));
+  }
+}
+
+function renderMigracaoModelosLista() {
+  migracaoModelosLista.innerHTML = "";
+  if (veiculosMigracaoModelosCache.length === 0) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhum modelo cadastrado ainda.";
+    migracaoModelosLista.appendChild(p);
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "tabela-credenciais";
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th>Modelo</th><th>Porta</th><th>Comando</th><th></th></tr>";
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  veiculosMigracaoModelosCache.forEach((m) => {
+    const tr = document.createElement("tr");
+
+    const tdModelo = document.createElement("td");
+    tdModelo.textContent = m.modelo;
+
+    const tdPorta = document.createElement("td");
+    tdPorta.textContent = m.porta || "-";
+
+    const tdComando = document.createElement("td");
+    tdComando.textContent = m.comando_template || "-";
+    tdComando.className = "comando-item-valor";
+
+    const tdAcoes = document.createElement("td");
+    tdAcoes.className = "acoes-credencial";
+
+    const btnEditar = document.createElement("button");
+    btnEditar.className = "btn-secondary";
+    btnEditar.textContent = "Editar";
+    btnEditar.addEventListener("click", () => abrirEdicaoMigracaoModelo(m));
+    tdAcoes.appendChild(btnEditar);
+
+    const btnExcluir = document.createElement("button");
+    btnExcluir.className = "btn-secondary";
+    btnExcluir.textContent = "Excluir";
+    btnExcluir.addEventListener("click", () => excluirMigracaoModelo(m.id));
+    tdAcoes.appendChild(btnExcluir);
+
+    tr.appendChild(tdModelo);
+    tr.appendChild(tdPorta);
+    tr.appendChild(tdComando);
+    tr.appendChild(tdAcoes);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  migracaoModelosLista.appendChild(table);
+}
+
+function resetFormMigracaoModelo() {
+  formMigracaoModelo.reset();
+  migracaoModeloEditandoId = null;
+  btnSalvarMigracaoModelo.textContent = "Adicionar";
+  btnCancelarEdicaoMigracaoModelo.classList.add("hidden");
+}
+
+function abrirEdicaoMigracaoModelo(m) {
+  inputMigracaoModeloNome.value = m.modelo;
+  inputMigracaoModeloPorta.value = m.porta || "";
+  inputMigracaoModeloComando.value = m.comando_template || "";
+  migracaoModeloEditandoId = m.id;
+  btnSalvarMigracaoModelo.textContent = "Salvar edição";
+  btnCancelarEdicaoMigracaoModelo.classList.remove("hidden");
+  inputMigracaoModeloNome.focus();
+}
+
+btnCancelarEdicaoMigracaoModelo.addEventListener("click", resetFormMigracaoModelo);
+
+formMigracaoModelo.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!clienteMigracaoAtualId) return;
+  const payload = {
+    modelo: inputMigracaoModeloNome.value.trim(),
+    porta: inputMigracaoModeloPorta.value.trim(),
+    comando_template: inputMigracaoModeloComando.value.trim(),
+  };
+  if (!payload.modelo) return;
+  try {
+    const url = migracaoModeloEditandoId
+      ? `/api/migracao/clientes/${clienteMigracaoAtualId}/modelos/${migracaoModeloEditandoId}`
+      : `/api/migracao/clientes/${clienteMigracaoAtualId}/modelos`;
+    const method = migracaoModeloEditandoId ? "PUT" : "POST";
+    const r = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return alert(`Erro ao salvar modelo: ${data.error || "falha desconhecida"}`);
+    resetFormMigracaoModelo();
+    await carregarMigracaoModelos();
+  } catch (err) {
+    alert(`Erro ao salvar modelo: ${String(err)}`);
+  }
+});
+
+async function excluirMigracaoModelo(id) {
+  if (!clienteMigracaoAtualId) return;
+  if (!confirm("Excluir este modelo?")) return;
+  try {
+    const r = await fetch(`/api/migracao/clientes/${clienteMigracaoAtualId}/modelos/${id}`, { method: "DELETE" });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return alert(`Erro ao excluir: ${data.error || "falha desconhecida"}`);
+    await carregarMigracaoModelos();
+  } catch (err) {
+    alert(`Erro ao excluir: ${String(err)}`);
+  }
+}
+
 // --- VEÍCULOS DO CLIENTE EM MIGRAÇÃO ---
 const overlayVeiculosMigracao = el("overlay-veiculos-migracao");
 const veiculosMigracaoTitulo = el("veiculos-migracao-titulo");
@@ -1254,6 +1402,16 @@ let veiculosMigracaoDadosAtuais = [];
 let modoEdicaoVeiculos = false;
 
 el("veiculos-migracao-fechar").addEventListener("click", () => overlayVeiculosMigracao.classList.add("hidden"));
+async function carregarModelosCacheParaVeiculos(clienteId) {
+  try {
+    const r = await fetch(`/api/migracao/clientes/${clienteId}/modelos`);
+    const data = await parseJsonResponse(r);
+    veiculosMigracaoModelosCache = data.ok ? (data.modelos || []) : [];
+  } catch (err) {
+    veiculosMigracaoModelosCache = [];
+  }
+}
+
 async function abrirVeiculosMigracao(cliente) {
   veiculosMigracaoClienteIdAtual = cliente.id;
   veiculosMigracaoTitulo.textContent = `Veículos — ${cliente.nome}`;
@@ -1263,6 +1421,7 @@ async function abrirVeiculosMigracao(cliente) {
   btnEditarVeiculos.textContent = "Editar";
   btnSelecionarTodosVeiculos.textContent = "Selecionar todos";
   overlayVeiculosMigracao.classList.remove("hidden");
+  await carregarModelosCacheParaVeiculos(cliente.id);
   await recarregarVeiculosMigracao(true);
 }
 
@@ -1374,9 +1533,35 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     tdStatus.appendChild(selectStatus);
     tr.appendChild(tdStatus);
 
+    // Referência preenchida mais abaixo, quando a célula de Comando é montada —
+    // o select de Equipamento (criado antes) usa isso pra autopreencher ao trocar.
+    let inputComandoRef = null;
+
     function criarCelulaCampoEditavel(campo) {
       const td = document.createElement("td");
-      if (modoEdicaoVeiculos) {
+      if (modoEdicaoVeiculos && campo === "equipamento" && veiculosMigracaoModelosCache.length > 0) {
+        const select = document.createElement("select");
+        select.className = "veiculo-comando-input";
+        select.dataset.campo = campo;
+        const optVazia = document.createElement("option");
+        optVazia.value = "";
+        optVazia.textContent = "Selecione o modelo...";
+        select.appendChild(optVazia);
+        veiculosMigracaoModelosCache.forEach((m) => {
+          const opt = document.createElement("option");
+          opt.value = m.modelo;
+          opt.textContent = m.modelo;
+          if (m.modelo === v.equipamento) opt.selected = true;
+          select.appendChild(opt);
+        });
+        select.addEventListener("change", () => {
+          const modelo = veiculosMigracaoModelosCache.find((m) => m.modelo === select.value);
+          if (modelo && inputComandoRef) {
+            inputComandoRef.value = resolverComandoModelo(modelo.comando_template, modelo.porta);
+          }
+        });
+        td.appendChild(select);
+      } else if (modoEdicaoVeiculos) {
         const input = document.createElement("input");
         input.type = "text";
         input.className = "veiculo-comando-input";
@@ -1432,6 +1617,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     inputComando.dataset.campo = "comando";
     inputComando.placeholder = "Digite o comando...";
     inputComando.value = v.comando || "";
+    inputComandoRef = inputComando;
     let ultimoComandoSalvo = inputComando.value;
     inputComando.addEventListener("blur", async () => {
       if (modoEdicaoVeiculos || inputComando.value === ultimoComandoSalvo) return;

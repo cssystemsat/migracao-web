@@ -402,7 +402,7 @@
   </div>
 
   <div id="overlay-migracao" class="overlay hidden">
-    <div class="modal">
+    <div class="modal modal-grande">
       <div class="modal-header">
         <h3 id="migracao-modal-titulo">Cliente</h3>
         <button id="migracao-modal-fechar" class="btn-secondary">Fechar</button>
@@ -410,8 +410,8 @@
       <div class="modal-body">
         <form id="form-migracao" class="form-migracao">
           <label class="campo-migracao">
-            <span>CS</span>
-            <input type="text" id="migracao-cs" placeholder="Responsável CS">
+            <span>CSM responsável</span>
+            <input type="text" id="migracao-cs" placeholder="Responsável CSM">
           </label>
           <label class="campo-migracao">
             <span>Plataforma de origem</span>
@@ -431,6 +431,23 @@
           </label>
           <button type="submit" class="btn-primary">Salvar</button>
         </form>
+
+        <div id="migracao-modelos-bloco" class="migracao-modelos-bloco">
+          <h4 class="form-credencial-titulo">Modelos de rastreador</h4>
+          <p class="placeholder migracao-modelos-dica">No comando, use <code>{porta}</code> onde a porta cadastrada deve entrar. Ex.: rastreador <strong>j16</strong>, porta <strong>123456</strong>, comando <code>ip,200.152.62.20,{porta}</code> → gera <code>ip,200.152.62.20,123456</code> automaticamente sempre que o Equipamento de um veículo for "j16".</p>
+
+          <div id="migracao-modelos-lista" class="lista-credenciais"></div>
+
+          <form id="form-migracao-modelo" class="form-credencial">
+            <input type="text" id="migracao-modelo-nome" placeholder="Modelo (ex: J16)" required>
+            <input type="text" id="migracao-modelo-porta" placeholder="Porta (ex: 123456)">
+            <input type="text" id="migracao-modelo-comando" placeholder="Comando (use {porta})">
+            <div class="form-credencial-botoes">
+              <button type="submit" id="btn-salvar-migracao-modelo" class="btn-primary">Adicionar</button>
+              <button type="button" id="btn-cancelar-edicao-migracao-modelo" class="btn-secondary hidden">Cancelar edição</button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>
