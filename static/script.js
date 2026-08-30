@@ -3589,4 +3589,17 @@ formMinhaSenha.addEventListener("submit", async (e) => {
   }
 });
 
+// --- TEMA ESCURO ---
+const chkTemaEscuro = el("chk-tema-escuro");
+chkTemaEscuro.checked = document.documentElement.getAttribute("data-theme") === "dark";
+chkTemaEscuro.addEventListener("change", () => {
+  if (chkTemaEscuro.checked) {
+    document.documentElement.setAttribute("data-theme", "dark");
+    localStorage.setItem("tema", "dark");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.setItem("tema", "claro");
+  }
+});
+
 atualizarStatus();

@@ -15,9 +15,39 @@
   --cinza-700: #374151;
   --cinza-900: #111827;
   --branco: #ffffff;
+  --painel: #ffffff;
+  --fundo-pagina: var(--cinza-100);
   --radius: 8px;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
 }
+
+/* Tema escuro — troca as cores de superfície/texto; --branco continua fixo
+   (é usado como texto/realce claro em cima de botões e cores coloridas, não
+   deve escurecer) e cada matiz de destaque ganha uma variante mais clara pra
+   manter contraste em cima de fundo escuro. */
+:root[data-theme="dark"] {
+  --painel: #161c2b;
+  --fundo-pagina: #0a0e17;
+  --cinza-100: #212a3d;
+  --cinza-200: #2b3650;
+  --cinza-300: #3a4666;
+  --cinza-500: #8b96b3;
+  --cinza-700: #c3cbe0;
+  --cinza-900: #eef1fa;
+  --azul-escuro: #60a5fa;
+  --vermelho: #f87171;
+  --violeta: #c4b5fd;
+  --verde-escuro: #4ade80;
+  --amarelo: #fbbf24;
+  --amarelo-escuro: #fbbf24;
+  --turquesa: #5eead4;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+:root[data-theme="dark"] .saida-corpo { background: #10151f; }
+:root[data-theme="dark"] table.tabela-saida tr:hover td { background: #1e2a42; }
+:root[data-theme="dark"] .status-off { background: #4c1d1d; }
+:root[data-theme="dark"] .status-on { background: #14532d; }
 
 * { box-sizing: border-box; }
 
@@ -25,7 +55,7 @@ html, body { height: 100%; }
 body {
   margin: 0;
   font-family: "Segoe UI", Arial, sans-serif;
-  background: var(--cinza-100);
+  background: var(--fundo-pagina);
   color: var(--cinza-900);
   display: flex;
   flex-direction: column;
@@ -33,7 +63,7 @@ body {
 }
 
 .topbar {
-  background: var(--branco);
+  background: var(--painel);
   border-bottom: 1px solid var(--cinza-200);
   padding: 12px 24px;
   display: flex;
@@ -126,7 +156,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 
 .panel {
-  background: var(--branco);
+  background: var(--painel);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 16px;
@@ -255,7 +285,7 @@ table.tabela-saida th.th-redimensionavel { position: sticky; top: 0; padding-rig
   margin-bottom: 24px;
 }
 .stat-tile {
-  background: var(--branco);
+  background: var(--painel);
   border: 1px solid var(--cinza-200);
   border-radius: var(--radius);
   padding: 16px 18px;
@@ -329,7 +359,7 @@ table.tabela-saida th.th-redimensionavel { position: sticky; top: 0; padding-rig
 }
 
 .modal {
-  background: var(--branco);
+  background: var(--painel);
   border-radius: 10px;
   width: 100%;
   max-width: 680px;
@@ -503,7 +533,7 @@ table.tabela-credenciais th { background: var(--cinza-100); }
   top: calc(100% + 8px);
   right: 0;
   min-width: 220px;
-  background: var(--branco);
+  background: var(--painel);
   border: 1px solid var(--cinza-200);
   border-radius: var(--radius);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
@@ -544,6 +574,30 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 .app-menu-item:hover { background: var(--cinza-100); }
 .app-menu-sair { color: var(--vermelho); border-top: 1px solid var(--cinza-200); }
 
+.app-menu-tema { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: default; }
+.switch-tema { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+.switch-tema input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch-tema-trilho {
+  position: absolute;
+  inset: 0;
+  background: var(--cinza-300);
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+.switch-tema-trilho::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  background: var(--branco);
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+.switch-tema input:checked + .switch-tema-trilho { background: var(--azul); }
+.switch-tema input:checked + .switch-tema-trilho::before { transform: translateX(16px); }
+
 .comandos-modelo-linha { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-bottom: 14px; }
 .comandos-modelo-select { flex: 1; min-width: 220px; }
 .comandos-modelo-linha button { width: auto; white-space: nowrap; }
@@ -576,7 +630,7 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 .cartao-acesso {
   position: relative;
   z-index: 1;
-  background: var(--branco);
+  background: var(--painel);
   border-radius: 14px;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45);
   padding: 32px;
@@ -764,7 +818,7 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
   border-radius: var(--radius);
   font-size: 0.8rem;
   font-weight: 600;
-  background: var(--branco);
+  background: var(--painel);
 }
 
 table.tabela-saida tr.linha-status-aguardando td { background: #dbeafe; }

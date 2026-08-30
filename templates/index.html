@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Migração {{ app_version }} — Web</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <script>
+    // Aplica o tema salvo antes da página desenhar, pra não piscar claro e depois escurecer.
+    try {
+      if (localStorage.getItem("tema") === "dark") {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    } catch (err) {}
+  </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -29,6 +37,13 @@
             <span class="app-usuario-nome">{{ app_usuario }}</span>
             {% if app_usuario_admin %}<span class="app-usuario-badge">Admin</span>{% endif %}
           </div>
+          <label class="app-menu-item app-menu-tema">
+            <span>Tema escuro</span>
+            <span class="switch-tema">
+              <input type="checkbox" id="chk-tema-escuro">
+              <span class="switch-tema-trilho"></span>
+            </span>
+          </label>
           <button type="button" id="btn-minha-senha" class="app-menu-item">Minha senha</button>
           {% if app_usuario_admin %}
             <button type="button" id="btn-gerenciar-usuarios" class="app-menu-item">Gerenciar usuários</button>
