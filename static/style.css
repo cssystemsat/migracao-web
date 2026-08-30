@@ -585,6 +585,7 @@ table.tabela-credenciais th { background: var(--cinza-100); }
   text-align: center;
 }
 .logo-acesso {
+  position: relative;
   width: 60px;
   height: 60px;
   border-radius: 50%;
@@ -595,6 +596,53 @@ table.tabela-credenciais th { background: var(--cinza-100); }
   font-size: 30px;
   background: linear-gradient(135deg, var(--azul), var(--violeta));
   box-shadow: 0 10px 24px rgba(29, 78, 216, 0.4);
+}
+.logo-acesso::before,
+.logo-acesso::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid rgba(99, 102, 241, 0.55);
+  animation: pulso-anel 2.6s ease-out infinite;
+}
+.logo-acesso::after { animation-delay: 1.3s; }
+@keyframes pulso-anel {
+  0% { transform: scale(0.85); opacity: 0.9; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.particulas-tech { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.particulas-tech span {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(147, 197, 253, 0.85);
+  box-shadow: 0 0 10px 2px rgba(147, 197, 253, 0.65);
+  animation: flutuar-particula 9s ease-in-out infinite;
+}
+.particulas-tech span:nth-child(1) { top: 15%; left: 12%; animation-delay: 0s; }
+.particulas-tech span:nth-child(2) {
+  top: 70%; left: 8%; animation-delay: 1.4s;
+  background: rgba(196, 181, 253, 0.85);
+  box-shadow: 0 0 10px 2px rgba(196, 181, 253, 0.65);
+}
+.particulas-tech span:nth-child(3) { top: 22%; left: 88%; animation-delay: 2.8s; }
+.particulas-tech span:nth-child(4) {
+  top: 82%; left: 85%; animation-delay: 4.2s;
+  background: rgba(196, 181, 253, 0.85);
+  box-shadow: 0 0 10px 2px rgba(196, 181, 253, 0.65);
+}
+.particulas-tech span:nth-child(5) { top: 45%; left: 5%; animation-delay: 5.6s; }
+.particulas-tech span:nth-child(6) {
+  top: 10%; left: 62%; animation-delay: 7s;
+  background: rgba(196, 181, 253, 0.85);
+  box-shadow: 0 0 10px 2px rgba(196, 181, 253, 0.65);
+}
+@keyframes flutuar-particula {
+  0%, 100% { transform: translate(0, 0); opacity: 0.35; }
+  50% { transform: translate(14px, -20px); opacity: 1; }
 }
 .cartao-acesso h1 { margin: 0 0 4px; color: var(--azul-escuro); }
 .cartao-acesso h1 span { color: var(--vermelho); }
