@@ -57,30 +57,37 @@ body {
   font-family: "Segoe UI", Arial, sans-serif;
   background: var(--fundo-pagina);
   color: var(--cinza-900);
-  display: flex;
-  flex-direction: column;
   min-height: 100vh;
+}
+/* O grid de sidebar/topbar/conteudo é só da tela principal do app (index.html,
+   cujo <body> sempre carrega data-usuario-perfil) — sem esse escopo, ele vazava
+   pra tela de login (login_app.html, <body> sem esse atributo) e espremia o
+   cartão de login numa coluna estreita em telas largas, sobrando vazio ao lado. */
+body[data-usuario-perfil] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "sidebar topbar"
+    "sidebar content";
 }
 
 .topbar {
+  grid-area: topbar;
   background: var(--painel);
   border-bottom: 1px solid var(--cinza-200);
-  padding: 12px 24px;
+  padding: 8px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
-  flex-shrink: 0;
+  gap: 8px;
+  min-width: 0;
 }
 
-.topbar h1 {
-  font-size: 1.25rem;
-  margin: 0;
-  color: var(--azul-escuro);
-}
-.topbar h1 span { color: var(--vermelho); }
-
+/* Vive dentro de Ferramentas Auxiliares (não mais na topbar), então usa o
+   tamanho padrão dos outros formulários — o encolhimento anterior era só
+   pra caber na faixa estreita ao lado da sidebar. */
 .login-form {
   display: flex;
   align-items: center;
@@ -99,6 +106,33 @@ body {
 .select-credencial {
   max-width: 180px;
   background: var(--cinza-100);
+}
+
+/* Topbar mais enxuta — o espaço ao lado da sidebar em altura total é menor
+   do que a largura cheia de antes, então os elementos do topo (login,
+   busca, botões) ficam menores aqui pra não quebrar linha. */
+.topbar button {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+.topbar .btn-engrenagem-usuario {
+  width: 30px;
+  height: 30px;
+  font-size: 0.9rem;
+  /* Zera o padding do ".topbar button" acima — senão a foto fica encolhida
+     dentro do padding e o círculo do botão nunca a recorta (fica quadrada). */
+  padding: 0;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+/* Com foto, a troca de fundo do hover nem aparece — o anel é o que sinaliza. */
+.topbar .btn-engrenagem-usuario:hover,
+.topbar .btn-engrenagem-usuario:focus-visible {
+  box-shadow: 0 0 0 2px var(--painel), 0 0 0 4px var(--azul);
+  transform: scale(1.06);
+}
+@media (prefers-reduced-motion: reduce) {
+  .topbar .btn-engrenagem-usuario { transition: none; }
+  .topbar .btn-engrenagem-usuario:hover { transform: none; }
 }
 
 button {
@@ -161,6 +195,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   box-shadow: var(--shadow);
   padding: 16px;
   min-height: 0;
+  /* .conteudo é flex-column pra travar a altura do Kanban/Lista — sem isso,
+     painéis "normais" (Dashboard, Ferramentas, Ficha) herdam flex-shrink:1
+     e podem ser espremidos abaixo da altura do próprio conteúdo em telas
+     mais baixas, deixando o fundo branco menor que o que está desenhado
+     nele. .saida-panel (Kanban/Lista) sobrescreve com flex:1 de propósito. */
+  flex-shrink: 0;
 }
 
 .menu-lateral { padding: 8px 16px; overflow-y: auto; }
@@ -182,6 +222,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   cursor: pointer;
 }
 .menu-cabecalho:hover:not(:disabled) { background: none; opacity: 0.8; }
+.titulo-autenticacao { color: var(--verde-escuro); }
 .titulo-implantacao { color: var(--amarelo-escuro); }
 .titulo-consultas { color: var(--azul); }
 .titulo-import { color: var(--vermelho); }
@@ -213,7 +254,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 #botoes-dashboard button:not(:disabled):hover { background: #ccfbf1; border-color: #99f6e4; }
 #botoes-ferramentas button:not(:disabled):hover { background: #fef9c3; border-color: #fef08a; }
 
-.saida-panel { min-height: 300px; display: flex; flex-direction: column; }
+/* min-height garante um piso de altura pro painel de Saída — sem isso ele
+   encolhe quase a zero (flex:1 puro) quando tem muita coisa acima dele (ex.:
+   Autenticação + Importação + Consultas, na sub-tela de Ferramentas), o que
+   também deixava a rolagem automática até aqui sem efeito (não sobrava
+   espaço de scroll pra rolar). No Kanban/Lista de Implantação/Migração ele já
+   ocupa a tela toda, então esse piso quase nunca chega a fazer diferença ali. */
+.saida-panel { flex: 1; min-height: 440px; display: flex; flex-direction: column; }
 .saida-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .saida-header h2 { margin: 0; font-size: 1rem; }
 .saida-header-botoes { display: flex; gap: 8px; }
@@ -284,22 +331,34 @@ table.tabela-saida th.th-redimensionavel { position: sticky; top: 0; padding-rig
   gap: 14px;
   margin-bottom: 24px;
 }
+/* Estilo de KPI card inspirado no Painel de Gestão CS: cartão branco com
+   cantos mais arredondados, sombra leve e uma borda de destaque à esquerda
+   (cor por --tile-accent, definida inline por quem monta o tile; sem isso
+   cai no azul padrão). Label vem ANTES do valor — contexto primeiro, número
+   grande depois — e o valor ficou bem maior pra puxar o olho. */
 .stat-tile {
   background: var(--painel);
   border: 1px solid var(--cinza-200);
-  border-radius: var(--radius);
-  padding: 16px 18px;
-}
-.stat-tile-valor {
-  font-size: 2rem;
-  font-weight: 700;
-  color: var(--cinza-900);
-  line-height: 1.1;
+  border-left: 4px solid var(--tile-accent, var(--azul));
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .stat-tile-label {
-  margin-top: 4px;
-  font-size: 0.82rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--cinza-500);
+}
+.stat-tile-valor {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--cinza-900);
+  line-height: 1;
 }
 
 .dashboard-secao { margin-bottom: 24px; }
@@ -347,6 +406,53 @@ table.tabela-saida th.th-redimensionavel { position: sticky; top: 0; padding-rig
 }
 .status-legenda-valor { margin-left: auto; font-weight: 600; color: var(--cinza-900); }
 
+/* Cards de insight do novo Dashboard (atrasados, funil de marcos, flags,
+   veículos por status) — mesma "receita" visual do card de decisor da Ficha
+   (.ficha-card-decisor), só generalizada pra qualquer conteúdo. */
+.dashboard-insights { display: grid; gap: 16px; margin-bottom: 24px; }
+.insight-card {
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+.insight-card h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--cinza-700);
+  margin: 0 0 12px;
+}
+.stat-tile-valor-alerta { color: var(--vermelho); }
+
+.lista-atrasados { display: flex; flex-direction: column; gap: 6px; }
+.lista-atrasados-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--cinza-100);
+}
+.lista-atrasados-item:hover { background: var(--cinza-200); }
+.lista-atrasados-nome { font-weight: 600; }
+.lista-atrasados-etapa { font-size: 0.78rem; font-weight: 400; color: var(--cinza-500); margin-left: 8px; }
+.lista-atrasados-dias { font-size: 0.8rem; font-weight: 700; color: var(--vermelho); white-space: nowrap; }
+.lista-atrasados-mais { font-size: 0.8rem; color: var(--cinza-500); margin-top: 8px; }
+
+/* Cores fixas (não seguem tema), mesmo racional das tags da Ficha. */
+.flags-resumo { display: flex; gap: 10px; flex-wrap: wrap; }
+.flag-resumo-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 .overlay {
   position: fixed;
   inset: 0;
@@ -388,6 +494,50 @@ table.tabela-saida th.th-redimensionavel { position: sticky; top: 0; padding-rig
 .modal-header-acoes .btn-primary { font-weight: 600; }
 
 .modal-body { padding: 18px; overflow-y: auto; }
+
+/* Janela de configuração da Ficha do Cliente: sidebar interna pra trocar
+   entre os dados de Implantação e de Migração sem sair do modal. Só entra
+   em jogo quando aberto pela engrenagem da Ficha (classe adicionada via JS). */
+.modal-sidebar-config { display: none; }
+.modal.tem-sidebar-config {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  grid-template-rows: auto 1fr;
+  /* Mesmo tamanho (largura e altura) nas duas abas — a maior, a de Migração —
+     pra não pular de tamanho ao trocar pela sidebar. Conteúdo mais curto
+     (Implantação) só deixa espaço sobrando; mais alto que isso rola dentro
+     do modal-body. */
+  max-width: 980px;
+  height: 88vh;
+}
+.modal.tem-sidebar-config .modal-sidebar-config {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  grid-column: 1;
+  grid-row: 1 / 3;
+  padding: 18px 10px;
+  border-right: 1px solid var(--cinza-200);
+  background: var(--cinza-100);
+  border-radius: 10px 0 0 10px;
+  overflow-y: auto;
+}
+.modal.tem-sidebar-config .modal-header { grid-column: 2; grid-row: 1; }
+.modal.tem-sidebar-config .modal-body { grid-column: 2; grid-row: 2; min-height: 0; }
+.modal-sidebar-config-item {
+  width: auto;
+  text-align: left;
+  padding: 9px 12px;
+  margin-top: 0;
+  border-radius: var(--radius);
+  background: none;
+  border: none;
+  color: var(--cinza-700);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.modal-sidebar-config-item:hover { background: var(--cinza-200); }
+.modal-sidebar-config-item.ativo { background: var(--azul); color: var(--branco); }
 
 .overlay-fullscreen { padding: 0; }
 .modal-fullscreen {
@@ -510,7 +660,7 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 .usuario-admin-linha { flex: none; }
 .usuario-admin-linha input { flex: none; min-width: 0; width: 16px; height: 16px; padding: 0; border: none; }
 
-.topbar-direita { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.topbar-direita { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .app-usuario-nome { font-weight: 600; }
 
 .app-usuario-menu { position: relative; }
@@ -525,8 +675,10 @@ table.tabela-credenciais th { background: var(--cinza-100); }
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 .btn-engrenagem-usuario:hover { background: var(--cinza-200); }
+.topbar-avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
 
 .app-menu-dropdown {
   position: absolute;
@@ -729,6 +881,30 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 }
 .form-migracao .btn-primary { margin-top: 4px; }
 
+.minha-conta-corpo { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; margin-top: 20px; }
+.minha-conta-foto-bloco { display: flex; flex-direction: column; align-items: center; gap: 10px; flex-shrink: 0; }
+.minha-conta-foto {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  padding: 0;
+  border: none;
+  background: var(--cinza-200);
+  color: var(--cinza-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.minha-conta-foto:hover { background: var(--cinza-300); }
+.minha-conta-foto img { width: 100%; height: 100%; object-fit: cover; }
+.minha-conta-form { display: flex; flex-direction: column; gap: 12px; max-width: 360px; }
+.minha-conta-aniversario { display: flex; gap: 8px; }
+.minha-conta-aniversario select { flex: 1; }
+.minha-conta-acoes { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.minha-conta-acoes .btn-primary { width: auto; padding: 8px 20px; margin-top: 0; }
+#minha-conta-msg { margin: 0; }
+
 .btn-engrenagem {
   background: var(--cinza-100);
   border: 1px solid var(--cinza-200);
@@ -747,6 +923,45 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .modal-implantacao-cliente { max-width: 860px; }
 .form-implantacao-cliente-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px; }
 .form-implantacao-cliente-grid button[type="submit"] { grid-column: 1 / -1; }
+.implantacao-cliente-complementares {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 16px;
+  border-top: 1px solid var(--cinza-200);
+  margin-top: 6px;
+  padding-top: 10px;
+}
+
+/* Combobox pesquisável genérico (Estado/Cidade do Decisor, e outros campos
+   de lista suspensa com busca por digitação no futuro). */
+.combobox-pesquisavel { position: relative; }
+.combobox-pesquisavel input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+.combobox-pesquisavel input:disabled { background: var(--cinza-100); cursor: not-allowed; }
+.combobox-lista {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--painel);
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+}
+.combobox-item { padding: 8px 10px; font-size: 0.9rem; cursor: pointer; }
+.combobox-item:hover { background: var(--cinza-100); }
+.combobox-item-vazio { color: var(--cinza-500); cursor: default; }
+.combobox-item-vazio:hover { background: none; }
 
 .implantacao-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .implantacao-busca,
@@ -825,10 +1040,28 @@ table.tabela-saida tr.linha-status-aguardando td { background: #dbeafe; }
 table.tabela-saida tr.linha-status-enviado td { background: #fef9c3; }
 table.tabela-saida tr.linha-status-migrado td { background: #dcfce7; }
 table.tabela-saida tr.linha-status-enviar td { background: #fee2e2; }
+table.tabela-saida tr.linha-status-cancelado td { background: #e5e7eb; }
 table.tabela-saida tr.linha-status-aguardando:hover td { background: #bfdbfe; }
 table.tabela-saida tr.linha-status-enviado:hover td { background: #fef08a; }
 table.tabela-saida tr.linha-status-migrado:hover td { background: #bbf7d0; }
 table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
+table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
+
+.veiculo-comando-textarea {
+  resize: vertical;
+  min-height: 2.4em;
+  font-family: inherit;
+}
+
+.veiculo-contagem-cliente {
+  font-size: 0.75rem;
+  color: var(--cinza-700);
+  white-space: nowrap;
+}
+
+.btn-excluir-linha {
+  color: #b91c1c;
+}
 
 .veiculos-migracao-envio-status {
   font-size: 0.8rem;
@@ -1050,3 +1283,653 @@ table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
   font-weight: 500;
 }
 .conversor-cor-swatch-nenhuma.selecionada { border-color: var(--azul); box-shadow: none; background: #dbeafe; }
+
+/* --- FASE 1: nova navegação (topbar + sidebar de 4 áreas + Dashboard) --- */
+
+.topbar-busca { flex: 1; max-width: 220px; min-width: 0; }
+.topbar-busca input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+  background: var(--cinza-100);
+  color: var(--cinza-500);
+}
+
+.app-body { grid-area: content; display: flex; min-height: 0; min-width: 0; padding: 16px; }
+
+.sidebar {
+  grid-area: sidebar;
+  width: 250px;
+  flex-shrink: 0;
+  background: var(--painel);
+  border-right: 1px solid var(--cinza-200);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  transition: width 0.3s ease;
+}
+.sidebar-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 2px 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--cinza-200);
+  flex-shrink: 0;
+}
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  background: none;
+  border: none;
+  padding: 2px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+}
+#sidebar-logo:hover:not(:disabled) { background: none; }
+.sidebar-logo,
+.sidebar-logo:focus,
+.sidebar-logo:focus-visible,
+.sidebar-logo:active {
+  outline: none;
+  box-shadow: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.sidebar-logo-selo {
+  flex-shrink: 0;
+  font-size: 19px;
+  line-height: 1;
+}
+.sidebar-logo-texto {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--azul-escuro);
+  white-space: nowrap;
+}
+.sidebar-logo-texto span { color: var(--vermelho); }
+
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: none;
+  color: var(--cinza-500);
+  border-radius: var(--radius);
+  flex-shrink: 0;
+}
+.sidebar-toggle:hover { background: var(--cinza-100); color: var(--cinza-700); }
+.sidebar-toggle svg { transition: transform 0.3s ease; }
+.sidebar.recolhida .sidebar-toggle svg { transform: rotate(180deg); }
+
+.sidebar.recolhida .sidebar-topo { flex-direction: column; gap: 10px; padding: 2px 0 14px; }
+.sidebar.recolhida .sidebar-logo-texto { display: none; }
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: none;
+  border: none;
+  color: var(--cinza-700);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.sidebar-item:hover:not(:disabled) { background: var(--cinza-100); }
+.sidebar-item.ativo { background: #dbeafe; color: var(--azul-escuro); font-weight: 700; }
+:root[data-theme="dark"] .sidebar-item.ativo { background: rgba(96, 165, 250, 0.16); }
+.sidebar-item-icone { flex-shrink: 0; }
+.sidebar-item-texto { white-space: nowrap; }
+
+.sidebar.recolhida { width: 64px; }
+.sidebar.recolhida .sidebar-item { justify-content: center; padding: 10px; }
+.sidebar.recolhida .sidebar-item-texto { display: none; }
+
+.conteudo { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+
+.conteudo-header { margin-bottom: 4px; }
+.conteudo-titulo { font-size: 1.3rem; margin: 0 0 4px; }
+.conteudo-subtitulo { color: var(--cinza-500); font-size: 0.85rem; margin: 0; }
+
+/* --- Minha Conta: hub pessoal (cabeçalho + Visão Geral reservada + Tarefas) --- */
+.minha-conta-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.minha-conta-identificacao { display: flex; align-items: center; gap: 14px; }
+.minha-conta-avatar-hub {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--cinza-100);
+  color: var(--cinza-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.minha-conta-avatar-hub img { width: 100%; height: 100%; object-fit: cover; }
+.minha-conta-identificacao .conteudo-titulo { margin: 0; }
+.minha-conta-cargo { color: var(--cinza-500); font-size: 0.85rem; margin: 2px 0 0; }
+
+.minha-conta-hub { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) {
+  .minha-conta-hub { grid-template-columns: 1fr; }
+}
+
+.minha-conta-visao-geral {
+  background: var(--cinza-100);
+  border: 1px dashed var(--cinza-300);
+  border-radius: var(--radius);
+  padding: 20px;
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.minha-conta-painel-tarefas {
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.minha-conta-tarefas-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.minha-conta-tarefas-topo h3 { margin: 0; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+.minha-conta-tarefas-badge {
+  background: var(--cinza-200);
+  color: var(--cinza-700);
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 8px;
+  min-width: 20px;
+  text-align: center;
+  display: inline-block;
+}
+.minha-conta-painel-tarefas .btn-primary { width: auto; padding: 6px 14px; margin-top: 0; font-size: 0.85rem; }
+.minha-conta-tarefas-lista { margin-top: 4px; }
+.minha-conta-link-concluidas {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--cinza-200);
+  color: var(--azul);
+  font-size: 0.82rem;
+  text-align: center;
+  padding: 10px 0 0;
+  margin-top: 8px;
+  cursor: pointer;
+}
+.minha-conta-link-concluidas:hover { text-decoration: underline; }
+
+.tarefa-item-compacta { cursor: pointer; border-radius: var(--radius); }
+.tarefa-item-compacta:hover { background: var(--cinza-100); }
+
+.tarefa-detalhes-acoes { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.tarefa-detalhes-acoes .btn-primary { width: auto; padding: 8px 18px; margin-top: 0; }
+.tarefa-detalhes-acoes .btn-secondary { width: auto; }
+
+.area-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 20px; }
+.area-card {
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-radius: 12px;
+  padding: 18px;
+  text-align: left;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--cinza-900);
+}
+.area-card:hover { border-color: var(--azul); }
+.area-card-titulo { margin: 0; font-size: 1rem; }
+.area-card-desc { margin: 0; font-size: 0.82rem; color: var(--cinza-500); line-height: 1.4; }
+.area-card-implantacao .area-card-titulo { color: var(--amarelo-escuro); }
+.area-card-migracao .area-card-titulo { color: var(--violeta); }
+.area-card-ferramentas .area-card-titulo { color: var(--amarelo); }
+
+/* Cards da tela "Ferramentas Auxiliares" — cada um leva pra uma sub-tela
+   própria (ou abre direto um modal, no caso de Conversor/Quebra-String). */
+.card-ferr-importacao .area-card-titulo { color: var(--vermelho); }
+.card-ferr-comandos .area-card-titulo { color: var(--turquesa); }
+.card-ferr-conversor .area-card-titulo { color: var(--azul-escuro); }
+.card-ferr-quebrastring .area-card-titulo { color: var(--verde-escuro); }
+
+/* Sub-telas de Ferramentas Auxiliares (Importação e Consulta / Envio de
+   Comandos): cada seção ocupa a largura toda, sem ficar espremida num
+   canto como o menu-acordeão antigo. */
+.ferramentas-subtela { display: flex; flex-direction: column; gap: 20px; }
+.ferramentas-voltar { align-self: flex-start; margin: 0; }
+.ferramentas-secao { padding-bottom: 20px; border-bottom: 1px solid var(--cinza-200); }
+.ferramentas-secao:last-child { border-bottom: none; padding-bottom: 0; }
+.ferramentas-secao-titulo {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.botoes-linha {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  padding-bottom: 0;
+}
+
+/* --- FASE 2: toggle segmentado + Kanban de Implantação/Migração --- */
+
+/* Wrapper das telas de Kanban/Lista (Implantação e Migração): toolbar
+   (busca/filtro/toggle) fica fixa no topo, só o corpo (board ou tabela)
+   rola — o scroll fica contido aqui dentro, sem afetar o resto da página. */
+.saida-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.saida-view-toolbar { flex-shrink: 0; }
+.saida-view-corpo { flex: 1; min-height: 0; overflow: auto; }
+
+.segmentado { display: inline-flex; background: var(--cinza-100); border-radius: var(--radius); padding: 2px; gap: 2px; }
+.segmentado button {
+  background: none;
+  color: var(--cinza-700);
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  width: auto;
+  margin-top: 0;
+}
+.segmentado button:hover:not(:disabled) { background: none; opacity: 0.75; }
+.segmentado button.ativo { background: var(--painel); color: var(--cinza-900); box-shadow: var(--shadow); font-weight: 700; }
+
+/* O board preenche a altura disponível do painel (não cresce além da tela);
+   cada coluna rola seus próprios cards em vez de esticar o board inteiro
+   verticalmente — só o board como um todo rola na horizontal. */
+.kanban-board { display: grid; grid-auto-flow: column; grid-auto-columns: 260px; grid-template-rows: minmax(0, 1fr); gap: 14px; overflow-x: auto; padding-bottom: 12px; margin-top: 14px; height: 100%; min-height: 0; }
+.kanban-coluna { background: var(--cinza-100); border-radius: 12px; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 10px; min-height: 100px; min-width: 0; overflow-y: auto; }
+/* padding-top fica aqui (não no .kanban-coluna) de propósito: o header é sticky
+   e gruda no topo do padding-box da coluna ao rolar — se o respiro de cima fosse
+   padding do container, ele nunca seria "coberto" pelo scroll e um card ficava
+   visível atrás dessa folga (efeito de canto quadrado/vazado). Com o respiro
+   dentro do próprio header, ele fica colado na borda de cima da coluna, onde o
+   recorte arredondado do overflow já cuida de arredondar os cantos dele. */
+.kanban-coluna-cabecalho { display: flex; align-items: center; justify-content: space-between; padding: 14px 6px 2px; flex-shrink: 0; position: sticky; top: 0; background: var(--cinza-100); z-index: 1; }
+.kanban-coluna-nome { font-size: 0.78rem; font-weight: 700; color: var(--cinza-700); }
+.kanban-coluna-contagem { font-size: 0.72rem; font-weight: 700; color: var(--cinza-500); background: var(--painel); border-radius: 999px; padding: 1px 7px; }
+.kanban-card {
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  padding: 12px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: var(--shadow);
+  color: var(--cinza-900);
+  width: 100%;
+  margin-top: 0;
+  cursor: pointer;
+}
+.kanban-card:hover { border-color: var(--azul); background: var(--painel); }
+.kanban-card-linha-nome { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+.kanban-card-nome { font-size: 0.86rem; font-weight: 700; line-height: 1.25; }
+.kanban-card-flag-icone { flex-shrink: 0; margin-top: 1px; }
+.kanban-card-meta { font-size: 0.76rem; color: var(--cinza-500); }
+.kanban-card-badge-atrasado { margin-top: 6px; }
+/* Heurística de risco (cliente antigo com poucas placas) — só cor, sem texto
+   extra no card; motivo explicado no title do atributo (ver JS). */
+.kanban-card-risco { border-color: var(--vermelho); border-width: 2px; }
+.kanban-vazio { font-size: 0.76rem; color: var(--cinza-500); text-align: center; padding: 12px 4px; }
+
+/* --- FASE 3a: sidebar contextual + Ficha do Cliente --- */
+
+.sidebar-voltar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  margin-bottom: 6px;
+  border-radius: var(--radius);
+  background: none;
+  border: none;
+  color: var(--cinza-700);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.sidebar-voltar:hover { background: var(--cinza-100); }
+.sidebar-cliente-nome {
+  padding: 4px 12px 12px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--cinza-200);
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--cinza-900);
+}
+.sidebar.recolhida .sidebar-cliente-nome { display: none; }
+.sidebar.recolhida .sidebar-voltar { justify-content: center; }
+
+.ficha-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.ficha-header h2 { margin: 0 0 6px; font-size: 1.3rem; }
+.ficha-header-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 0.82rem; color: var(--cinza-500); }
+
+.ficha-engrenagem { flex-shrink: 0; }
+
+.info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin: 16px 0; }
+/* Mesma "família" visual do .stat-tile (cantos mais arredondados, sombra
+   leve) mas sem aumentar a fonte — aqui são vários fatos pequenos lado a
+   lado, não KPIs isolados, e um valor gigante quebraria a grade. */
+.info-item { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: 10px; box-shadow: var(--shadow); padding: 12px 14px; }
+.info-item-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cinza-500); margin-bottom: 4px; }
+.info-item-valor { font-size: 0.92rem; font-weight: 700; }
+
+.stepper-legenda { margin: -12px 0 20px; font-size: 0.85rem; text-align: center; }
+.stepper-legenda.ok { color: var(--verde-escuro); }
+.stepper-legenda.atrasado { color: var(--vermelho); font-weight: 700; }
+.stepper-legenda.concluido { color: var(--cinza-500); }
+
+.stepper { display: flex; align-items: flex-start; margin: 10px 0 20px; }
+.stepper-etapa { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+.stepper-etapa:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 13px;
+  left: calc(50% + 20px);
+  right: calc(-50% + 20px);
+  height: 2px;
+  background: var(--cinza-300);
+}
+.stepper-etapa.concluida:not(:last-child)::after { background: var(--verde); }
+.stepper-bolha {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  border: 2px solid var(--cinza-300);
+  color: var(--cinza-500);
+  background: var(--painel);
+  position: relative;
+  z-index: 1;
+}
+.stepper-etapa.concluida .stepper-bolha { background: var(--verde); border-color: var(--verde); color: #fff; }
+.stepper-etapa.ativa .stepper-bolha { background: var(--azul); border-color: var(--azul); color: #fff; }
+.stepper-nome { font-size: 0.76rem; color: var(--cinza-700); max-width: 110px; }
+.stepper-etapa.ativa .stepper-nome { font-weight: 700; color: var(--cinza-900); }
+
+.ficha-secao { margin-bottom: 18px; }
+.ficha-secao h3 { font-size: 0.95rem; margin: 0 0 4px; }
+.ficha-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.ficha-acoes button { width: auto; margin-top: 0; }
+
+.ficha-credencial-linha { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ficha-credencial-linha button { width: auto; margin-top: 0; }
+.ficha-credencial-login { font-size: 0.82rem; color: var(--cinza-500); }
+.ficha-consulta-resultado { margin-top: 12px; }
+
+/* Aviso de credencial ausente nas abas Consulta/Importação — só ali a falta
+   dela bloqueia a ação da tela, então vira alerta de verdade (mesma dupla
+   claro/escuro do .status-off, não só texto discreto). */
+.alerta-bloco { display: flex; align-items: center; gap: 8px; background: #fee2e2; border-radius: var(--radius); padding: 10px 14px; margin: 12px 0 0; color: var(--vermelho); font-size: 0.88rem; font-weight: 600; }
+:root[data-theme="dark"] .alerta-bloco { background: #4c1d1d; }
+
+input:disabled, select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--cinza-100);
+}
+
+.badge-tipo { display: inline-flex; align-items: center; font-size: 0.68rem; font-weight: 700; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.badge-tipo.so-implantacao { background: #dbeafe; color: var(--azul-escuro); }
+.badge-tipo.com-migracao { background: #ede9fe; color: var(--violeta); }
+
+/* Tags de destaque da Visão Geral (Momento/Flag/Etapa/Persona) — cor fixa
+   (não segue tema claro/escuro), igual às cores de status da tabela de
+   veículos: o significado da cor importa mais que combinar com o tema. */
+.ficha-tags-resumo { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 18px; }
+.tag-resumo {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.tag-momento { background: #dbeafe; color: #1e3a8a; }
+.tag-etapa { background: #ede9fe; color: #5b21b6; }
+.tag-persona { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+.tag-flag-yellow { background: #fef9c3; color: #854d0e; }
+.tag-flag-red { background: #fee2e2; color: #991b1b; }
+.tag-flag-black { background: #111827; color: #f9fafb; }
+
+.marco-linha {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--cinza-200);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.marco-linha:last-child { border-bottom: none; }
+.marco-linha input[type="checkbox"] { width: 17px; height: 17px; flex-shrink: 0; }
+.marco-linha span:first-of-type { flex: 1; }
+.marco-linha.feito span:first-of-type { text-decoration: line-through; color: var(--cinza-500); }
+
+/* Checklist de um marco (painel dentro do modal do cliente, aberto pelo
+   submenu Marcos do sidebar). */
+.marco-resumo { font-size: 0.85rem; color: var(--cinza-500); margin: 0 0 10px; font-weight: 600; }
+.marco-resumo.concluido { color: var(--verde-escuro); }
+.marco-resumo.atrasado { color: var(--vermelho); }
+.btn-remover-item-marco {
+  width: auto;
+  margin-top: 0;
+  padding: 2px 8px;
+  background: none;
+  border: none;
+  color: var(--cinza-500);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.btn-remover-item-marco:hover { color: var(--vermelho); }
+.marco-extra-form { display: flex; gap: 8px; margin: 12px 0; }
+.marco-extra-form input { flex: 1; }
+.marco-extra-form button { width: auto; margin-top: 0; white-space: nowrap; }
+.marco-linha.marco-manual { border-top: 1px solid var(--cinza-200); border-bottom: none; color: var(--cinza-700); }
+
+.sidebar-seta { display: inline-block; margin-left: 4px; transition: transform 0.15s; }
+.modal-sidebar-config-item.expandido .sidebar-seta { transform: rotate(90deg); }
+.modal-sidebar-submenu { display: flex; flex-direction: column; gap: 2px; padding-left: 12px; }
+.modal-sidebar-subitem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: auto;
+  margin-top: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: none;
+  border: none;
+  color: var(--cinza-700);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+}
+.modal-sidebar-subitem:hover { background: var(--cinza-200); }
+.modal-sidebar-subitem.ativo { background: var(--cinza-200); color: var(--azul); }
+.subitem-status { font-size: 0.72rem; color: var(--cinza-500); }
+.subitem-status.concluido { color: var(--verde-escuro); font-weight: 700; }
+.subitem-status.atrasado { color: var(--vermelho); font-weight: 700; }
+
+/* Lista de Tarefas (Ficha > Visão Geral e Minha Conta > Tarefas) — mesma
+   "receita" de linha do .marco-linha, com corpo maior pra caber meta-info. */
+.tarefa-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--cinza-200); }
+.tarefa-item:last-child { border-bottom: none; }
+.tarefa-item input[type="checkbox"] { width: 17px; height: 17px; flex-shrink: 0; margin-top: 2px; }
+.tarefa-item-corpo { flex: 1; min-width: 0; }
+.tarefa-item-titulo { font-weight: 600; font-size: 0.9rem; }
+.tarefa-item.concluida .tarefa-item-titulo { text-decoration: line-through; color: var(--cinza-500); }
+.tarefa-item-meta { font-size: 0.78rem; color: var(--cinza-500); margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tarefa-item-cliente { cursor: pointer; color: var(--azul); }
+.tarefa-item-cliente:hover { text-decoration: underline; }
+.tarefa-item-acoes { display: flex; gap: 4px; flex-shrink: 0; }
+.tarefa-item-acoes button { width: auto; padding: 4px 8px; font-size: 0.75rem; margin-top: 0; }
+/* Mesma paleta de cor da legenda de prazo dos Marcos (.stepper-legenda.*),
+   só que como badge de status em vez de linha de texto sozinha. */
+.tarefa-status { font-weight: 700; }
+.tarefa-status.ok { color: var(--verde-escuro); }
+.tarefa-status.atrasado { color: var(--vermelho); }
+.tarefa-status.concluido { color: var(--cinza-500); font-weight: 400; }
+.tarefa-status.cancelado { color: var(--vermelho); font-weight: 600; }
+
+/* Finalizar tarefa (Concluída/Cancelada) e desfecho mostrado nos detalhes. */
+.tarefa-resultado-opcoes { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; font-size: 0.9rem; }
+.tarefa-resultado-opcoes label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.tarefa-resultado-box {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--verde-escuro);
+  background: var(--cinza-100);
+  border-radius: var(--radius);
+}
+.tarefa-resultado-box.cancelada { border-left-color: var(--vermelho); }
+.tarefa-resultado-box p { margin: 4px 0 0; font-size: 0.9rem; white-space: pre-wrap; }
+
+/* Central de tarefas: abas de status à esquerda, filtros à direita. */
+.central-tarefas-barra {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.central-tarefas-status { display: flex; gap: 6px; flex-wrap: wrap; }
+.central-tarefas-status button { width: auto; margin-top: 0; padding: 5px 12px; font-size: 0.8rem; }
+.central-tarefas-status button.ativo { background: var(--azul); color: var(--branco); border-color: var(--azul); }
+.central-tarefas-contagem { font-weight: 400; opacity: 0.8; }
+.central-tarefas-filtros { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.central-tarefas-filtros select { width: auto; min-width: 190px; margin-top: 0; }
+.central-tarefas-check { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer; white-space: nowrap; }
+
+.ficha-card-decisor {
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.decisor-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.decisor-nome { font-weight: 700; font-size: 0.95rem; }
+.decisor-detalhes { font-size: 0.82rem; color: var(--cinza-500); margin-top: 2px; }
+.btn-whatsapp {
+  display: inline-block;
+  background: #22c55e;
+  color: #fff;
+  width: auto;
+  margin-top: 0;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  text-align: center;
+  cursor: pointer;
+}
+.btn-whatsapp:hover { background: #16a34a; }
+
+/* Reorganização da Ficha > Visão Geral: painel de acompanhamento (cabeçalho →
+   atenção → resumo/tarefas → progresso → operacional) em vez de lista de
+   seções soltas. Cada bloco vira um cartão (.ficha-painel) pra dar hierarquia
+   visual clara sem mexer em .ficha-secao (ainda usada pelas outras abas). */
+.ficha-painel { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 18px; }
+.ficha-painel:last-child { margin-bottom: 0; }
+.ficha-painel > h3 { margin: 0 0 12px; font-size: 0.95rem; }
+
+/* Responsável (CS) e Decisor (contato no cliente) em blocos separados e
+   rotulados — são pessoas diferentes, e antes disso ficava fácil confundir
+   uma com a outra (o WhatsApp é sempre do decisor, nunca do responsável). */
+.ficha-header-contato { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 0 0 16px; }
+.ficha-header-contato-blocos { display: flex; gap: 28px; flex-wrap: wrap; }
+.ficha-header-contato .btn-whatsapp { flex-shrink: 0; }
+
+.ficha-grid-hub { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; align-items: start; margin-bottom: 18px; }
+.ficha-grid-hub.ficha-grid-hub-unica { grid-template-columns: 1fr; }
+.ficha-grid-hub .ficha-painel, .ficha-grid-hub .ficha-painel-tarefas { margin-bottom: 0; }
+@media (max-width: 900px) {
+  .ficha-grid-hub { grid-template-columns: 1fr; }
+}
+
+.ficha-alertas .alerta-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--cinza-200); font-size: 0.88rem; }
+.ficha-alertas .alerta-item:last-child { border-bottom: none; }
+.ficha-alertas-vazio { color: var(--verde-escuro); font-size: 0.88rem; margin: 0; }
+
+.ficha-progresso-bloco { margin-bottom: 20px; }
+.ficha-progresso-bloco:last-child { margin-bottom: 0; }
+.ficha-progresso-titulo { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 2px; }
+.ficha-progresso-titulo h4 { margin: 0; font-size: 0.8rem; color: var(--cinza-500); text-transform: uppercase; letter-spacing: 0.03em; }
+.ficha-progresso-pct { font-size: 0.82rem; font-weight: 700; color: var(--cinza-500); }
+.progresso-alerta-atraso { color: var(--vermelho); font-weight: 700; font-size: 0.85rem; margin: 4px 0 8px; }
+
+.ficha-operacional summary { cursor: pointer; font-weight: 700; font-size: 0.95rem; list-style: none; display: flex; align-items: center; gap: 8px; }
+.ficha-operacional summary::-webkit-details-marker { display: none; }
+.ficha-operacional summary::before { content: "▸"; font-size: 0.75rem; color: var(--cinza-500); transition: transform 0.15s; }
+.ficha-operacional[open] summary::before { transform: rotate(90deg); }
+.ficha-operacional-bloco { margin-top: 14px; }
+.ficha-operacional-bloco h4 { margin: 0 0 8px; font-size: 0.85rem; color: var(--cinza-700); }
+
+.credencial-compacta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.9rem; font-weight: 600; }
+.credencial-compacta button { width: auto; margin-top: 0; }
+.credencial-compacta-ok { color: var(--verde-escuro); }
+.credencial-compacta-erro { color: var(--vermelho); }
+.credencial-compacta-pendente { color: var(--amarelo-escuro); }
+
+/* Ajuste da foto de perfil: quadrado com a imagem, máscara escurecendo tudo
+   fora do círculo (o formato do avatar), zoom embaixo. */
+.modal-foto-corte { max-width: 340px; }
+.foto-corte-dica { font-size: 0.85rem; color: var(--cinza-500); margin: 0 0 12px; text-align: center; }
+.foto-corte-area {
+  position: relative;
+  width: 260px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--cinza-200);
+}
+.foto-corte-area canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.foto-corte-area canvas.arrastando { cursor: grabbing; }
+.foto-corte-mascara {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.foto-corte-zoom { display: flex; align-items: center; gap: 10px; margin: 14px auto 0; max-width: 260px; font-weight: 700; color: var(--cinza-500); }
+.foto-corte-zoom input { flex: 1; margin: 0; }

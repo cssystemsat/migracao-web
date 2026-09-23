@@ -15,28 +15,77 @@
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body data-usuario-id="{{ app_usuario_id }}" data-usuario-responsavel="{{ app_usuario_responsavel }}" data-usuario-perfil="{{ app_usuario_perfil }}">
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-topo">
+      <button type="button" class="sidebar-logo" id="sidebar-logo" title="Ir para o Dashboard">
+        <span class="sidebar-logo-selo">🌐</span>
+        <span class="sidebar-logo-texto">Migração <span>{{ app_version }}</span></span>
+      </button>
+      <button type="button" class="sidebar-toggle" id="sidebar-toggle" title="Recolher menu">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 5 8 12 15 19"></polyline></svg>
+      </button>
+    </div>
+
+    <div id="sidebar-raiz">
+      <button type="button" class="sidebar-item" id="nav-dashboard" title="Dashboard">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"></rect><rect x="13" y="3" width="8" height="8" rx="1.5"></rect><rect x="3" y="13" width="8" height="8" rx="1.5"></rect><rect x="13" y="13" width="8" height="8" rx="1.5"></rect></svg>
+        <span class="sidebar-item-texto">Dashboard</span>
+      </button>
+      <button type="button" class="sidebar-item" id="nav-implantacao" title="Controle de Implantação">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.2"></rect><rect x="10" y="4" width="5" height="10" rx="1.2"></rect><rect x="17" y="4" width="4" height="13" rx="1.2"></rect></svg>
+        <span class="sidebar-item-texto">Controle de Implantação</span>
+      </button>
+      <button type="button" class="sidebar-item" id="nav-migracao" title="Controle de Migração">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.2"></rect><rect x="10" y="4" width="5" height="10" rx="1.2"></rect><rect x="17" y="4" width="4" height="13" rx="1.2"></rect></svg>
+        <span class="sidebar-item-texto">Controle de Migração</span>
+      </button>
+      <button type="button" class="sidebar-item" id="nav-ferramentas" title="Ferramentas Auxiliares">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line><circle cx="9" cy="6" r="2"></circle><circle cx="15" cy="12" r="2"></circle><circle cx="9" cy="18" r="2"></circle></svg>
+        <span class="sidebar-item-texto">Ferramentas Auxiliares</span>
+      </button>
+    </div>
+
+    <div id="sidebar-cliente" class="hidden">
+      <button type="button" class="sidebar-voltar" id="ficha-voltar" title="Voltar">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 5 8 12 15 19"></polyline></svg>
+        <span class="sidebar-item-texto">Voltar</span>
+      </button>
+      <div class="sidebar-cliente-nome" id="ficha-sidebar-nome"></div>
+      <button type="button" class="sidebar-item" id="ficha-aba-geral">
+        <span class="sidebar-item-texto">Visão Geral</span>
+      </button>
+      <button type="button" class="sidebar-item" id="ficha-aba-implantacao">
+        <span class="sidebar-item-texto">Implantação</span>
+      </button>
+      <button type="button" class="sidebar-item hidden" id="ficha-aba-migracao">
+        <span class="sidebar-item-texto">Migração</span>
+      </button>
+      <button type="button" class="sidebar-item" id="ficha-aba-consulta">
+        <span class="sidebar-item-texto">Consulta</span>
+      </button>
+      <button type="button" class="sidebar-item" id="ficha-aba-importacao">
+        <span class="sidebar-item-texto">Importação</span>
+      </button>
+    </div>
+  </nav>
+
   <header class="topbar">
-    <h1>Migração <span>{{ app_version }}</span></h1>
+    <div class="topbar-busca">
+      <input type="text" placeholder="Buscar cliente..." disabled title="Em breve">
+    </div>
     <div class="topbar-direita">
-      <form id="form-login" class="login-form">
-        <select id="select-credencial" class="select-credencial">
-          <option value="">Cliente salvo...</option>
-        </select>
-        <input type="text" id="login" name="login" placeholder="Login" autocomplete="username" required>
-        <input type="password" id="senha" name="senha" placeholder="Senha" autocomplete="current-password" required>
-        <button type="submit" id="btn-autenticar">Autenticar</button>
-        <button type="button" id="btn-logout" class="btn-secondary hidden">Sair</button>
-        <button type="button" id="btn-gerenciar-logins" class="btn-secondary">Gerenciar logins</button>
-        <span id="status-auth" class="status-pill status-off">Não autenticado</span>
-      </form>
       <div class="app-usuario-menu">
-        <button type="button" id="btn-app-menu" class="btn-engrenagem-usuario" title="Perfil e configurações">⚙️</button>
+        <button type="button" id="btn-app-menu" class="btn-engrenagem-usuario" title="Perfil e configurações">
+          <img id="topbar-avatar-img" src="{{ url_for('foto_meu_perfil', v=app_usuario_foto_versao) if app_usuario_tem_foto else '' }}" alt="" class="topbar-avatar-img{{ '' if app_usuario_tem_foto else ' hidden' }}">
+          <svg id="topbar-avatar-placeholder" class="topbar-avatar-placeholder{{ '' if not app_usuario_tem_foto else ' hidden' }}" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"></path></svg>
+        </button>
         <div id="app-menu-dropdown" class="app-menu-dropdown hidden">
           <div class="app-menu-usuario">
             <span class="app-usuario-nome">{{ app_usuario }}</span>
-            {% if app_usuario_admin %}<span class="app-usuario-badge">Admin</span>{% endif %}
+            {% if app_usuario_perfil == 'adm' %}<span class="app-usuario-badge">Admin</span>{% endif %}
           </div>
+          <button type="button" id="btn-minha-conta" class="app-menu-item">Minha conta</button>
           <label class="app-menu-item app-menu-tema">
             <span>Tema escuro</span>
             <span class="switch-tema">
@@ -44,8 +93,7 @@
               <span class="switch-tema-trilho"></span>
             </span>
           </label>
-          <button type="button" id="btn-minha-senha" class="app-menu-item">Minha senha</button>
-          {% if app_usuario_admin %}
+          {% if app_usuario_perfil == 'adm' %}
             <button type="button" id="btn-gerenciar-usuarios" class="app-menu-item">Gerenciar usuários</button>
           {% endif %}
           <a href="{{ url_for('logout_app') }}" class="app-menu-item app-menu-sair">Sair da ferramenta</a>
@@ -54,110 +102,232 @@
     </div>
   </header>
 
-  <main class="layout">
-    <section class="panel menu-lateral">
-      <div class="menu-grupo" data-grupo="implantacao">
-        <button type="button" class="menu-cabecalho titulo-implantacao">
-          <span>Implantação</span>
-          <span class="menu-seta">▾</span>
-        </button>
-        <div class="menu-conteudo">
-          <div class="botoes" id="botoes-implantacao">
-            <button data-tipo="implantacao-clientes">Clientes em implantação</button>
-            <button disabled title="Em desenvolvimento — aguardando especificação">Processos</button>
+  <div class="app-body">
+    <main class="conteudo">
+      <section id="tela-dashboard" class="panel">
+        <div class="conteudo-header">
+          <div>
+            <h2 class="conteudo-titulo">Dashboard</h2>
+            <p class="conteudo-subtitulo">Visão geral da operação de Implantação e Migração</p>
           </div>
         </div>
-      </div>
-
-      <div class="menu-grupo" data-grupo="consultas">
-        <button type="button" class="menu-cabecalho titulo-consultas">
-          <span>Consultas / Listagens</span>
-          <span class="menu-seta">▾</span>
-        </button>
-        <div class="menu-conteudo">
-          <div class="botoes" id="botoes-consultas">
-            <button data-tipo="clientes">Listar Clientes</button>
-            <button data-tipo="veiculos">Listar Veículos</button>
-            <button data-tipo="rastreadores">Listar Rastreadores</button>
-            <button data-tipo="pessoas">Listar Pessoas</button>
-            <button data-tipo="desatualizados">Listar Desatualizados</button>
-            <button data-tipo="uos">Listar UO's</button>
+        <div class="dashboard-tiles">
+          <div class="stat-tile" style="--tile-accent: var(--amarelo-escuro);">
+            <div class="stat-tile-label">Clientes em implantação (ativos)</div>
+            <div class="stat-tile-valor" id="tile-implantacao-ativos">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--violeta);">
+            <div class="stat-tile-label">Clientes em migração (ativos)</div>
+            <div class="stat-tile-valor" id="tile-migracao-ativos">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--verde);">
+            <div class="stat-tile-label">Veículos migrados</div>
+            <div class="stat-tile-valor" id="tile-veiculos-migrados">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--vermelho);">
+            <div class="stat-tile-label">Clientes com marco atrasado</div>
+            <div class="stat-tile-valor" id="tile-clientes-atrasados">–</div>
           </div>
         </div>
-      </div>
+        <div id="dashboard-insights" class="dashboard-insights"></div>
+        <div class="area-cards">
+          <button type="button" class="area-card area-card-implantacao" id="card-ir-implantacao">
+            <h3 class="area-card-titulo">Controle de Implantação</h3>
+            <p class="area-card-desc">Clientes em processo de implantação — configuração de base e treinamentos.</p>
+          </button>
+          <button type="button" class="area-card area-card-migracao" id="card-ir-migracao">
+            <h3 class="area-card-titulo">Controle de Migração</h3>
+            <p class="area-card-desc">Clientes em processo de migração de dados e repontamento.</p>
+          </button>
+          <button type="button" class="area-card area-card-ferramentas" id="card-ir-ferramentas">
+            <h3 class="area-card-titulo">Ferramentas Auxiliares</h3>
+            <p class="area-card-desc">Consultas, importação, comandos e utilitários de apoio.</p>
+          </button>
+        </div>
+      </section>
 
-      <div class="menu-grupo" data-grupo="import">
-        <button type="button" class="menu-cabecalho titulo-import">
-          <span>Área de Importação</span>
-          <span class="menu-seta">▾</span>
-        </button>
-        <div class="menu-conteudo">
-          <div class="botoes" id="botoes-import">
-            <button data-tipo="cliente">Importar Cliente</button>
-            <button data-tipo="veiculo">Importar Veículo</button>
-            <button disabled title="Ainda não implementado">Importar Rastreador</button>
-            <button data-tipo="uo">Importar UO</button>
-            <button data-tipo="usuario">Importar Usuário</button>
-            <button disabled title="Ainda não implementado">Importar SimCard</button>
-            <button data-tipo="deletar-veiculos">Deletar veículos</button>
-            <button data-tipo="associar-rastreadores">Associar rastreadores</button>
+      <section id="tela-ferramentas" class="panel hidden">
+        <div class="conteudo-header" id="ferramentas-cards-header">
+          <div>
+            <h2 class="conteudo-titulo">Ferramentas Auxiliares</h2>
+            <p class="conteudo-subtitulo">Consultas, importação, comandos e utilitários de apoio operacional</p>
           </div>
         </div>
-      </div>
+        <div class="area-cards" id="ferramentas-cards">
+          <button type="button" class="area-card card-ferr-importacao" id="card-ferramentas-importacao">
+            <h3 class="area-card-titulo">Área de Importação e Consulta</h3>
+            <p class="area-card-desc">Autentique-se na SSX, importe dados e consulte clientes, veículos, rastreadores, pessoas e UO's.</p>
+          </button>
+          {% if app_usuario_perfil != 'visualizacao' %}
+            <button type="button" class="area-card card-ferr-comandos" id="card-ferramentas-comandos">
+              <h3 class="area-card-titulo">Envio de Comandos</h3>
+              <p class="area-card-desc">Envie comandos por SMS pra rastreadores e gerencie os modelos de comando cadastrados.</p>
+            </button>
+          {% endif %}
+          <button type="button" class="area-card card-ferr-conversor" id="card-ferramentas-conversor-kml">
+            <h3 class="area-card-titulo">Conversor KML → SSX</h3>
+            <p class="area-card-desc">Converte um arquivo KML em planilha pronta pra importar na SSX.</p>
+          </button>
+          <button type="button" class="area-card card-ferr-quebrastring" id="card-ferramentas-quebra-string">
+            <h3 class="area-card-titulo">Quebra-String</h3>
+            <p class="area-card-desc">Analisa byte a byte a string bruta enviada por um rastreador.</p>
+          </button>
+          <button type="button" class="area-card card-ferr-validador" id="card-ferramentas-validador">
+            <h3 class="area-card-titulo">Validador de Planilha de Importação</h3>
+            <p class="area-card-desc">Confere a planilha contra as regras oficiais de cada tipo de importação da SSX antes de importar de verdade.</p>
+          </button>
+          {% if app_usuario_perfil == 'adm' %}
+            <button type="button" class="area-card card-ferr-sync-planilha" id="card-ferramentas-sync-planilha">
+              <h3 class="area-card-titulo">Sincronizar Planilha</h3>
+              <p class="area-card-desc">Traz as atualizações da planilha de CS pros cadastros de cliente do app.</p>
+            </button>
+          {% endif %}
+        </div>
 
-      <div class="menu-grupo" data-grupo="migracao">
-        <button type="button" class="menu-cabecalho titulo-migracao">
-          <span>Área de Migração</span>
-          <span class="menu-seta">▾</span>
-        </button>
-        <div class="menu-conteudo">
-          <div class="botoes" id="botoes-migracao">
-            <button data-tipo="migracao-clientes">Clientes em migração</button>
-            <button data-tipo="envio-comando">Envio de comando</button>
+        <div id="ferramentas-sub-importacao" class="ferramentas-subtela hidden">
+          <button type="button" class="btn-secondary ferramentas-voltar" data-ferramentas-voltar>← Voltar</button>
+          <div class="conteudo-header">
+            <div>
+              <h2 class="conteudo-titulo">Área de Importação e Consulta</h2>
+              <p class="conteudo-subtitulo">Autentique-se, importe dados e consulte informações da SSX</p>
+            </div>
+          </div>
+
+          <div class="ferramentas-secao">
+            <h3 class="ferramentas-secao-titulo titulo-autenticacao">Autenticação</h3>
+            <form id="form-login" class="login-form">
+              <select id="select-credencial" class="select-credencial">
+                <option value="">Cliente salvo...</option>
+              </select>
+              <input type="text" id="login" name="login" placeholder="Login" autocomplete="username" required>
+              <input type="password" id="senha" name="senha" placeholder="Senha" autocomplete="current-password" required>
+              <button type="submit" id="btn-autenticar">Autenticar</button>
+              <button type="button" id="btn-logout" class="btn-secondary hidden">Sair</button>
+              {% if app_usuario_perfil == 'adm' %}
+                <button type="button" id="btn-gerenciar-logins" class="btn-secondary">Gerenciar logins</button>
+              {% endif %}
+              <span id="status-auth" class="status-pill status-off">Não autenticado</span>
+            </form>
+            <p class="placeholder">Use pra mexer com um cliente que ainda não tem Ficha. Clientes com Ficha autenticam direto por lá, com a credencial já cadastrada.</p>
+          </div>
+
+          {% if app_usuario_perfil != 'visualizacao' %}
+            <div class="ferramentas-secao">
+              <h3 class="ferramentas-secao-titulo titulo-import">Área de Importação</h3>
+              <div class="botoes botoes-linha" id="botoes-import">
+                <button data-tipo="cliente">Importar Cliente</button>
+                <button data-tipo="veiculo">Importar Veículo</button>
+                <button disabled title="Ainda não implementado">Importar Rastreador</button>
+                <button data-tipo="uo">Importar UO</button>
+                <button data-tipo="usuario">Importar Usuário</button>
+                <button disabled title="Ainda não implementado">Importar SimCard</button>
+                <button data-tipo="deletar-veiculos">Deletar veículos</button>
+                <button data-tipo="associar-rastreadores">Associar rastreadores</button>
+              </div>
+            </div>
+          {% endif %}
+
+          <div class="ferramentas-secao">
+            <h3 class="ferramentas-secao-titulo titulo-consultas">Consultas / Listagens</h3>
+            <div class="botoes botoes-linha" id="botoes-consultas">
+              <button data-tipo="clientes">Listar Clientes</button>
+              <button data-tipo="veiculos">Listar Veículos</button>
+              <button data-tipo="rastreadores">Listar Rastreadores</button>
+              <button data-tipo="pessoas">Listar Pessoas</button>
+              <button data-tipo="desatualizados">Listar Desatualizados</button>
+              <button data-tipo="uos">Listar UO's</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="menu-grupo" data-grupo="ferramentas">
-        <button type="button" class="menu-cabecalho titulo-ferramentas">
-          <span>Ferramentas</span>
-          <span class="menu-seta">▾</span>
-        </button>
-        <div class="menu-conteudo">
-          <div class="botoes" id="botoes-ferramentas">
-            <button data-tipo="conversor-kml">Conversor KML → SSX</button>
-            <button data-tipo="quebra-string">Quebra String</button>
-            <button data-tipo="comandos">Comandos</button>
+        <div id="ferramentas-sub-comandos" class="ferramentas-subtela hidden">
+          <button type="button" class="btn-secondary ferramentas-voltar" data-ferramentas-voltar>← Voltar</button>
+          <div class="conteudo-header">
+            <div>
+              <h2 class="conteudo-titulo">Envio de Comandos</h2>
+              <p class="conteudo-subtitulo">Envie comandos por SMS ou gerencie os modelos cadastrados</p>
+            </div>
+          </div>
+          <div class="area-cards">
+            <button type="button" class="area-card" id="btn-abrir-envio-comando">
+              <h3 class="area-card-titulo">Envio de comando (SMS)</h3>
+              <p class="area-card-desc">Gera e envia um comando SMS pra um rastreador específico.</p>
+            </button>
+            <button type="button" class="area-card" id="btn-abrir-comandos-modelos">
+              <h3 class="area-card-titulo">Gerenciar modelos de comando</h3>
+              <p class="area-card-desc">Cadastra, edita e organiza os modelos de comando por tipo de rastreador.</p>
+            </button>
           </div>
         </div>
-      </div>
 
-      <div class="menu-grupo" data-grupo="dashboard">
-        <button type="button" class="menu-cabecalho titulo-dashboard">
-          <span>Dashboard</span>
-          <span class="menu-seta">▾</span>
-        </button>
-        <div class="menu-conteudo">
-          <div class="botoes" id="botoes-dashboard">
-            <button data-tipo="dashboard-indicadores">Indicadores</button>
+        <div id="ferramentas-sub-sync-planilha" class="ferramentas-subtela hidden">
+          <button type="button" class="btn-secondary ferramentas-voltar" data-ferramentas-voltar>← Voltar</button>
+          <div class="conteudo-header">
+            <div>
+              <h2 class="conteudo-titulo">Sincronizar Planilha</h2>
+              <p class="conteudo-subtitulo">Traz as atualizações da planilha de CS pros cadastros de cliente — nos campos em comum, a planilha manda.</p>
+            </div>
+          </div>
+          <div class="ferramentas-secao">
+            <div class="botoes botoes-linha">
+              <button type="button" id="btn-buscar-sync-planilha">Buscar alterações</button>
+              <button type="button" id="btn-aplicar-sync-planilha" class="btn-primary hidden">Aplicar sincronização</button>
+            </div>
+            <p id="sync-planilha-status" class="placeholder"></p>
+          </div>
+          <div id="sync-planilha-resultado"></div>
+        </div>
+      </section>
+
+      <section class="panel saida-panel hidden" id="tela-saida-wrapper">
+        <div class="saida-header">
+          <h2 id="saida-titulo">Saída</h2>
+          <div class="saida-header-botoes">
+            <button id="btn-exportar-excel" class="btn-secondary hidden">Exportar Excel</button>
+            <button id="btn-limpar" class="btn-secondary">Limpar</button>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section class="panel saida-panel">
-      <div class="saida-header">
-        <h2>Saída</h2>
-        <div class="saida-header-botoes">
-          <button id="btn-exportar-excel" class="btn-secondary hidden">Exportar Excel</button>
-          <button id="btn-limpar" class="btn-secondary">Limpar</button>
+        <div id="saida" class="saida-corpo">
+          <p class="placeholder">Autentique-se e escolha uma consulta ou importação.</p>
         </div>
-      </div>
-      <div id="saida" class="saida-corpo">
-        <p class="placeholder">Autentique-se e escolha uma consulta ou importação.</p>
-      </div>
-    </section>
-  </main>
+      </section>
+
+      <section id="tela-ficha-cliente" class="panel hidden">
+        <div id="ficha-cliente-corpo"></div>
+      </section>
+
+      <section id="tela-minha-conta" class="panel hidden">
+        <div class="minha-conta-cabecalho">
+          <div class="minha-conta-identificacao">
+            <div class="minha-conta-avatar-hub" id="minha-conta-avatar-hub" title="Foto de perfil">
+              <img id="minha-conta-avatar-hub-img" class="hidden" alt="Foto de perfil">
+              <svg id="minha-conta-avatar-hub-placeholder" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"></path></svg>
+            </div>
+            <div>
+              <h2 class="conteudo-titulo" id="minha-conta-titulo">{{ app_usuario }}</h2>
+              <p class="minha-conta-cargo" id="minha-conta-cargo"></p>
+            </div>
+          </div>
+          <button type="button" id="btn-minha-conta-editar" class="btn-engrenagem" title="Configurações da conta">⚙️</button>
+        </div>
+
+        <div class="minha-conta-hub">
+          <div class="minha-conta-visao-geral">
+            <p class="placeholder">Em breve: visão geral com informações e indicadores do dia a dia.</p>
+          </div>
+
+          <div class="minha-conta-painel-tarefas">
+            <div class="minha-conta-tarefas-topo">
+              <h3>Tarefas <span class="minha-conta-tarefas-badge" id="minha-conta-tarefas-contagem">0</span></h3>
+              <button type="button" id="btn-nova-tarefa-minha-conta" class="btn-primary">+ Nova tarefa</button>
+            </div>
+            <div id="minha-conta-tarefas-lista" class="minha-conta-tarefas-lista"></div>
+            <button type="button" id="btn-central-tarefas" class="minha-conta-link-concluidas">Abrir central de tarefas (histórico e acompanhamento)</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <div id="overlay" class="overlay hidden">
     <div class="modal">
@@ -200,6 +370,7 @@
             <span id="progresso-pct">0%</span>
           </div>
         </div>
+        <div id="import-log" class="log-massa"></div>
 
         <button id="btn-iniciar-import" class="btn-primary" disabled>Iniciar Importação</button>
       </div>
@@ -300,10 +471,21 @@
         <form id="form-novo-usuario" class="form-credencial">
           <input type="text" id="usuario-nome" placeholder="Usuário" required>
           <input type="password" id="usuario-senha" placeholder="Senha (deixe em branco pra manter, ao editar)">
-          <label class="checkbox-linha usuario-admin-linha">
-            <input type="checkbox" id="usuario-admin">
-            Administrador
-          </label>
+          <input type="text" id="usuario-responsavel" placeholder="Nome de exibição (opcional)" title="Como esse login aparece nos selects de Responsável/Consultor Comercial — se vazio, usa o nome de usuário.">
+          <select id="usuario-tipo-acesso" title="Define o que esse login pode fazer no app">
+            <option value="adm">Administrador — acesso total, gerencia outros usuários</option>
+            <option value="analista" selected>Analista — opera só nos clientes da própria carteira</option>
+            <option value="visualizacao">Visualização — só lê, nenhuma ação</option>
+          </select>
+          <select id="usuario-area" title="Área do usuário na empresa — quem tem uma área de CS pode ter clientes na própria carteira">
+            <option value="">Sem área definida</option>
+            <option value="CS - Implantação">CS - Implantação</option>
+            <option value="CS - Onboarding">CS - Onboarding</option>
+            <option value="CS - Ongoing">CS - Ongoing</option>
+            <option value="Treinamento">Treinamento</option>
+            <option value="Suporte">Suporte</option>
+            <option value="Comercial">Comercial</option>
+          </select>
           <div class="form-credencial-botoes">
             <button type="submit" id="btn-salvar-usuario" class="btn-primary">Adicionar</button>
             <button type="button" id="btn-cancelar-edicao-usuario" class="btn-secondary hidden">Cancelar edição</button>
@@ -332,8 +514,78 @@
     </div>
   </div>
 
+  <div id="overlay-minha-conta" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Editar minha conta</h3>
+        <button id="minha-conta-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="minha-conta-corpo">
+          <div class="minha-conta-foto-bloco">
+            <button type="button" id="minha-conta-foto-btn" class="minha-conta-foto" title="Alterar foto de perfil">
+              <img id="minha-conta-foto-img" class="hidden" alt="Foto de perfil">
+              <svg id="minha-conta-foto-placeholder" viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"></path></svg>
+            </button>
+            <input type="file" id="minha-conta-foto-input" accept="image/*" hidden>
+            <button type="button" id="minha-conta-foto-trocar" class="btn-secondary">Trocar foto</button>
+          </div>
+
+          <form id="form-minha-conta" class="minha-conta-form">
+            <label class="campo-migracao">
+              <span>Nome</span>
+              <input type="text" id="minha-conta-nome" maxlength="80">
+            </label>
+            <label class="campo-migracao">
+              <span>Sobrenome</span>
+              <input type="text" id="minha-conta-sobrenome" maxlength="80">
+            </label>
+            <label class="campo-migracao">
+              <span>Data de aniversário</span>
+              <div class="minha-conta-aniversario">
+                <select id="minha-conta-aniversario-dia">
+                  <option value="">Dia</option>
+                  {% for d in range(1, 32) %}<option value="{{ '%02d' % d }}">{{ d }}</option>{% endfor %}
+                </select>
+                <select id="minha-conta-aniversario-mes">
+                  <option value="">Mês</option>
+                  {% for m, nome in [('01','Janeiro'),('02','Fevereiro'),('03','Março'),('04','Abril'),('05','Maio'),('06','Junho'),('07','Julho'),('08','Agosto'),('09','Setembro'),('10','Outubro'),('11','Novembro'),('12','Dezembro')] %}
+                    <option value="{{ m }}">{{ nome }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </label>
+            <label class="campo-migracao">
+              <span>Login (usuário)</span>
+              <input type="text" id="minha-conta-login" disabled>
+            </label>
+            <label class="campo-migracao">
+              <span>Telefone profissional</span>
+              <input type="text" id="minha-conta-telefone" placeholder="DDD DDI Número (ex.: 11 55 999998888)">
+            </label>
+            <label class="campo-migracao">
+              <span>E-mail</span>
+              <input type="email" id="minha-conta-email">
+            </label>
+            <div class="minha-conta-acoes">
+              <button type="submit" id="btn-salvar-minha-conta" class="btn-primary">Salvar</button>
+              <button type="button" id="btn-minha-conta-senha" class="btn-secondary">Trocar minha senha</button>
+            </div>
+            <p id="minha-conta-msg" class="placeholder hidden"></p>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="overlay-implantacao-cliente" class="overlay hidden">
-    <div class="modal modal-implantacao-cliente">
+    <div class="modal modal-implantacao-cliente" id="modal-implantacao-cliente">
+      <div class="modal-sidebar-config hidden" id="implantacao-cliente-sidebar-config">
+        <button type="button" class="modal-sidebar-config-item" data-aba="implantacao">Implantação</button>
+        <button type="button" class="modal-sidebar-config-item" data-aba="migracao">Migração</button>
+        <button type="button" class="modal-sidebar-config-item" data-aba="marcos">Marcos <span class="sidebar-seta">▸</span></button>
+        <div id="implantacao-marcos-submenu" class="modal-sidebar-submenu hidden"></div>
+      </div>
       <div class="modal-header">
         <h3 id="implantacao-cliente-modal-titulo">Adicionar cliente</h3>
         <button id="implantacao-cliente-modal-fechar" class="btn-secondary">Fechar</button>
@@ -342,34 +594,159 @@
         <form id="form-implantacao-cliente" class="form-migracao form-implantacao-cliente-grid">
           <label class="campo-migracao">
             <span>IdCentral</span>
-            <input type="text" id="implantacao-cliente-idcentral">
+            <input type="text" id="implantacao-cliente-idcentral" required>
           </label>
           <label class="campo-migracao">
             <span>Cliente</span>
-            <input type="text" id="implantacao-cliente-nome" required>
+            <input type="text" id="implantacao-cliente-nome">
           </label>
           <label class="campo-migracao">
             <span>Data de entrada</span>
             <input type="date" id="implantacao-cliente-data">
           </label>
           <label class="campo-migracao">
-            <span>Objetivo</span>
-            <input type="text" id="implantacao-cliente-objetivo">
-          </label>
-          <label class="campo-migracao">
-            <span>Valor de contrato</span>
-            <input type="number" id="implantacao-cliente-valor" min="0" step="0.01">
-          </label>
-          <label class="campo-migracao">
-            <span>CSM</span>
-            <select id="implantacao-cliente-csm">
-              <option value="">Selecione...</option>
-              <option value="Duda">Duda</option>
-              <option value="Juan">Juan</option>
-              <option value="João Pedro">João Pedro</option>
+            <span>Possui Migração?</span>
+            <select id="implantacao-cliente-tem-migracao">
+              <option value="nao">Não</option>
+              <option value="sim">Sim</option>
             </select>
           </label>
+          <label class="campo-migracao">
+            <span>Responsável</span>
+            <select id="implantacao-cliente-csm">
+              <option value="">Selecione...</option>
+            </select>
+          </label>
+
+          <div id="implantacao-cliente-campos-complementares" class="implantacao-cliente-complementares hidden">
+            <label class="campo-migracao">
+              <span>Objetivo</span>
+              <input type="text" id="implantacao-cliente-objetivo">
+            </label>
+            <label class="campo-migracao">
+              <span>Valor de contrato</span>
+              <input type="number" id="implantacao-cliente-valor" min="0" step="0.01">
+            </label>
+            <label class="campo-migracao">
+              <span>Momento do Cliente</span>
+              <select id="implantacao-cliente-momento">
+                <option value="">Selecione...</option>
+                <option value="Starter">Starter</option>
+                <option value="Capacitação">Capacitação</option>
+                <option value="Consultorias">Consultorias</option>
+                <option value="Maturação">Maturação</option>
+                <option value="Operando">Operando</option>
+                <option value="Sumido">Sumido</option>
+                <option value="Ir para o Ongoing">Ir para o Ongoing</option>
+                <option value="Protestado">Protestado</option>
+                <option value="Cancelado">Cancelado</option>
+                <option value="Implantado">Implantado</option>
+                <option value="Travado por Infraestrutura">Travado por Infraestrutura</option>
+                <option value="Possível Cancelamento">Possível Cancelamento</option>
+              </select>
+            </label>
+            <label class="campo-migracao">
+              <span>Flag</span>
+              <select id="implantacao-cliente-flag">
+                <option value="">Selecione...</option>
+                <option value="Yellow Flag">Yellow Flag</option>
+                <option value="Red Flag">Red Flag</option>
+                <option value="Black Flag">Black Flag</option>
+              </select>
+            </label>
+            <label class="campo-migracao">
+              <span>Consultor Comercial</span>
+              <select id="implantacao-cliente-vendedor">
+                <option value="">Selecione...</option>
+              </select>
+            </label>
+            <label class="campo-migracao">
+              <span>Persona</span>
+              <select id="implantacao-cliente-persona">
+                <option value="">Selecione...</option>
+                <option value="Associação">Associação</option>
+                <option value="Central de alarme">Central de alarme</option>
+                <option value="Cliente final">Cliente final</option>
+                <option value="Empreendedor">Empreendedor</option>
+                <option value="Central de rastreamento">Central de rastreamento</option>
+                <option value="Lobo solitário">Lobo solitário</option>
+                <option value="Provedor de internet">Provedor de internet</option>
+              </select>
+            </label>
+            <label class="campo-migracao">
+              <span>Nome do Decisor</span>
+              <input type="text" id="implantacao-cliente-decisor-nome">
+            </label>
+            <label class="campo-migracao">
+              <span>WhatsApp do Decisor</span>
+              <input type="tel" id="implantacao-cliente-decisor-whatsapp" placeholder="(00) 00000-0000">
+            </label>
+            <label class="campo-migracao">
+              <span>Estado do Decisor</span>
+              <div id="implantacao-cliente-decisor-estado-wrap"></div>
+            </label>
+            <label class="campo-migracao">
+              <span>Cidade do Decisor</span>
+              <div id="implantacao-cliente-decisor-cidade-wrap"></div>
+            </label>
+          </div>
+
           <button type="submit" id="btn-salvar-implantacao-cliente" class="btn-primary">Adicionar</button>
+        </form>
+
+        <div id="implantacao-marco-painel" class="marco-painel hidden">
+          <p id="implantacao-marco-resumo" class="marco-resumo"></p>
+          <div id="implantacao-marco-itens"></div>
+          <form id="form-implantacao-marco-extra" class="marco-extra-form">
+            <input type="text" id="implantacao-marco-extra-texto" maxlength="200" placeholder="Adicionar item só para este cliente...">
+            <button type="submit" class="btn-secondary">Adicionar</button>
+          </form>
+          <label class="marco-linha marco-manual">
+            <input type="checkbox" id="implantacao-marco-manual">
+            <span>Marcar este marco como concluído mesmo com itens pendentes</span>
+          </label>
+          <button type="button" id="btn-salvar-implantacao-marcos" class="btn-primary">Salvar marcos</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>window.CHECKLIST_MARCOS_PADRAO = {{ checklist_marcos_padrao | tojson }};</script>
+
+  <div id="overlay-importar-clientes" class="overlay hidden">
+    <div class="modal modal-grande">
+      <div class="modal-header">
+        <h3>Importar clientes por planilha</h3>
+        <button id="importar-clientes-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <p class="placeholder">
+          Só o IdCentral é obrigatório — os outros campos podem ficar em
+          branco. <a id="importar-clientes-baixar-modelo" href="/api/clientes/importar/modelo">Baixar planilha modelo</a>.
+        </p>
+        <input type="file" id="importar-clientes-arquivo" accept=".xlsx,.xls">
+        <div id="importar-clientes-prevista"></div>
+        <button type="button" id="btn-importar-clientes-confirmar" class="btn-primary hidden">Importar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-ficha-credencial" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Credencial SSX do cliente</h3>
+        <button id="ficha-credencial-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-ficha-credencial" class="form-migracao">
+          <label class="campo-migracao">
+            <span>Login</span>
+            <input type="text" id="ficha-credencial-login" required>
+          </label>
+          <label class="campo-migracao">
+            <span>Senha</span>
+            <input type="password" id="ficha-credencial-senha" placeholder="Deixe em branco pra manter a senha salva" autocomplete="new-password">
+          </label>
+          <button type="submit" class="btn-primary">Salvar</button>
         </form>
       </div>
     </div>
@@ -417,21 +794,182 @@
     </div>
   </div>
 
-  <div id="overlay-migracao" class="overlay hidden">
+  <!-- Listas de tarefas ficam ANTES dos modais de tarefa (mesmo z-index,
+       vale a ordem no DOM): detalhes/editar/finalizar abertos a partir
+       delas precisam aparecer por cima. -->
+  <div id="overlay-central-tarefas" class="overlay hidden">
     <div class="modal modal-grande">
+      <div class="modal-header">
+        <h3>Central de tarefas</h3>
+        <button id="central-tarefas-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="central-tarefas-barra">
+          <div class="central-tarefas-status" id="central-tarefas-status">
+            <button type="button" class="btn-secondary ativo" data-status="pendentes">Pendentes <span class="central-tarefas-contagem"></span></button>
+            <button type="button" class="btn-secondary" data-status="concluida">Concluídas <span class="central-tarefas-contagem"></span></button>
+            <button type="button" class="btn-secondary" data-status="cancelada">Canceladas <span class="central-tarefas-contagem"></span></button>
+            <button type="button" class="btn-secondary" data-status="todas">Todas <span class="central-tarefas-contagem"></span></button>
+          </div>
+          <div class="central-tarefas-filtros">
+            <label class="central-tarefas-check">
+              <input type="checkbox" id="central-tarefas-so-criadas">
+              <span>Só as que eu criei</span>
+            </label>
+            <select id="central-tarefas-responsavel" title="Filtrar por responsável">
+              <option value="">Todos os responsáveis</option>
+            </select>
+          </div>
+        </div>
+        <div id="central-tarefas-lista"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-tarefa" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="tarefa-modal-titulo">Nova tarefa</h3>
+        <button id="tarefa-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-tarefa" class="form-migracao">
+          <label class="campo-migracao" id="tarefa-campo-cliente">
+            <span>Cliente (opcional)</span>
+            <input type="text" id="tarefa-cliente-busca" list="tarefa-clientes-datalist" placeholder="Deixe em branco pra não vincular...">
+            <datalist id="tarefa-clientes-datalist"></datalist>
+          </label>
+          <label class="campo-migracao">
+            <span>Título</span>
+            <input type="text" id="tarefa-titulo" required>
+          </label>
+          <label class="campo-migracao">
+            <span>Descrição</span>
+            <textarea id="tarefa-descricao" rows="3"></textarea>
+          </label>
+          <label class="campo-migracao">
+            <span>Data limite</span>
+            <input type="date" id="tarefa-data-limite" required>
+          </label>
+          <label class="campo-migracao">
+            <span>Responsável</span>
+            <select id="tarefa-responsavel"></select>
+          </label>
+          <p id="tarefa-erro" class="placeholder hidden" style="color: var(--vermelho);"></p>
+          <button type="submit" id="btn-salvar-tarefa" class="btn-primary">Salvar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-tarefa-detalhes" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="tarefa-detalhes-titulo">Tarefa</h3>
+        <button id="tarefa-detalhes-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <p id="tarefa-detalhes-descricao" class="placeholder"></p>
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-item-label">Cliente</div>
+            <div class="info-item-valor" id="tarefa-detalhes-cliente">—</div>
+          </div>
+          <div class="info-item">
+            <div class="info-item-label">Responsável</div>
+            <div class="info-item-valor" id="tarefa-detalhes-responsavel">—</div>
+          </div>
+          <div class="info-item">
+            <div class="info-item-label">Criada por</div>
+            <div class="info-item-valor" id="tarefa-detalhes-criador">—</div>
+          </div>
+          <div class="info-item">
+            <div class="info-item-label">Criada em</div>
+            <div class="info-item-valor" id="tarefa-detalhes-criada">—</div>
+          </div>
+          <div class="info-item">
+            <div class="info-item-label">Prazo</div>
+            <div class="info-item-valor" id="tarefa-detalhes-prazo">—</div>
+          </div>
+          <div class="info-item">
+            <div class="info-item-label">Status</div>
+            <div class="info-item-valor" id="tarefa-detalhes-status">—</div>
+          </div>
+        </div>
+        <div id="tarefa-detalhes-resultado" class="tarefa-resultado-box hidden">
+          <div class="info-item-label" id="tarefa-detalhes-resultado-titulo"></div>
+          <p id="tarefa-detalhes-resultado-texto"></p>
+        </div>
+        <div class="tarefa-detalhes-acoes">
+          <button type="button" id="tarefa-detalhes-concluir" class="btn-primary">Marcar como concluída</button>
+          <button type="button" id="tarefa-detalhes-editar" class="btn-secondary">Editar</button>
+          <button type="button" id="tarefa-detalhes-excluir" class="btn-secondary">Excluir</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-tarefa-finalizar" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Finalizar tarefa</h3>
+        <button id="tarefa-finalizar-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-tarefa-finalizar" class="form-migracao">
+          <div class="tarefa-resultado-opcoes">
+            <label><input type="radio" name="tarefa-resultado" value="concluida" checked> Concluída</label>
+            <label><input type="radio" name="tarefa-resultado" value="cancelada"> Cancelada (não pôde ser feita)</label>
+          </div>
+          <label class="campo-migracao">
+            <span id="tarefa-finalizar-descricao-label">Descrição (opcional)</span>
+            <textarea id="tarefa-finalizar-descricao" rows="3" maxlength="1000"></textarea>
+          </label>
+          <p id="tarefa-finalizar-erro" class="placeholder hidden" style="color: var(--vermelho);"></p>
+          <button type="submit" class="btn-primary">Salvar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-migracao" class="overlay hidden">
+    <div class="modal modal-grande" id="modal-migracao">
+      <div class="modal-sidebar-config hidden" id="migracao-sidebar-config">
+        <button type="button" class="modal-sidebar-config-item" data-aba="implantacao">Implantação</button>
+        <button type="button" class="modal-sidebar-config-item" data-aba="migracao">Migração</button>
+      </div>
       <div class="modal-header">
         <h3 id="migracao-modal-titulo">Cliente</h3>
         <button id="migracao-modal-fechar" class="btn-secondary">Fechar</button>
       </div>
       <div class="modal-body">
         <form id="form-migracao" class="form-migracao">
+          <label class="campo-migracao" id="migracao-idcentral-wrap">
+            <span>IdCentral</span>
+            <input type="text" id="migracao-idcentral" placeholder="Precisa bater com o IdCentral da Implantação pra abrir a Ficha do Cliente unificada">
+          </label>
+          <label class="campo-migracao" id="migracao-cs-wrap">
+            <span>Responsável</span>
+            <select id="migracao-cs">
+              <option value="">Selecione...</option>
+            </select>
+          </label>
           <label class="campo-migracao">
-            <span>CSM responsável</span>
-            <input type="text" id="migracao-cs" placeholder="Responsável CSM">
+            <span>Etapa</span>
+            <select id="migracao-etapa">
+              <option value="analise">Análise / Coleta de Dados</option>
+              <option value="importacao">Importação</option>
+              <option value="comandos">Envio de Comandos</option>
+              <option value="concluido">Validação / Concluído</option>
+            </select>
           </label>
           <label class="campo-migracao">
             <span>Plataforma de origem</span>
             <input type="text" id="migracao-plataforma" placeholder="Ex: iTrack, Fleety...">
+          </label>
+          <label class="campo-migracao">
+            <span>Link da planilha de migração</span>
+            <input type="text" id="migracao-link-planilha" placeholder="Cole aqui o link da planilha Google">
           </label>
           <label class="campo-migracao">
             <span>Quantidade de Clientes</span>
@@ -476,7 +1014,6 @@
         <div class="modal-header-acoes">
           <span id="veiculos-migracao-envio-status" class="veiculos-migracao-envio-status"></span>
           <button id="veiculos-migracao-selecionar-todos" class="btn-secondary">Selecionar todos</button>
-          <button id="veiculos-migracao-editar" class="btn-secondary">Editar</button>
           <button id="veiculos-migracao-enviar-selecionados" class="btn-primary">Enviar</button>
           <button id="veiculos-migracao-fechar" class="btn-secondary">Fechar</button>
         </div>
@@ -676,6 +1213,40 @@
     </div>
   </div>
 
+  <div id="overlay-validador" class="overlay hidden">
+    <div class="modal modal-grande">
+      <div class="modal-header">
+        <h3>Validador de Planilha de Importação</h3>
+        <button id="validador-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="passo">
+          <span class="passo-num">1</span>
+          <span>Tipo de importação</span>
+          <select id="validador-tipo"></select>
+        </div>
+
+        <div class="passo">
+          <span class="passo-num">2</span>
+          <label for="validador-input-arquivo" class="file-label">Carregar planilha (.xlsx, .xls ou .csv)</label>
+          <input type="file" id="validador-input-arquivo" accept=".xlsx,.xls,.csv">
+          <span id="validador-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
+        </div>
+
+        <div class="passo">
+          <span class="passo-num">3</span>
+          <span>Confira se a ordem das colunas bate com o layout oficial da SSX (a validação usa a ORDEM das colunas, não o nome do cabeçalho)</span>
+        </div>
+        <p id="validador-contagem-colunas" class="placeholder hidden"></p>
+        <div id="validador-mapa-campos" class="mapa-campos"></div>
+
+        <button id="btn-validador-rodar" class="btn-primary" disabled>Validar planilha</button>
+
+        <div id="validador-resultado" class="conversor-resultado"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="overlay-comandos" class="overlay hidden">
     <div class="modal modal-grande">
       <div class="modal-header">
@@ -718,6 +1289,30 @@
             </div>
           </form>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fica por último: abre por cima do modal de Minha Conta (mesmo z-index,
+       vale a ordem no DOM). -->
+  <div id="overlay-foto-corte" class="overlay hidden">
+    <div class="modal modal-foto-corte">
+      <div class="modal-header">
+        <h3>Ajustar foto</h3>
+        <button id="foto-corte-fechar" class="btn-secondary">Cancelar</button>
+      </div>
+      <div class="modal-body">
+        <p class="foto-corte-dica">Arraste a imagem para posicionar e use o zoom para aproximar.</p>
+        <div class="foto-corte-area" id="foto-corte-area">
+          <canvas id="foto-corte-canvas"></canvas>
+          <div class="foto-corte-mascara"></div>
+        </div>
+        <label class="foto-corte-zoom">
+          <span>−</span>
+          <input type="range" id="foto-corte-zoom" min="1" max="4" step="0.01" value="1">
+          <span>+</span>
+        </label>
+        <button type="button" id="btn-foto-corte-aplicar" class="btn-primary">Salvar foto</button>
       </div>
     </div>
   </div>

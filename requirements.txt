@@ -5,6 +5,13 @@ openpyxl==3.1.5
 gunicorn==23.0.0
 firebase-admin==7.5.0
 
+# Banco relacional (log de auditoria + histórico do cliente) — roda em
+# paralelo ao Firestore, não substitui. Ver db_sql.py/models.py.
+SQLAlchemy==2.0.54
+psycopg2-binary==2.9.13
+alembic==1.20.0
+python-dotenv==1.0.1
+
 # Fixadas explicitamente: uma versao mais nova do google-cloud-firestore (puxada
 # sozinha pelo firebase-admin, que nao fixa suas proprias dependencias) quebrou
 # o Firestore em produção com "Invalid database id (default)". Essas sao as

@@ -4,3 +4,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Banco relacional local (log de auditoria/histórico) — cada máquina tem o
+# seu, nunca deve ir pro repo. Produção usa Postgres via DATABASE_URL.
+local_dev.db
+
+# Variáveis de ambiente locais (DATABASE_URL com senha, etc.) — cada máquina
+# tem o seu, nunca deve ir pro repo.
+.env
