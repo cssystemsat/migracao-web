@@ -21,3 +21,8 @@ google-api-core==2.33.0
 grpcio==1.83.0
 google-auth==2.47.0
 protobuf==7.35.1
+
+# Sheets/Drive API — reusa a MESMA credencial de service account do Firebase
+# acima (FIREBASE_CREDENTIALS_JSON), só com escopo próprio. Ver planilha_migracao.py.
+google-api-python-client==2.171.0
+google-auth-httplib2==0.2.0

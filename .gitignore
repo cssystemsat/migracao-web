@@ -9,6 +9,13 @@ venv/
 # seu, nunca deve ir pro repo. Produção usa Postgres via DATABASE_URL.
 local_dev.db
 
+# Dados do modo offline (dev_offline_preview.py — Firestore fake gravado em
+# arquivo). Só pra desenvolvimento local.
+.dados_offline.json
+.dados_offline.json.tmp
+.dados_offline_um_cliente.json
+.dados_offline_um_cliente.json.tmp
+
 # Variáveis de ambiente locais (DATABASE_URL com senha, etc.) — cada máquina
 # tem o seu, nunca deve ir pro repo.
 .env

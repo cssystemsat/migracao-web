@@ -193,7 +193,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: var(--painel);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 16px;
+  /* Mesmo respiro em todas as telas (junto com o padding do .app-body e o
+     gap do .conteudo) — não sobrescrever por tela. */
+  padding: 14px;
   min-height: 0;
   /* .conteudo é flex-column pra travar a altura do Kanban/Lista — sem isso,
      painéis "normais" (Dashboard, Ferramentas, Ficha) herdam flex-shrink:1
@@ -630,6 +632,7 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 .acoes-credencial button { padding: 5px 10px; font-size: 0.8rem; }
 
 .form-credencial-titulo { font-size: 0.9rem; margin: 6px 0 10px; }
+.resumo-modelos-planilha:not(:empty) { margin-top: 16px; }
 
 .migracao-modelos-bloco { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--cinza-200); }
 .migracao-modelos-dica { font-size: 0.8rem; margin-bottom: 12px; }
@@ -880,6 +883,30 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
   resize: vertical;
 }
 .form-migracao .btn-primary { margin-top: 4px; }
+.linha-input-botao { display: flex; gap: 8px; }
+.linha-input-botao input { flex: 1; min-width: 0; }
+.linha-input-botao .btn-secondary { width: auto; flex-shrink: 0; padding: 8px 14px; margin-top: 0; font-size: 0.85rem; white-space: nowrap; }
+
+/* Agrupa os campos de acesso à plataforma de origem (link/login/senha) num
+   container separado do resto do formulário de migração, pra ficar claro
+   que são credenciais do cliente, não dados de progresso da migração. */
+.migracao-grupo-acesso {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--cinza-100);
+  border: 1px solid var(--cinza-200);
+  border-radius: 10px;
+  padding: 12px;
+}
+.migracao-grupo-titulo {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--cinza-500);
+}
+.migracao-grupo-linha-dupla { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 .minha-conta-corpo { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; margin-top: 20px; }
 .minha-conta-foto-bloco { display: flex; flex-direction: column; align-items: center; gap: 10px; flex-shrink: 0; }
@@ -916,7 +943,7 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .btn-engrenagem:hover:not(:disabled) { background: var(--cinza-200); }
 .btn-engrenagem.btn-excluir:hover:not(:disabled) { background: #fee2e2; border-color: #fecaca; color: var(--vermelho); }
 
-.migracao-toolbar { margin-bottom: 12px; }
+.migracao-toolbar { margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .migracao-toolbar .btn-primary { width: auto; padding: 8px 16px; margin-top: 0; }
 
 
@@ -965,14 +992,16 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 
 .implantacao-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .implantacao-busca,
-.implantacao-filtro-csm {
+.implantacao-filtro-csm,
+.toolbar-filtro-responsavel {
   padding: 8px 10px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
   font-size: 0.85rem;
 }
 .implantacao-busca { min-width: 240px; }
-.implantacao-filtro-csm { background: var(--cinza-100); }
+.implantacao-filtro-csm,
+.toolbar-filtro-responsavel { background: var(--cinza-100); }
 
 .timeline-setor { border-bottom: 1px solid var(--cinza-200); padding: 14px 0; }
 .timeline-setor:last-child { border-bottom: none; }
@@ -1004,14 +1033,65 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 
 .veiculos-migracao-corpo { width: 100%; }
 
+.veiculos-migracao-filtros { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.veiculos-migracao-filtros input[type="text"] {
+  flex: 1;
+  min-width: 220px;
+  padding: 9px 12px;
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+.veiculos-migracao-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.veiculo-chip-status {
+  width: auto;
+  margin-top: 0;
+  padding: 6px 13px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid var(--cinza-300);
+  border-radius: 999px;
+  background: var(--cinza-100);
+  color: var(--cinza-700);
+}
+.veiculo-chip-status:hover:not(.ativo) { background: var(--cinza-200); }
+.veiculo-chip-status.ativo { outline: 2px solid var(--azul); outline-offset: -1px; font-weight: 700; }
+.veiculo-chip-status.chip-aguardando { background: #dbeafe; color: #1e3a8a; border-color: transparent; }
+.veiculo-chip-status.chip-enviar { background: #fee2e2; color: #991b1b; border-color: transparent; }
+.veiculo-chip-status.chip-enviado { background: #fef9c3; color: #854d0e; border-color: transparent; }
+.veiculo-chip-status.chip-migrado { background: #dcfce7; color: #166534; border-color: transparent; }
+.veiculo-chip-status.chip-cancelado { background: #e5e7eb; color: #374151; border-color: transparent; }
+
+/* Tabela de veículos: mais respiro e menos "grade de planilha" (sem a borda
+   vertical entre células) que o .tabela-saida padrão — a cor de fundo por
+   status (linha-status-*, mais abaixo) continua intacta, só ajusta
+   espaçamento/bordas. Escopado só aqui pra não afetar outras tabelas que
+   usam a mesma classe base. */
+.veiculos-migracao-corpo table.tabela-saida th,
+.veiculos-migracao-corpo table.tabela-saida td {
+  padding: 10px 12px;
+  border-right: none;
+}
+.veiculos-migracao-corpo table.tabela-saida th {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--cinza-500);
+}
+
 .veiculo-comando-input {
   width: 100%;
   min-width: 140px;
-  padding: 5px 7px;
+  padding: 6px 9px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
   font-size: 0.82rem;
+  background: transparent;
 }
+.veiculo-comando-input:hover, .veiculo-comando-input:focus { background: var(--painel); border-color: var(--cinza-500); }
 
 .btn-enviar-icone {
   background: var(--verde);
@@ -1028,7 +1108,7 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .btn-adicionar-linha:hover:not(:disabled) { background: var(--azul-escuro); }
 
 .veiculo-status-select {
-  padding: 5px 7px;
+  padding: 6px 8px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
   font-size: 0.8rem;
@@ -1210,6 +1290,7 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
 
 @media (max-width: 720px) {
   .comando-colunas { grid-template-columns: 1fr; }
+  .migracao-grupo-linha-dupla { grid-template-columns: 1fr; }
 }
 
 .conversor-resultado { margin-top: 16px; }
@@ -1286,18 +1367,53 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
 
 /* --- FASE 1: nova navegação (topbar + sidebar de 4 áreas + Dashboard) --- */
 
-.topbar-busca { flex: 1; max-width: 220px; min-width: 0; }
+.topbar-esquerda { flex: 1; min-width: 0; display: flex; align-items: center; gap: 16px; }
+/* Título da página vive aqui (não mais dentro de cada painel). */
+.topbar-titulo { margin: 0; font-size: 1rem; font-weight: 700; color: var(--cinza-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.topbar .topbar-titulo-pai { background: none; border: none; padding: 0; margin: 0; width: auto; font: inherit; font-weight: 500; color: var(--cinza-500); cursor: pointer; }
+.topbar .topbar-titulo-pai:hover:not(:disabled) { background: none; color: var(--azul); text-decoration: underline; opacity: 1; }
+.topbar-titulo-sep { color: var(--cinza-300); font-weight: 400; }
+.topbar-busca { flex: 1; max-width: 320px; min-width: 0; position: relative; }
+
+/* Títulos que agora estão na topbar — escondidos dentro das telas (o
+   subtítulo, quando tem, continua). Minha conta e Ficha mantêm o próprio
+   cabeçalho (nome/foto/tags), por isso não entram aqui. */
+.panel > .conteudo-header .conteudo-titulo,
+.ferramentas-subtela > .conteudo-header .conteudo-titulo { display: none; }
+#saida-titulo:is(:empty, .oculto-topbar) { display: none; }
+/* Implantação/Migração: o cabeçalho do painel de saída só tinha o título —
+   sem nenhum botão visível, some inteiro. */
+.saida-header:has(#saida-titulo.oculto-topbar):not(:has(.saida-header-botoes button:not(.hidden))) { display: none; }
 .topbar-busca input {
   width: 100%;
-  padding: 5px 8px;
+  box-sizing: border-box;
+  padding: 6px 52px 6px 28px;
   border: 1px solid var(--cinza-300);
   border-radius: var(--radius);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   background: var(--cinza-100);
-  color: var(--cinza-500);
+  color: var(--cinza-900);
 }
+.topbar-busca input:focus { background: var(--painel); border-color: var(--azul); outline: none; box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15); }
+.topbar-busca-icone { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--cinza-500); pointer-events: none; }
+.topbar-busca-atalho { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-family: inherit; font-size: 0.62rem; font-weight: 600; line-height: 1; color: var(--cinza-500); background: var(--painel); border: 1px solid var(--cinza-300); border-radius: 4px; padding: 3px 5px; pointer-events: none; }
+.topbar-busca input:focus ~ .topbar-busca-atalho { display: none; }
 
-.app-body { grid-area: content; display: flex; min-height: 0; min-width: 0; padding: 16px; }
+/* Lista de resultados da busca global (ir para o cliente). */
+.busca-global-resultados { position: absolute; top: calc(100% + 6px); left: 0; right: 0; min-width: 280px; max-height: 360px; overflow-y: auto; background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15); padding: 4px; z-index: 60; }
+.topbar .busca-global-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; margin: 0; padding: 7px 10px; border: none; border-radius: 6px; background: transparent; color: var(--cinza-900); text-align: left; cursor: pointer; font-size: 0.82rem; }
+.topbar .busca-global-item.ativo, .topbar .busca-global-item:hover:not(:disabled) { background: var(--cinza-100); opacity: 1; }
+.busca-global-nome { font-weight: 600; }
+.busca-global-meta { font-size: 0.7rem; color: var(--cinza-500); }
+.busca-global-vazio { padding: 10px; font-size: 0.8rem; color: var(--cinza-500); }
+
+/* Filtro local das listas (Implantação/Migração) — funil, não lupa. */
+.filtro-lista { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--cinza-300); border-radius: var(--radius); background: var(--painel); color: var(--cinza-500); }
+.filtro-lista:focus-within { border-color: var(--azul); }
+.filtro-lista input { border: none; outline: none; background: transparent; color: var(--cinza-900); padding: 7px 0; width: 170px; font-size: 0.85rem; margin: 0; }
+.tela-lista-compacta .filtro-lista input { padding: 4px 0; font-size: 0.8rem; }
+
+.app-body { grid-area: content; display: flex; min-height: 0; min-width: 0; padding: 12px; }
 
 .sidebar {
   grid-area: sidebar;
@@ -1316,8 +1432,8 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
 .sidebar-topo {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
   padding: 2px 2px 14px;
   margin-bottom: 6px;
   border-bottom: 1px solid var(--cinza-200);
@@ -1345,11 +1461,6 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
   box-shadow: none;
   -webkit-tap-highlight-color: transparent;
 }
-.sidebar-logo-selo {
-  flex-shrink: 0;
-  font-size: 19px;
-  line-height: 1;
-}
 .sidebar-logo-texto {
   font-size: 0.95rem;
   font-weight: 700;
@@ -1362,20 +1473,20 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   padding: 0;
+  margin: 0;
   background: none;
-  color: var(--cinza-500);
+  color: var(--cinza-700);
   border-radius: var(--radius);
   flex-shrink: 0;
 }
-.sidebar-toggle:hover { background: var(--cinza-100); color: var(--cinza-700); }
-.sidebar-toggle svg { transition: transform 0.3s ease; }
-.sidebar.recolhida .sidebar-toggle svg { transform: rotate(180deg); }
-
-.sidebar.recolhida .sidebar-topo { flex-direction: column; gap: 10px; padding: 2px 0 14px; }
-.sidebar.recolhida .sidebar-logo-texto { display: none; }
+/* :not(:disabled) pra ganhar do button:hover geral (fundo azul, sumia o ícone). */
+.sidebar-toggle:hover:not(:disabled) { background: var(--cinza-100); color: var(--cinza-900); }
+/* Recolhido: só o sanduíche, centralizado (o texto "Migração 4.0" some). */
+.sidebar.recolhida .sidebar-topo { justify-content: center; padding: 2px 0 14px; }
+.sidebar.recolhida .sidebar-logo { display: none; }
 
 .sidebar-item {
   display: flex;
@@ -1401,7 +1512,7 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
 .sidebar.recolhida .sidebar-item { justify-content: center; padding: 10px; }
 .sidebar.recolhida .sidebar-item-texto { display: none; }
 
-.conteudo { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.conteudo { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 
 .conteudo-header { margin-bottom: 4px; }
 .conteudo-titulo { font-size: 1.3rem; margin: 0 0 4px; }
@@ -1556,62 +1667,176 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
 
 /* O board preenche a altura disponível do painel (não cresce além da tela);
    cada coluna rola seus próprios cards em vez de esticar o board inteiro
-   verticalmente — só o board como um todo rola na horizontal. */
-.kanban-board { display: grid; grid-auto-flow: column; grid-auto-columns: 260px; grid-template-rows: minmax(0, 1fr); gap: 14px; overflow-x: auto; padding-bottom: 12px; margin-top: 14px; height: 100%; min-height: 0; }
-.kanban-coluna { background: var(--cinza-100); border-radius: 12px; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 10px; min-height: 100px; min-width: 0; overflow-y: auto; }
+   verticalmente. grid-template-columns vem inline (JS, construirKanban) —
+   uma coluna por etapa, então encolhe com a tela em vez de manter uma largura
+   mínima grande e forçar scroll horizontal à toa (ex.: sidebar aberta). */
+.kanban-board { display: grid; grid-template-rows: minmax(0, 1fr); gap: 14px; overflow-x: auto; padding-bottom: 12px; margin-top: 14px; height: 100%; min-height: 0; }
+.kanban-coluna { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: 12px; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 10px; min-height: 100px; min-width: 0; overflow-y: auto; }
 /* padding-top fica aqui (não no .kanban-coluna) de propósito: o header é sticky
    e gruda no topo do padding-box da coluna ao rolar — se o respiro de cima fosse
    padding do container, ele nunca seria "coberto" pelo scroll e um card ficava
    visível atrás dessa folga (efeito de canto quadrado/vazado). Com o respiro
    dentro do próprio header, ele fica colado na borda de cima da coluna, onde o
    recorte arredondado do overflow já cuida de arredondar os cantos dele. */
-.kanban-coluna-cabecalho { display: flex; align-items: center; justify-content: space-between; padding: 14px 6px 2px; flex-shrink: 0; position: sticky; top: 0; background: var(--cinza-100); z-index: 1; }
-.kanban-coluna-nome { font-size: 0.78rem; font-weight: 700; color: var(--cinza-700); }
-.kanban-coluna-contagem { font-size: 0.72rem; font-weight: 700; color: var(--cinza-500); background: var(--painel); border-radius: 999px; padding: 1px 7px; }
+.kanban-coluna-cabecalho { display: flex; align-items: center; justify-content: space-between; padding: 14px 6px 2px; flex-shrink: 0; position: sticky; top: 0; background: var(--painel); z-index: 1; }
+.kanban-coluna-nome { font-size: 0.78rem; font-weight: 700; color: var(--azul-escuro); }
+.kanban-coluna-contagem { font-size: 0.72rem; font-weight: 700; color: var(--cinza-500); background: var(--cinza-100); border-radius: 999px; padding: 1px 7px; }
+/* Mesmo padrão visual do card de Implantação (.kmarcos-card): compacto,
+   hierarquia por peso/cor (rótulo cinza + valor em negrito escuro), hover
+   com leve elevação em vez de trocar a borda. */
 .kanban-card {
   background: var(--painel);
   border: 1px solid var(--cinza-200);
   border-radius: var(--radius);
-  padding: 12px;
+  padding: 8px 10px;
   text-align: left;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
   box-shadow: var(--shadow);
   color: var(--cinza-900);
   width: 100%;
   margin-top: 0;
   cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
 }
-.kanban-card:hover { border-color: var(--azul); background: var(--painel); }
+.kanban-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
+/* O conteúdo (nome/meta/meta/barra) é um único filho dentro de .kanban-card
+   — o gap do card de fora não tinha efeito nenhum nele; o espaçamento real
+   entre nome, metas e barra de progresso precisa estar aqui. */
+.kanban-card-conteudo { display: flex; flex-direction: column; gap: 3px; }
 .kanban-card-linha-nome { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
-.kanban-card-nome { font-size: 0.86rem; font-weight: 700; line-height: 1.25; }
+.kanban-card-nome { font-size: 0.78rem; font-weight: 700; line-height: 1.25; color: var(--azul-escuro); word-break: break-word; }
 .kanban-card-flag-icone { flex-shrink: 0; margin-top: 1px; }
-.kanban-card-meta { font-size: 0.76rem; color: var(--cinza-500); }
+.kanban-card-meta { font-size: 0.72rem; color: var(--cinza-700); line-height: 1.3; }
+.kanban-card-meta strong { color: var(--cinza-900); font-weight: 600; }
 .kanban-card-badge-atrasado { margin-top: 6px; }
+.kanban-card-conteudo .progresso-bar-bg { margin-top: 2px; }
 /* Heurística de risco (cliente antigo com poucas placas) — só cor, sem texto
    extra no card; motivo explicado no title do atributo (ver JS). */
 .kanban-card-risco { border-color: var(--vermelho); border-width: 2px; }
 .kanban-vazio { font-size: 0.76rem; color: var(--cinza-500); text-align: center; padding: 12px 4px; }
 
+/* --- Kanban de Implantação (visual da tela de Marcos do painel de CS) ---
+   Prefixo kmarcos- pra não mexer no Kanban de Migração (.kanban-*).
+   Barra de números em cima + 5 colunas dividindo a largura; cada coluna
+   rola os próprios cards. Em tela estreita o board rola na horizontal. */
+/* padding (não margin) no topo: com height:100% + margin o bloco passava 10px
+   da área e aparecia uma barra de rolagem de fora. Só as colunas rolam. */
+.kmarcos-wrap { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; padding-top: 10px; box-sizing: border-box; }
+
+.kmarcos-stats { display: flex; align-items: stretch; flex-shrink: 0; background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius); overflow: hidden; }
+.kmarcos-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border: none;
+  border-right: 1px solid var(--cinza-200);
+  border-radius: 0;
+  background: transparent;
+  color: var(--cinza-900);
+  width: auto;
+  margin-top: 0;
+  font: inherit;
+}
+.kmarcos-stat:last-child { border-right: none; }
+button.kmarcos-stat { cursor: pointer; transition: background 0.15s; }
+button.kmarcos-stat:hover:not(:disabled) { background: var(--cinza-100); opacity: 1; }
+.kmarcos-stat-rotulo { display: inline-flex; align-items: center; gap: 4px; font-size: 0.66rem; color: var(--cinza-500); line-height: 1; }
+.kmarcos-stat-valor { font-size: 1.05rem; font-weight: 700; line-height: 1; color: var(--azul-escuro); }
+.kmarcos-stat-ok .kmarcos-stat-valor { color: #059669; }
+.kmarcos-stat-atrasado .kmarcos-stat-valor { color: #dc2626; }
+.kmarcos-stat-ok.ativo, .kmarcos-stat-ok.ativo:hover:not(:disabled) { background: #d1fae5; }
+.kmarcos-stat-atrasado.ativo, .kmarcos-stat-atrasado.ativo:hover:not(:disabled) { background: #fee2e2; }
+.kmarcos-stat-flag .kmarcos-stat-rotulo,
+.kmarcos-stat-flag .kmarcos-stat-valor { color: var(--kmarcos-flag-cor); }
+.kmarcos-stat-flag.ativo, .kmarcos-stat-flag.ativo:hover:not(:disabled) { background: var(--kmarcos-flag-cor); }
+.kmarcos-stat-flag.ativo .kmarcos-stat-rotulo,
+.kmarcos-stat-flag.ativo .kmarcos-stat-valor { color: #ffffff; }
+.kmarcos-flag-yellow { --kmarcos-flag-cor: #d97706; }
+.kmarcos-flag-red { --kmarcos-flag-cor: #dc2626; }
+.kmarcos-flag-black { --kmarcos-flag-cor: #1f2937; }
+
+.kmarcos-board { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); grid-template-rows: minmax(0, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+.kmarcos-coluna { display: flex; flex-direction: column; min-height: 0; background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 10px 8px 8px 10px; }
+.kmarcos-coluna-cabecalho { flex-shrink: 0; padding: 0 2px 8px 0; }
+.kmarcos-coluna-linha { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.kmarcos-coluna-titulo { margin: 0; font-size: 0.88rem; font-weight: 700; color: var(--azul-escuro); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kmarcos-coluna-contagem { flex-shrink: 0; font-size: 0.72rem; font-weight: 700; color: var(--cinza-700); background: var(--cinza-100); border-radius: 999px; padding: 1px 8px; }
+.kmarcos-coluna-sub { font-size: 0.68rem; color: var(--cinza-500); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kmarcos-coluna-cards { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+.kmarcos-vazio { font-size: 0.8rem; color: var(--cinza-500); text-align: center; padding: 28px 4px; }
+
+.kmarcos-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: var(--cinza-900);
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.kmarcos-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
+.kmarcos-card-risco { border: 2px solid #dc2626; }
+.kmarcos-card-nome { font-size: 0.78rem; font-weight: 700; line-height: 1.25; color: var(--azul-escuro); word-break: break-word; }
+.kmarcos-card-status { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.kmarcos-card-flag { display: inline-flex; align-items: center; gap: 3px; font-size: 0.66rem; font-weight: 600; color: var(--kmarcos-flag-cor); }
+.kmarcos-selo { font-size: 0.66rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; line-height: 1.1; }
+.kmarcos-selo-ok { background: #d1fae5; color: #059669; }
+.kmarcos-selo-atrasado { background: #fee2e2; color: #dc2626; }
+.kmarcos-card-linha { display: flex; align-items: center; gap: 5px; font-size: 0.72rem; color: var(--cinza-700); line-height: 1.3; }
+.kmarcos-card-linha-dupla { display: flex; align-items: center; flex-wrap: wrap; column-gap: 12px; }
+.kmarcos-card-icone { display: inline-flex; flex-shrink: 0; color: var(--cinza-500); }
+.kmarcos-icone-calendario, .kmarcos-icone-caminhao { color: var(--verde); }
+.kmarcos-card-linha strong { color: var(--cinza-900); font-weight: 600; }
+.kmarcos-card-apagado { color: var(--cinza-500); }
+
+.btn-ver-implantados { width: auto; margin-top: 0; padding: 8px 14px; }
+.modal-implantados { max-width: 760px; }
+.implantados-busca { width: 100%; margin-bottom: 12px; box-sizing: border-box; }
+.tabela-implantados-linha { cursor: pointer; }
+
+/* Layout compacto nas telas de Implantação e Migração (classe posta no body
+   por marcarTelaListaCompacta) — menos moldura em volta = mais cards no
+   Kanban. As duas telas compartilham a classe base .migracao-toolbar, então
+   as regras abaixo valem pras duas (implantacao-toolbar só soma ajustes
+   extras específicos da Implantação). */
+.tela-lista-compacta #tela-saida-wrapper .saida-corpo { border: none; padding: 0; background: transparent; }
+.tela-lista-compacta #tela-saida-wrapper { min-height: 0; }
+.tela-lista-compacta .migracao-toolbar { gap: 8px; margin-bottom: 0; }
+.tela-lista-compacta .migracao-toolbar .btn-primary,
+.tela-lista-compacta .migracao-toolbar .btn-secondary { padding: 5px 12px; font-size: 0.8rem; }
+.tela-lista-compacta .migracao-toolbar .implantacao-filtro-csm,
+.tela-lista-compacta .migracao-toolbar .toolbar-filtro-responsavel { padding: 4px 8px; font-size: 0.8rem; }
+.tela-lista-compacta .migracao-toolbar .segmentado button { padding: 4px 10px; font-size: 0.8rem; }
+
+:root[data-theme="dark"] .kmarcos-stat-ok .kmarcos-stat-valor { color: #4ade80; }
+:root[data-theme="dark"] .kmarcos-stat-atrasado .kmarcos-stat-valor { color: #f87171; }
+:root[data-theme="dark"] .kmarcos-stat-ok.ativo, :root[data-theme="dark"] .kmarcos-stat-ok.ativo:hover:not(:disabled) { background: #14532d; }
+:root[data-theme="dark"] .kmarcos-stat-atrasado.ativo, :root[data-theme="dark"] .kmarcos-stat-atrasado.ativo:hover:not(:disabled) { background: #4c1d1d; }
+:root[data-theme="dark"] .kmarcos-flag-yellow { --kmarcos-flag-cor: #fbbf24; }
+:root[data-theme="dark"] .kmarcos-flag-red { --kmarcos-flag-cor: #f87171; }
+:root[data-theme="dark"] .kmarcos-flag-black { --kmarcos-flag-cor: #9ca3af; }
+:root[data-theme="dark"] .kmarcos-stat-flag.ativo .kmarcos-stat-rotulo,
+:root[data-theme="dark"] .kmarcos-stat-flag.ativo .kmarcos-stat-valor { color: #0a0e17; }
+:root[data-theme="dark"] .kmarcos-selo-ok { background: #14532d; color: #4ade80; }
+:root[data-theme="dark"] .kmarcos-selo-atrasado { background: #4c1d1d; color: #f87171; }
+:root[data-theme="dark"] .kmarcos-card-risco { border-color: #f87171; }
+:root[data-theme="dark"] .kmarcos-card:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
+:root[data-theme="dark"] .kmarcos-icone-calendario,
+:root[data-theme="dark"] .kmarcos-icone-caminhao { color: #4ade80; }
+
 /* --- FASE 3a: sidebar contextual + Ficha do Cliente --- */
 
-.sidebar-voltar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  padding: 9px 12px;
-  margin-bottom: 6px;
-  border-radius: var(--radius);
-  background: none;
-  border: none;
-  color: var(--cinza-700);
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-.sidebar-voltar:hover { background: var(--cinza-100); }
 .sidebar-cliente-nome {
   padding: 4px 12px 12px;
   margin-bottom: 6px;
@@ -1621,11 +1846,11 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
   color: var(--cinza-900);
 }
 .sidebar.recolhida .sidebar-cliente-nome { display: none; }
-.sidebar.recolhida .sidebar-voltar { justify-content: center; }
 
 .ficha-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
-.ficha-header h2 { margin: 0 0 6px; font-size: 1.3rem; }
-.ficha-header-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 0.82rem; color: var(--cinza-500); }
+.ficha-header h2 { margin: 0; font-size: 1.3rem; }
+/* Nome do cliente + tag "Migração" (só quando tem) na mesma linha. */
+.ficha-header-titulo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .ficha-engrenagem { flex-shrink: 0; }
 
@@ -1680,6 +1905,69 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
 .ficha-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
 .ficha-acoes button { width: auto; margin-top: 0; }
 
+/* Card de acesso à plataforma de origem (Ficha > Migração) — uma caixa só
+   (não card-dentro-de-card), linhas separadas por um fio fino em vez de
+   cada uma ter seu próprio contorno/sombra, ícones em estilo "ghost". */
+.acesso-origem-card {
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-radius: 10px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+.acesso-origem-cabecalho {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--cinza-200);
+  background: var(--cinza-100);
+}
+.acesso-origem-cabecalho h3 { font-size: 0.82rem; margin: 0; color: var(--cinza-700); }
+.acesso-origem-abrir {
+  width: auto;
+  margin-top: 0;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: none;
+  border: 1px solid var(--cinza-300);
+  border-radius: 999px;
+  color: var(--azul);
+}
+.acesso-origem-abrir:hover { background: var(--painel); }
+.acesso-origem-card > .placeholder { margin: 10px 14px 12px; font-size: 0.82rem; }
+.acesso-origem-corpo { display: flex; flex-direction: column; }
+.acesso-origem-linha {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+}
+.acesso-origem-linha:not(:last-child) { border-bottom: 1px solid var(--cinza-100); }
+.acesso-origem-label { font-size: 0.74rem; color: var(--cinza-500); min-width: 42px; flex-shrink: 0; }
+.acesso-origem-valor {
+  flex: 1;
+  font-family: "Consolas", monospace;
+  font-size: 0.86rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.acesso-origem-botao {
+  width: auto;
+  margin-top: 0;
+  padding: 3px 6px;
+  font-size: 0.88rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--cinza-500);
+  flex-shrink: 0;
+}
+.acesso-origem-botao:hover:not(:disabled) { background: var(--cinza-100); color: var(--cinza-900); }
+
 .ficha-credencial-linha { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ficha-credencial-linha button { width: auto; margin-top: 0; }
 .ficha-credencial-login { font-size: 0.82rem; color: var(--cinza-500); }
@@ -1691,14 +1979,13 @@ table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
 .alerta-bloco { display: flex; align-items: center; gap: 8px; background: #fee2e2; border-radius: var(--radius); padding: 10px 14px; margin: 12px 0 0; color: var(--vermelho); font-size: 0.88rem; font-weight: 600; }
 :root[data-theme="dark"] .alerta-bloco { background: #4c1d1d; }
 
-input:disabled, select:disabled {
+input:disabled, select:disabled, input.input-travado {
   opacity: 0.6;
   cursor: not-allowed;
   background: var(--cinza-100);
 }
 
 .badge-tipo { display: inline-flex; align-items: center; font-size: 0.68rem; font-weight: 700; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
-.badge-tipo.so-implantacao { background: #dbeafe; color: var(--azul-escuro); }
 .badge-tipo.com-migracao { background: #ede9fe; color: var(--violeta); }
 
 /* Tags de destaque da Visão Geral (Momento/Flag/Etapa/Persona) — cor fixa
@@ -1756,6 +2043,44 @@ input:disabled, select:disabled {
 .marco-extra-form button { width: auto; margin-top: 0; white-space: nowrap; }
 .marco-linha.marco-manual { border-top: 1px solid var(--cinza-200); border-bottom: none; color: var(--cinza-700); }
 
+/* Prioridades da Quick Win (Marco 2) — um bloco por prioridade, com as
+   subtarefas dentro. */
+.tag-implantado { background: #dcfce7; color: #166534; }
+.marco-secao-titulo { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cinza-500); margin: 14px 0 6px; }
+.marco-prioridade { border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 8px 12px 0; margin-bottom: 10px; }
+.marco-prioridade-cabecalho { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--cinza-200); }
+.marco-prioridade-cabecalho strong { flex: 1; font-size: 0.92rem; }
+.marco-prioridade .marco-linha { padding-left: 8px; }
+.marco-adicionar { margin: 6px 0 10px; }
+.marco-adicionar .marco-extra-form { margin: 0; align-items: center; }
+.btn-adicionar-inline {
+  width: auto;
+  margin: 0;
+  padding: 6px 10px;
+  background: none;
+  border: 1px dashed var(--cinza-300);
+  border-radius: var(--radius);
+  color: var(--azul);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-adicionar-inline:hover { background: var(--cinza-200); border-style: solid; }
+.marco-prioridade .btn-adicionar-inline { border: none; padding: 4px 8px; }
+.campo-implantado-info { font-size: 0.75rem; color: var(--verde-escuro); font-weight: 600; min-height: 1em; }
+/* Aba "Marcos" da Ficha: lista dos marcos à esquerda, checklist à direita. */
+.ficha-marcos-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 16px; }
+.ficha-marcos-lista { display: flex; flex-direction: column; gap: 4px; }
+.ficha-marcos-lista .modal-sidebar-subitem { padding: 10px 12px; font-size: 0.85rem; border: 1px solid var(--cinza-200); }
+.ficha-marcos-titulo { margin: 0 0 6px; }
+.ficha-marcos-layout .btn-primary#btn-salvar-implantacao-marcos { margin-top: 14px; }
+@media (max-width: 760px) {
+  .ficha-marcos-layout { grid-template-columns: 1fr; }
+}
+.btn-link-inline { width: auto; margin: 0 0 0 6px; padding: 0; background: none; border: none; color: var(--azul); font: inherit; cursor: pointer; }
+.btn-link-inline:hover { text-decoration: underline; }
+.ficha-marco-atual { font-size: 0.82rem; color: var(--cinza-500); font-weight: 600; margin: 8px 0 0; }
+
 .sidebar-seta { display: inline-block; margin-left: 4px; transition: transform 0.15s; }
 .modal-sidebar-config-item.expandido .sidebar-seta { transform: rotate(90deg); }
 .modal-sidebar-submenu { display: flex; flex-direction: column; gap: 2px; padding-left: 12px; }
@@ -1777,6 +2102,11 @@ input:disabled, select:disabled {
 .modal-sidebar-subitem:hover { background: var(--cinza-200); }
 .modal-sidebar-subitem.ativo { background: var(--cinza-200); color: var(--azul); }
 .subitem-status { font-size: 0.72rem; color: var(--cinza-500); }
+.modal-sidebar-subitem { gap: 8px; }
+.subitem-nome small { display: block; font-size: 0.68rem; font-weight: 500; color: var(--cinza-500); }
+.subitem-nome small.subitem-prazo { margin-top: 3px; font-weight: 700; color: var(--cinza-700); }
+.subitem-nome small.subitem-prazo.perto { color: #b45309; }
+.subitem-nome small.subitem-prazo.atrasado { color: var(--vermelho); }
 .subitem-status.concluido { color: var(--verde-escuro); font-weight: 700; }
 .subitem-status.atrasado { color: var(--vermelho); font-weight: 700; }
 
@@ -1840,21 +2170,6 @@ input:disabled, select:disabled {
 .decisor-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .decisor-nome { font-weight: 700; font-size: 0.95rem; }
 .decisor-detalhes { font-size: 0.82rem; color: var(--cinza-500); margin-top: 2px; }
-.btn-whatsapp {
-  display: inline-block;
-  background: #22c55e;
-  color: #fff;
-  width: auto;
-  margin-top: 0;
-  padding: 8px 14px;
-  border-radius: var(--radius);
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-decoration: none;
-  text-align: center;
-  cursor: pointer;
-}
-.btn-whatsapp:hover { background: #16a34a; }
 
 /* Reorganização da Ficha > Visão Geral: painel de acompanhamento (cabeçalho →
    atenção → resumo/tarefas → progresso → operacional) em vez de lista de
@@ -1869,7 +2184,6 @@ input:disabled, select:disabled {
    uma com a outra (o WhatsApp é sempre do decisor, nunca do responsável). */
 .ficha-header-contato { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 0 0 16px; }
 .ficha-header-contato-blocos { display: flex; gap: 28px; flex-wrap: wrap; }
-.ficha-header-contato .btn-whatsapp { flex-shrink: 0; }
 
 .ficha-grid-hub { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; align-items: start; margin-bottom: 18px; }
 .ficha-grid-hub.ficha-grid-hub-unica { grid-template-columns: 1fr; }
@@ -1933,3 +2247,49 @@ input:disabled, select:disabled {
 }
 .foto-corte-zoom { display: flex; align-items: center; gap: 10px; margin: 14px auto 0; max-width: 260px; font-weight: 700; color: var(--cinza-500); }
 .foto-corte-zoom input { flex: 1; margin: 0; }
+
+/* --- Playbook Fase 1: parado, motivo do atraso, tempo nos marcos --- */
+.kmarcos-selo-parado { background: #fef3c7; color: #92400e; }
+.kmarcos-stat-parado .kmarcos-stat-valor { color: #b45309; }
+.kmarcos-stat-parado.ativo, .kmarcos-stat-parado.ativo:hover:not(:disabled) { background: #fef3c7; }
+:root[data-theme="dark"] .kmarcos-selo-parado { background: #451a03; color: #fbbf24; }
+:root[data-theme="dark"] .kmarcos-stat-parado .kmarcos-stat-valor { color: #fbbf24; }
+:root[data-theme="dark"] .kmarcos-stat-parado.ativo, :root[data-theme="dark"] .kmarcos-stat-parado.ativo:hover:not(:disabled) { background: #451a03; }
+
+.motivo-atraso { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--cinza-200); border-radius: var(--radius); background: var(--cinza-100); font-size: 0.85rem; display: flex; flex-direction: column; gap: 4px; }
+.motivo-atraso-linha { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.motivo-atraso-acao { color: var(--azul-escuro); font-weight: 600; font-size: 0.82rem; }
+.motivo-atraso-meta { color: var(--cinza-500); font-size: 0.76rem; }
+.motivo-atraso-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
+.motivo-atraso-form select, .motivo-atraso-form input { padding: 6px 8px; border: 1px solid var(--cinza-300); border-radius: var(--radius); background: var(--painel); color: var(--cinza-900); font-size: 0.82rem; margin: 0; }
+.motivo-atraso-form input { flex: 1; min-width: 180px; }
+.motivo-atraso-form .btn-primary { width: auto; margin: 0; padding: 6px 14px; font-size: 0.82rem; }
+.motivo-atraso > .btn-link-inline { align-self: flex-start; margin: 0; font-size: 0.8rem; }
+
+.lista-atrasados-motivo { font-size: 0.74rem; font-weight: 500; color: var(--azul-escuro); margin-left: 8px; }
+.lista-atrasados-motivo.sem-motivo { color: var(--cinza-500); font-style: italic; }
+.lista-parados-dias { color: #b45309; }
+:root[data-theme="dark"] .lista-parados-dias { color: #fbbf24; }
+.motivos-resumo { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.motivos-resumo-chip { font-size: 0.74rem; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: #dbeafe; color: #1e3a8a; }
+.motivos-resumo-chip.sem-motivo { background: var(--cinza-100); color: var(--cinza-500); }
+:root[data-theme="dark"] .motivos-resumo-chip { background: #1e3a8a; color: #dbeafe; }
+
+.tempo-marcos-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.tempo-marcos-bloco { border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 10px 12px; }
+.tempo-marcos-bloco.destaque { border-color: var(--azul); background: rgba(29, 78, 216, 0.05); }
+.tempo-marcos-rotulo { font-size: 0.74rem; color: var(--cinza-500); }
+.tempo-marcos-valor { font-size: 1.15rem; font-weight: 700; color: var(--azul-escuro); margin: 2px 0; }
+.tempo-marcos-detalhe { font-size: 0.7rem; color: var(--cinza-500); }
+.tempo-marcos-aviso { margin: 10px 0 0; font-size: 0.8rem; }
+.subitem-prazo.concluido-em { color: var(--verde-escuro); }
+.subitem-prazo.concluido-em.sem-data { color: var(--cinza-500); font-weight: 400; }
+
+/* Card do decisor na Visão Geral (nome/telefone/cidade + botão do WhatsApp). */
+.ficha-header-contato-blocos { align-items: flex-start; }
+.card-decisor { display: flex; align-items: center; gap: 16px; padding: 10px 12px; border: 1px solid var(--cinza-200); border-radius: var(--radius); background: var(--painel); box-shadow: var(--shadow); min-width: 240px; }
+.card-decisor-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.card-decisor-nome { font-weight: 700; color: var(--cinza-900); }
+.card-decisor-detalhe { font-size: 0.8rem; color: var(--cinza-500); }
+.card-decisor-wpp { margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; background: #25d366; color: #ffffff; font-size: 0.8rem; font-weight: 600; text-decoration: none; }
+.card-decisor-wpp:hover { background: #1ebe5a; }

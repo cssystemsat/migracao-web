@@ -17,16 +17,23 @@ import pandas as pd
 import requests
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
+from googleapiclient.errors import HttpError
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import conversorkml
+import planilha_migracao
 import validador_importacao
 from auditoria import diff_campos, registrar_acao
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("MIGRACAO_SECRET_KEY", os.urandom(24))
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+# Relê templates/index.html do disco quando ele muda — sem isso (debug
+# desligado) o template fica cacheado e só aparecia depois de reiniciar o
+# servidor, e cada reinício custava leitura no Firestore (login + Dashboard).
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
 
 # Sobe 0.1 a cada edição publicada (3.0 -> 3.1 -> 3.2 ...); só sobe o inteiro quando pedido.
 APP_VERSION = "4.0"
@@ -175,6 +182,15 @@ def exigir_login_app():
         return
     if not session.get("app_ok"):
         return redirect(url_for("login_app"))
+    # Sessão aberta antes da v4.0 só tem "app_usuario_admin" (sem perfil) —
+    # sem isso o admin logado desde antes do deploy vira não-admin até sair e
+    # entrar de novo. Recarrega do Firestore uma vez e completa a sessão.
+    if "app_usuario_perfil" not in session:
+        usuario_doc = _buscar_usuario_por_id(session.get("app_usuario_id"))
+        if not usuario_doc:
+            session.clear()
+            return redirect(url_for("login_app"))
+        _sessao_login_app(usuario_doc)
 
 
 @app.route("/login-app", methods=["GET", "POST"])
@@ -310,8 +326,11 @@ def editar_app_usuario(usuario_id):
     if novo_perfil not in PERFIS_USUARIO:
         novo_perfil = perfil_atual
     nova_area = str(data.get("area", atual.get("area") or "")).strip()
-    if nova_area not in AREAS_USUARIO:
+    # Área antiga fora da lista atual (ex.: "CS") continua valendo enquanto
+    # ninguém trocar — senão qualquer edição do usuário apagava a área dele.
+    if nova_area not in AREAS_USUARIO and nova_area != (atual.get("area") or ""):
         nova_area = None
+    nova_area = nova_area or None
     novo_responsavel = str(data.get("nome_responsavel", atual.get("nome_responsavel", ""))).strip()
 
     if not novo_nome:
@@ -1258,26 +1277,56 @@ IMPLANTACAO_MARCOS = ["marco-1", "marco-2", "marco-3", "marco-4", "marco-5"]
 # salvo em marcos_itens_feitos, então NÃO mude o id de um item que já está em
 # uso (só o texto); item novo = id novo. Cada cliente ainda pode ter itens
 # extras só dele (marcos_itens_extras), editados pelo modal de Marcos.
-# TODO: itens provisórios — trocar pela lista real de cada marco.
+# Itens tirados do "Plano de Sucesso do Cliente — Jornada de 180 Dias". O
+# Marco 2 (Quick Win) é quase todo montado por cliente: as prioridades
+# acordadas no kick-off, cada uma com suas subtarefas (marcos_prioridades).
+# Textos = "Definition of Done" do Playbook SSX (seção 16). Onde o sentido do
+# item antigo continuou o mesmo, o id foi mantido (quem já marcou continua
+# marcado); item com sentido novo ganhou id novo. Itens de passagem pro
+# Onboarding saíram do Marco 3 de propósito (vão virar formulário próprio).
 IMPLANTACAO_CHECKLIST_PADRAO = {
     "marco-1": [
-        {"id": "m1-kickoff", "texto": "Reunião de kickoff realizada"},
-        {"id": "m1-acessos", "texto": "Acessos da plataforma enviados"},
+        {"id": "m1-parametrizacao", "texto": "Base preparada"},
+        {"id": "m1-acessos", "texto": "Acessos liberados"},
+        {"id": "m1-ativacao", "texto": "Usuários-chave conseguiram acessar"},
+        {"id": "m1-kickoff", "texto": "Boas-vindas/Kick-off realizado"},
+        {"id": "m1-prioridades", "texto": "Expectativas, Quick Win e próximos passos alinhados"},
     ],
     "marco-2": [
-        {"id": "m2-treinamento", "texto": "Treinamento inicial realizado"},
-        {"id": "m2-cadastros", "texto": "Cadastros básicos configurados"},
+        {"id": "m2-quickwin", "texto": "Quick Win definida"},
+        {"id": "m2-mao-na-massa", "texto": "Treinamento “Mão na Massa” realizado"},
+        {"id": "m2-execucao", "texto": "Cenário/ação executado pelo cliente"},
+        {"id": "m2-valor", "texto": "Primeiro valor percebido e validado"},
+        {"id": "m2-continuidade", "texto": "Continuidade definida"},
     ],
     "marco-3": [
-        {"id": "m3-operacao", "texto": "Cliente operando na plataforma"},
+        {"id": "m3-operacao", "texto": "Uso recorrente estabelecido"},
+        {"id": "m3-alem-quickwin", "texto": "Funcionalidades além da Quick Win utilizadas"},
+        {"id": "m3-cenarios", "texto": "Cenários adicionais aplicáveis à operação"},
+        {"id": "m3-oportunidades", "texto": "Novas oportunidades de uso identificadas"},
+        {"id": "m3-adocao", "texto": "Evolução da adoção evidenciada"},
     ],
     "marco-4": [
-        {"id": "m4-validacao", "texto": "Validação da operação com o decisor"},
+        {"id": "m4-proficiente", "texto": "Uso consolidado e proficiente"},
+        {"id": "m4-qbr", "texto": "Business Review/QBR realizada"},
+        {"id": "m4-otimizacoes", "texto": "Gargalos e oportunidades identificados"},
+        {"id": "m4-ganhos", "texto": "Otimizações implementadas e/ou ganhos mensurados"},
+        {"id": "m4-continuidade", "texto": "Plano de continuidade definido"},
     ],
     "marco-5": [
-        {"id": "m5-encerramento", "texto": "Reunião de encerramento da implantação"},
+        {"id": "m5-autonomo", "texto": "Cliente autônomo"},
+        {"id": "m5-roi", "texto": "Percepção de valor/ROI validada"},
+        {"id": "m5-nps", "texto": "Satisfação avaliada"},
+        {"id": "m5-estrategia", "texto": "Estratégia de longo prazo definida"},
+        {"id": "m5-upsell", "texto": "Oportunidades de expansão e advocacy avaliadas"},
     ],
 }
+
+# Motivo do atraso — árvore de decisão do Playbook (seção 17, "Cliente não
+# está avançando"). A ação sugerida mora no front (MOTIVOS_ATRASO).
+MOTIVOS_ATRASO = ["nao_executa", "nao_entende", "sem_estrutura", "nao_responde", "problema_tecnico", "expectativa"]
+# Marco onde ficam as prioridades acordadas com o cliente (Quick Win).
+IMPLANTACAO_MARCO_PRIORIDADES = "marco-2"
 
 
 def _etapa_a_partir_dos_marcos(marcos_concluidos):
@@ -1287,14 +1336,17 @@ def _etapa_a_partir_dos_marcos(marcos_concluidos):
     return "concluido"
 
 
-def _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual):
+def _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual, prioridades=()):
     """Marco conclui sozinho quando todos os itens dele (padrão + extras do
-    cliente) estão feitos, ou quando foi marcado como concluído manualmente."""
+    cliente + subtarefas das prioridades, no Marco 2) estão feitos, ou quando
+    foi marcado como concluído manualmente."""
     feitos = set(itens_feitos)
     concluidos = []
     for marco in IMPLANTACAO_MARCOS:
         ids = [i["id"] for i in IMPLANTACAO_CHECKLIST_PADRAO.get(marco, [])]
         ids += [i["id"] for i in itens_extras.get(marco, [])]
+        if marco == IMPLANTACAO_MARCO_PRIORIDADES:
+            ids += [i["id"] for p in prioridades for i in p["itens"]]
         if marco in concluidos_manual or (ids and all(i in feitos for i in ids)):
             concluidos.append(marco)
     return concluidos
@@ -1578,6 +1630,12 @@ def _dados_cliente(data):
     return {
         "idcentral": idcentral,
         "cliente": cliente,
+        # False só quando o cliente nasceu pela tela de Migração e não tem par
+        # na Implantação (ver POST /api/clientes chamado por lá) — controla o
+        # menu enxuto da Ficha (sem Implantação/Marcos) e some do Kanban de
+        # Implantação. Cliente criado pela Implantação de verdade nunca manda
+        # esse campo, então cai no default True.
+        "tem_implantacao": bool(data.get("tem_implantacao", True)),
         "data_entrada": str(data.get("data_entrada", "")).strip(),
         "objetivo": str(data.get("objetivo", "")).strip(),
         "valor_contrato": valor_contrato,
@@ -1613,10 +1671,20 @@ def _idcentrals_existentes(excluir_id=None):
     for d in db.collection(CLIENTES_COLLECTION).stream():
         if excluir_id and d.id == excluir_id:
             continue
-        idcentral = (d.to_dict() or {}).get("idcentral")
+        # str().strip() igual ao _dados_cliente — cliente antigo gravado com
+        # idcentral numérico ou com espaço sobrando não pode escapar da checagem.
+        idcentral = str((d.to_dict() or {}).get("idcentral") or "").strip()
         if idcentral:
             mapa[idcentral] = d.id
     return mapa
+
+
+# Checar "IdCentral já existe?" e gravar são dois passos separados no
+# Firestore — sem esse lock, dois requests quase simultâneos (ex.: duplo
+# clique no "Adicionar") passam os dois pela checagem antes de qualquer um
+# gravar, e o cliente sai duplicado. Todo caminho que cria cliente ou troca
+# o IdCentral faz checagem + escrita dentro dele.
+CLIENTES_IDCENTRAL_LOCK = threading.Lock()
 
 
 def _recalcular_ultima_acao_cliente(cliente_id):
@@ -1646,6 +1714,11 @@ def listar_clientes():
         cliente = dict(d.to_dict(), id=d.id)
         cliente.setdefault("etapa", IMPLANTACAO_ETAPA_PADRAO)
         cliente.setdefault("marcos_concluidos", [])
+        cliente.setdefault("implantado", False)
+        cliente.setdefault("concluido_em", "")
+        cliente.setdefault("marcos_concluidos_em", {})
+        cliente.setdefault("marcos_atualizado_em", "")
+        cliente.setdefault("motivo_atraso", None)
         cliente.setdefault("estagio", ESTAGIO_CLIENTE_PADRAO)
         cliente.setdefault("ultima_acao", "")
         cliente.setdefault("ultima_acao_data", "")
@@ -1657,6 +1730,7 @@ def listar_clientes():
         cliente.setdefault("decisor_whatsapp", "")
         cliente.setdefault("decisor_estado", "")
         cliente.setdefault("decisor_cidade", "")
+        cliente.setdefault("tem_implantacao", True)
         lista.append(cliente)
     lista.sort(key=lambda c: c["ultima_acao_data"], reverse=True)
     return jsonify(ok=True, clientes=lista)
@@ -1668,10 +1742,11 @@ def criar_cliente():
     dados = _dados_cliente(data)
     if dados is None:
         return jsonify(ok=False, error="Informe o IdCentral do cliente."), 400
-    if dados["idcentral"] in _idcentrals_existentes():
-        return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
-    doc_ref = db.collection(CLIENTES_COLLECTION).document()
-    doc_ref.set(dados)
+    with CLIENTES_IDCENTRAL_LOCK:
+        if dados["idcentral"] in _idcentrals_existentes():
+            return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
+        doc_ref = db.collection(CLIENTES_COLLECTION).document()
+        doc_ref.set(dados)
     registrar_acao(
         acao="criar", entidade_tipo="cliente", entidade_id=doc_ref.id,
         entidade_nome=dados["cliente"], titulo="Cliente criado",
@@ -1693,8 +1768,6 @@ def editar_cliente(cliente_id):
     doc_atual_dict = doc_atual.to_dict() or {}
     if not _sou_admin():
         dados["idcentral"] = doc_atual_dict.get("idcentral", "")
-    if dados["idcentral"] in _idcentrals_existentes(excluir_id=cliente_id):
-        return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
     dados["ultima_acao"] = doc_atual_dict.get("ultima_acao", "")
     dados["ultima_acao_data"] = doc_atual_dict.get("ultima_acao_data", "")
     # Etapa/marcos só mudam pelo endpoint dedicado (PUT .../marcos) — o
@@ -1704,11 +1777,19 @@ def editar_cliente(cliente_id):
     dados["marcos_concluidos"] = doc_atual_dict.get("marcos_concluidos", [])
     # doc_ref.set() abaixo substitui o documento inteiro — o checklist dos
     # marcos (só escrito por PUT .../marcos) precisa ser carregado junto.
-    for campo in ("marcos_itens_feitos", "marcos_itens_extras", "marcos_concluidos_manual"):
+    # Mesmo vale pro switch "Implantado" (só escrito por PUT .../implantado)
+    # e pra data de conclusão dos 5 marcos (concluido_em/por).
+    for campo in ("marcos_itens_feitos", "marcos_itens_extras", "marcos_concluidos_manual",
+                  "marcos_prioridades", "implantado", "implantado_em", "implantado_por",
+                  "concluido_em", "concluido_por", "marcos_concluidos_em",
+                  "marcos_atualizado_em", "motivo_atraso", "tem_implantacao"):
         if campo in doc_atual_dict:
             dados[campo] = doc_atual_dict[campo]
     mudancas = diff_campos(doc_atual_dict, dados, ROTULOS_CLIENTE)
-    doc_ref.set(dados)
+    with CLIENTES_IDCENTRAL_LOCK:
+        if dados["idcentral"] in _idcentrals_existentes(excluir_id=cliente_id):
+            return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
+        doc_ref.set(dados)
     if mudancas:
         registrar_acao(
             acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
@@ -1741,24 +1822,72 @@ def salvar_marcos_cliente(cliente_id):
                 lista.append({"id": item_id, "texto": texto})
         if lista:
             itens_extras[marco] = lista
+    # Prioridades da Quick Win (Marco 2): nome não vazio; subtarefas com o
+    # mesmo filtro dos extras. Ids únicos no cliente todo (extras + prioridades
+    # + subtarefas), já que "feitos" é uma lista só.
+    prioridades = []
+    for prio in data.get("prioridades") or []:
+        prio_id = str((prio or {}).get("id", "")).strip()
+        nome = str((prio or {}).get("nome", "")).strip()[:100]
+        if not prio_id or not nome or prio_id in ids_extras:
+            continue
+        ids_extras.add(prio_id)
+        itens = []
+        for item in (prio or {}).get("itens") or []:
+            item_id = str((item or {}).get("id", "")).strip()
+            texto = str((item or {}).get("texto", "")).strip()[:200]
+            if item_id and texto and item_id not in ids_extras:
+                ids_extras.add(item_id)
+                itens.append({"id": item_id, "texto": texto})
+        prioridades.append({"id": prio_id, "nome": nome, "itens": itens})
     ids_validos = ids_extras | {i["id"] for itens in IMPLANTACAO_CHECKLIST_PADRAO.values() for i in itens}
     itens_feitos = [i for i in dict.fromkeys(data.get("itens_feitos") or []) if i in ids_validos]
     concluidos_manual = [m for m in IMPLANTACAO_MARCOS if m in (data.get("concluidos_manual") or [])]
 
-    marcos_concluidos = _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual)
+    marcos_concluidos = _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual, prioridades)
     etapa = _etapa_a_partir_dos_marcos(marcos_concluidos)
-    doc_ref.update({
+    hoje = time.strftime("%Y-%m-%d")
+    # Data em que cada marco ficou concluído (base do TTV e do tempo por
+    # marco). Grava só na transição; reabrir apaga; marco que continua
+    # concluído mantém a data original. Conclusões anteriores a isso não têm data.
+    concluidos_em = {
+        m: d for m, d in (doc_atual_dict.get("marcos_concluidos_em") or {}).items()
+        if m in marcos_concluidos
+    }
+    concluidos_antes = set(doc_atual_dict.get("marcos_concluidos") or [])
+    for m in marcos_concluidos:
+        if m not in concluidos_antes:
+            concluidos_em[m] = hoje
+    campos = {
         "marcos_itens_feitos": itens_feitos,
         "marcos_itens_extras": itens_extras,
+        "marcos_prioridades": prioridades,
         "marcos_concluidos_manual": concluidos_manual,
         "marcos_concluidos": marcos_concluidos,
+        "marcos_concluidos_em": concluidos_em,
+        # Qualquer salvamento do checklist conta como atividade — junto com
+        # ultima_acao_data (acontecimentos) define "implantação parada".
+        "marcos_atualizado_em": hoje,
         "etapa": etapa,
-    })
+    }
+    # Data de implantação = quando os 5 marcos ficaram concluídos. Só grava na
+    # transição (entrar em "concluido"); reabrir um marco apaga, e concluir de
+    # novo grava a data nova. Clientes já concluídos antes disso ficam sem data.
+    etapa_antes = doc_atual_dict.get("etapa") or IMPLANTACAO_ETAPA_PADRAO
+    if etapa == "concluido" and etapa_antes != "concluido":
+        campos["concluido_em"] = time.strftime("%Y-%m-%d")
+        campos["concluido_por"] = session.get("app_usuario_responsavel") or session.get("app_usuario_nome", "")
+    elif etapa != "concluido" and etapa_antes == "concluido":
+        campos["concluido_em"] = ""
+        campos["concluido_por"] = ""
+    doc_ref.update(campos)
 
     antes = set(doc_atual_dict.get("marcos_concluidos") or [])
     depois = set(marcos_concluidos)
     partes = [f"{m.replace('marco-', 'Marco ')} concluído" for m in IMPLANTACAO_MARCOS if m in depois - antes]
     partes += [f"{m.replace('marco-', 'Marco ')} reaberto" for m in IMPLANTACAO_MARCOS if m in antes - depois]
+    if etapa == "concluido" and etapa_antes != "concluido":
+        partes.append("Implantação concluída (5 marcos)")
     registrar_acao(
         acao="marco_concluido", entidade_tipo="cliente", entidade_id=cliente_id,
         entidade_nome=doc_atual_dict.get("cliente", ""),
@@ -1769,8 +1898,76 @@ def salvar_marcos_cliente(cliente_id):
     return jsonify(
         ok=True, marcos_concluidos=marcos_concluidos, etapa=etapa,
         marcos_itens_feitos=itens_feitos, marcos_itens_extras=itens_extras,
-        marcos_concluidos_manual=concluidos_manual,
+        marcos_prioridades=prioridades, marcos_concluidos_manual=concluidos_manual,
+        concluido_em=campos.get("concluido_em", doc_atual_dict.get("concluido_em", "")),
+        concluido_por=campos.get("concluido_por", doc_atual_dict.get("concluido_por", "")),
+        marcos_concluidos_em=concluidos_em, marcos_atualizado_em=hoje,
     )
+
+
+@app.route("/api/clientes/<cliente_id>/motivo-atraso", methods=["PUT"])
+def salvar_motivo_atraso_cliente(cliente_id):
+    """Por que o cliente está atrasado no marco atual (árvore de decisão do
+    Playbook). Fica preso ao marco em que foi registrado — quando o cliente
+    avança, o motivo antigo deixa de valer (o front compara com a etapa)."""
+    data = request.get_json(force=True) or {}
+    motivo = str(data.get("motivo", "")).strip()
+    if motivo not in MOTIVOS_ATRASO:
+        return jsonify(ok=False, error="Motivo inválido."), 400
+    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
+    doc_atual = doc_ref.get()
+    if not doc_atual.exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    doc_atual_dict = doc_atual.to_dict() or {}
+    motivo_atraso = {
+        "marco": doc_atual_dict.get("etapa") or IMPLANTACAO_ETAPA_PADRAO,
+        "motivo": motivo,
+        "obs": str(data.get("obs", "")).strip()[:300],
+        "em": time.strftime("%Y-%m-%d"),
+        "por": session.get("app_usuario_responsavel") or session.get("app_usuario_nome", ""),
+    }
+    doc_ref.update({"motivo_atraso": motivo_atraso})
+    registrar_acao(
+        acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
+        entidade_nome=doc_atual_dict.get("cliente", ""),
+        titulo="Motivo do atraso registrado",
+        cliente_id=cliente_id, idcentral=doc_atual_dict.get("idcentral", ""),
+        cliente_nome=doc_atual_dict.get("cliente", ""),
+    )
+    return jsonify(ok=True, motivo_atraso=motivo_atraso)
+
+
+@app.route("/api/clientes/<cliente_id>/implantado", methods=["PUT"])
+def salvar_implantado_cliente(cliente_id):
+    """Switch "Implantado" — decisão da equipe, de propósito independente dos
+    marcos (a regra de "quando conta como implantado" ainda não está fechada;
+    a tela só sugere ligar quando o Marco 3/passagem conclui). Guarda quando e
+    quem ligou; desligar limpa os dois."""
+    data = request.get_json(force=True) or {}
+    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
+    doc_atual = doc_ref.get()
+    if not doc_atual.exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    doc_atual_dict = doc_atual.to_dict() or {}
+    implantado = bool(data.get("implantado"))
+    if implantado == bool(doc_atual_dict.get("implantado")):
+        return jsonify(ok=True, implantado=implantado,
+                       implantado_em=doc_atual_dict.get("implantado_em", ""),
+                       implantado_por=doc_atual_dict.get("implantado_por", ""))
+    campos = {
+        "implantado": implantado,
+        "implantado_em": time.strftime("%Y-%m-%d") if implantado else "",
+        "implantado_por": (session.get("app_usuario_responsavel") or session.get("app_usuario_nome", "")) if implantado else "",
+    }
+    doc_ref.update(campos)
+    registrar_acao(
+        acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
+        entidade_nome=doc_atual_dict.get("cliente", ""),
+        titulo="Cliente marcado como implantado" if implantado else "Cliente desmarcado como implantado",
+        cliente_id=cliente_id, idcentral=doc_atual_dict.get("idcentral", ""),
+        cliente_nome=doc_atual_dict.get("cliente", ""),
+    )
+    return jsonify(ok=True, **campos)
 
 
 @app.route("/api/clientes/<cliente_id>", methods=["DELETE"])
@@ -2079,6 +2276,13 @@ def aplicar_sync_planilha():
     if itens is None:
         return jsonify(ok=False, error="Prévia não encontrada ou expirada — busque de novo."), 400
 
+    with CLIENTES_IDCENTRAL_LOCK:
+        criados, atualizados, ignorados = _aplicar_itens_sync_planilha(itens)
+    return jsonify(ok=True, criados=criados, atualizados=atualizados, ignorados=ignorados)
+
+
+def _aplicar_itens_sync_planilha(itens):
+    """Chamado com CLIENTES_IDCENTRAL_LOCK já adquirido."""
     existentes = _idcentrals_existentes()
     campos_chaves = [c for c, _ in CAMPOS_SYNC_PLANILHA]
     criados, atualizados = 0, 0
@@ -2112,7 +2316,7 @@ def aplicar_sync_planilha():
             doc_ref.update(campos)
             atualizados += 1
 
-    return jsonify(ok=True, criados=criados, atualizados=atualizados, ignorados=ignorados)
+    return criados, atualizados, ignorados
 
 
 # --- IMPORTAÇÃO DE CLIENTES POR PLANILHA (Implantação) ---
@@ -2222,6 +2426,13 @@ def confirmar_import_clientes():
     if resultado is None:
         return jsonify(ok=False, error="Prévia não encontrada — suba o arquivo de novo."), 400
 
+    with CLIENTES_IDCENTRAL_LOCK:
+        sucessos, erros = _gravar_import_clientes(resultado)
+    return jsonify(ok=True, sucessos=sucessos, erros=erros)
+
+
+def _gravar_import_clientes(resultado):
+    """Chamado com CLIENTES_IDCENTRAL_LOCK já adquirido."""
     # Revalida os IdCentrals contra o Firestore na hora de gravar (pode ter
     # mudado desde o preview — ex.: outra pessoa importando ao mesmo tempo).
     existentes = _idcentrals_existentes()
@@ -2242,7 +2453,7 @@ def confirmar_import_clientes():
         db.collection(CLIENTES_COLLECTION).document().set(dados)
         sucessos += 1
 
-    return jsonify(ok=True, sucessos=sucessos, erros=erros)
+    return sucessos, erros
 
 
 # --- LOCALIDADES (Estado/Cidade do Decisor) ---
@@ -2589,6 +2800,12 @@ STATUS_MIGRACAO_PADRAO = "em_andamento"
 CAMPOS_MIGRACAO_ATTEMPT_PADRAO = {
     "plataforma_origem": "",
     "link_planilha": "",
+    # Acesso que o cliente passa pra gente exportar os dados dele da plataforma
+    # de origem (ex.: outro rastreador) — usado no card de acesso rápido da
+    # aba Migração da Ficha (botão "Abrir plataforma" + copiar login/senha).
+    "link_acesso_origem": "",
+    "login_acesso_origem": "",
+    "senha_acesso_origem": "",
     "qtd_clientes": 0,
     "qtd_placas": 0,
     "percentual_migracao": 0,
@@ -2598,6 +2815,19 @@ CAMPOS_MIGRACAO_ATTEMPT_PADRAO = {
     "data_fim": "",
     "motivo": "",
 }
+
+
+def _migracao_atual(migracoes):
+    """De uma lista de tentativas de migração de um cliente (mais recente
+    primeiro), escolhe a "atual": a que está em_andamento, senão a mais
+    recente. None se a lista for vazia. Mesma regra usada na Ficha do Cliente
+    e na listagem da tela de Migração — um cliente só aparece com UMA
+    tentativa mesmo tendo histórico de tentativas antigas/canceladas."""
+    migracoes_ordenadas = sorted(migracoes, key=lambda m: m.get("data_inicio") or "", reverse=True)
+    atual = next((m for m in migracoes_ordenadas if m.get("status") == "em_andamento"), None)
+    if atual is None and migracoes_ordenadas:
+        atual = migracoes_ordenadas[0]
+    return atual
 
 
 @app.route("/api/clientes/<cliente_id>/migracoes", methods=["GET"])
@@ -2647,6 +2877,9 @@ def editar_migracao_cliente(cliente_id, migracao_id):
     atualizacoes = {
         "plataforma_origem": str(data.get("plataforma_origem", atual_dados.get("plataforma_origem", ""))).strip(),
         "link_planilha": str(data.get("link_planilha", atual_dados.get("link_planilha", ""))).strip(),
+        "link_acesso_origem": str(data.get("link_acesso_origem", atual_dados.get("link_acesso_origem", ""))).strip(),
+        "login_acesso_origem": str(data.get("login_acesso_origem", atual_dados.get("login_acesso_origem", ""))).strip(),
+        "senha_acesso_origem": str(data.get("senha_acesso_origem", atual_dados.get("senha_acesso_origem", ""))).strip(),
         "qtd_clientes": _para_int(data.get("qtd_clientes", atual_dados.get("qtd_clientes", 0))),
         "qtd_placas": _para_int(data.get("qtd_placas", atual_dados.get("qtd_placas", 0))),
         "percentual_migracao": _para_float(data.get("percentual_migracao", atual_dados.get("percentual_migracao", 0))),
@@ -2660,13 +2893,74 @@ def editar_migracao_cliente(cliente_id, migracao_id):
 
 @app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/finalizar", methods=["POST"])
 def finalizar_migracao_cliente(cliente_id, migracao_id):
-    """Ação simples de "terminou": marca concluída com a data de hoje."""
+    """Ação simples de "terminou": marca concluída com a data de hoje. Se
+    tiver planilha vinculada, também renomeia (" - FINALIZADA") e move ela
+    pra Migrações/Finalizadas no Drive — mas isso é best-effort: se o Drive
+    falhar (ex.: planilha apagada manualmente), a migração é finalizada do
+    mesmo jeito, só sem mexer no arquivo."""
     ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    if not ref.get().exists:
+    doc_atual = ref.get()
+    if not doc_atual.exists:
         return jsonify(ok=False, error="Migração não encontrada."), 404
     dados = {"status": "concluida", "data_fim": time.strftime("%Y-%m-%d")}
     ref.update(dados)
-    return jsonify(ok=True, **dados)
+    link_planilha = (doc_atual.to_dict() or {}).get("link_planilha")
+    aviso_planilha = None
+    if link_planilha:
+        try:
+            planilha_migracao.finalizar_planilha_migracao(link_planilha)
+        except Exception as err:
+            aviso_planilha = f"Migração finalizada, mas não consegui mover/renomear a planilha no Drive: {err}"
+    resposta = dict(ok=True, **dados)
+    if aviso_planilha:
+        resposta["aviso"] = aviso_planilha
+    return jsonify(**resposta)
+
+
+def _criar_planilha_migracao_ou_erro(nome_cliente):
+    """Chama planilha_migracao.criar_planilha_migracao e traduz os erros
+    possíveis (credencial não configurada, modelo não compartilhado com a
+    conta de serviço, etc.) numa mensagem que dá pra mostrar na tela.
+    Devolve (link, None) ou (None, mensagem_de_erro)."""
+    try:
+        resultado = planilha_migracao.criar_planilha_migracao(nome_cliente)
+    except planilha_migracao.PlanilhaMigracaoError as err:
+        return None, str(err)
+    except HttpError as err:
+        return None, f"Erro do Google Drive ao copiar a planilha-modelo: {err}"
+    except Exception as err:
+        # Credencial malformada/sem permissão, timeout, etc. — qualquer coisa
+        # que não seja um erro já tratado acima, mas não deve derrubar o request.
+        return None, f"Erro ao conectar com o Google Drive: {err}"
+    return resultado.get("webViewLink", ""), None
+
+
+@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/criar-planilha", methods=["POST"])
+def criar_planilha_migracao_cliente(cliente_id, migracao_id):
+    cliente_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
+    cliente_doc = cliente_ref.get()
+    if not cliente_doc.exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    migracao_ref = cliente_ref.collection("migracoes").document(migracao_id)
+    migracao_doc = migracao_ref.get()
+    if not migracao_doc.exists:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    # Trava também no servidor (não só escondendo o botão no front) — evita
+    # criar uma planilha nova (e duplicar no Drive) por causa de clique
+    # repetido/retry. "substituir" é o que o botão "Liberar edição" manda.
+    data = request.get_json(silent=True) or {}
+    link_atual = (migracao_doc.to_dict() or {}).get("link_planilha")
+    if link_atual and not data.get("substituir"):
+        return jsonify(
+            ok=False,
+            error="Essa migração já tem uma planilha vinculada. Libere a edição antes de criar outra.",
+        ), 409
+    nome_cliente = (cliente_doc.to_dict() or {}).get("cliente", "")
+    link, erro = _criar_planilha_migracao_ou_erro(nome_cliente)
+    if erro:
+        return jsonify(ok=False, error=erro), 502
+    migracao_ref.update({"link_planilha": link})
+    return jsonify(ok=True, link=link)
 
 
 @app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/cancelar", methods=["POST"])
@@ -2697,6 +2991,9 @@ CAMPOS_MIGRACAO_PADRAO = {
     "cs": "",
     "plataforma_origem": "",
     "link_planilha": "",
+    "link_acesso_origem": "",
+    "login_acesso_origem": "",
+    "senha_acesso_origem": "",
     "qtd_clientes": 0,
     "qtd_placas": 0,
     "percentual_migracao": 0,
@@ -2772,14 +3069,70 @@ def recalcular_contagens_migracao(cliente_migracao_id):
 
 @app.route("/api/migracao/clientes", methods=["GET"])
 def listar_clientes_migracao():
-    docs = db.collection(MIGRACAO_COLLECTION).stream()
+    """Junta as duas fontes de cliente de migração que coexistem hoje:
+    "legado" (migracao_clientes, coleção solta, sem ligação real com um
+    cliente de Implantação) e "unificado" (clientes/<id>/migracoes/<id> — a
+    tentativa pertence de fato a um cliente único, com IdCentral garantido).
+    Todo cliente novo (ver POST .../migracoes chamado pela tela) entra só no
+    unificado; o legado só existe enquanto os dados antigos não são migrados
+    (ver migrar_migracao_para_clientes.py)."""
     lista = []
-    for d in docs:
+
+    # Unificado primeiro — tem prioridade sobre o legado quando os dois
+    # existem pro mesmo IdCentral (cliente vinculado manualmente, ou já
+    # migrado pelo script mas a coleção antiga ainda não foi apagada).
+    idcentrais_unificados = set()
+    clientes_por_id = {d.id: (d.to_dict() or {}) for d in db.collection(CLIENTES_COLLECTION).stream()}
+    migracoes_por_cliente = {}
+    for d in db.collection_group("migracoes").stream():
+        cliente_id = d.reference.parent.parent.id
+        migracoes_por_cliente.setdefault(cliente_id, []).append(dict(d.to_dict(), id=d.id))
+    for cliente_id, migracoes in migracoes_por_cliente.items():
+        cliente_dados = clientes_por_id.get(cliente_id)
+        if cliente_dados is None:
+            continue  # cliente-pai foi apagado — tentativa órfã, ignora
+        m = _migracao_atual(migracoes)
+        if m is None:
+            continue
+        idcentral = cliente_dados.get("idcentral", "")
+        if idcentral:
+            idcentrais_unificados.add(idcentral)
+        lista.append({
+            "id": m["id"],
+            "origem": "unificado",
+            "cliente_id": cliente_id,
+            "migracao_id": m["id"],
+            "nome": cliente_dados.get("cliente", ""),
+            "idcentral": idcentral,
+            "cs": cliente_dados.get("csm", ""),
+            "tem_implantacao": cliente_dados.get("tem_implantacao", True),
+            "etapa": m.get("etapa") or MIGRACAO_ETAPA_PADRAO,
+            "plataforma_origem": m.get("plataforma_origem", ""),
+            "link_planilha": m.get("link_planilha", ""),
+            "link_acesso_origem": m.get("link_acesso_origem", ""),
+            "login_acesso_origem": m.get("login_acesso_origem", ""),
+            "senha_acesso_origem": m.get("senha_acesso_origem", ""),
+            "qtd_clientes": m.get("qtd_clientes", 0),
+            "qtd_placas": m.get("qtd_placas", 0),
+            "percentual_migracao": m.get("percentual_migracao", 0),
+            "data_inicio": m.get("data_inicio", ""),
+            "data_fim": m.get("data_fim", ""),
+        })
+
+    for d in db.collection(MIGRACAO_COLLECTION).stream():
         c = dict(d.to_dict(), id=d.id)
         c.setdefault("etapa", MIGRACAO_ETAPA_PADRAO)
         c.setdefault("idcentral", "")
+        # Coleção legada nunca teve data_inicio (nasceu sem esse controle) —
+        # sem essa data não dá pra calcular "dias em migração" no card.
+        c.setdefault("data_inicio", "")
+        c.setdefault("data_fim", "")
+        if c["idcentral"] and c["idcentral"] in idcentrais_unificados:
+            continue  # já tem versão unificada pro mesmo IdCentral — não duplica
+        c["origem"] = "legado"
         lista.append(c)
-    lista.sort(key=lambda c: c["nome"].lower())
+
+    lista.sort(key=lambda c: (c.get("nome") or "").lower())
     return jsonify(ok=True, clientes=lista)
 
 
@@ -2799,8 +3152,10 @@ def obter_ficha_cliente(idcentral):
         return jsonify(ok=False, error="Nenhum cliente encontrado com esse IdCentral."), 404
 
     implantacao = dict(doc_cliente.to_dict(), id=doc_cliente.id)
+    implantacao.setdefault("tem_implantacao", True)
     implantacao.setdefault("etapa", IMPLANTACAO_ETAPA_PADRAO)
     implantacao.setdefault("marcos_concluidos", [])
+    implantacao.setdefault("implantado", False)
     implantacao.setdefault("estagio", ESTAGIO_CLIENTE_PADRAO)
     implantacao.setdefault("momento", "")
     implantacao.setdefault("flag", "")
@@ -2813,9 +3168,7 @@ def obter_ficha_cliente(idcentral):
 
     migracoes = [dict(d.to_dict(), id=d.id) for d in doc_cliente.reference.collection("migracoes").stream()]
     migracoes.sort(key=lambda m: m.get("data_inicio") or "", reverse=True)
-    migracao_atual = next((m for m in migracoes if m.get("status") == "em_andamento"), None)
-    if migracao_atual is None and migracoes:
-        migracao_atual = migracoes[0]
+    migracao_atual = _migracao_atual(migracoes)
 
     doc_cred = db.collection(CREDENCIAIS_CLIENTE_COLLECTION).document(idcentral).get()
     dados_cred = doc_cred.to_dict() if doc_cred.exists else None
@@ -2877,6 +3230,9 @@ def atualizar_cliente_migracao(cliente_id):
         "cs": str(data.get("cs", atual_dados.get("cs", ""))).strip(),
         "plataforma_origem": str(data.get("plataforma_origem", atual_dados.get("plataforma_origem", ""))).strip(),
         "link_planilha": str(data.get("link_planilha", atual_dados.get("link_planilha", ""))).strip(),
+        "link_acesso_origem": str(data.get("link_acesso_origem", atual_dados.get("link_acesso_origem", ""))).strip(),
+        "login_acesso_origem": str(data.get("login_acesso_origem", atual_dados.get("login_acesso_origem", ""))).strip(),
+        "senha_acesso_origem": str(data.get("senha_acesso_origem", atual_dados.get("senha_acesso_origem", ""))).strip(),
         "qtd_clientes": _para_int(data.get("qtd_clientes", atual_dados.get("qtd_clientes", 0))),
         "qtd_placas": _para_int(data.get("qtd_placas", atual_dados.get("qtd_placas", 0))),
         "percentual_migracao": _para_float(data.get("percentual_migracao", atual_dados.get("percentual_migracao", 0))),
@@ -2889,6 +3245,27 @@ def atualizar_cliente_migracao(cliente_id):
         dados["idcentral"] = atual_dados.get("idcentral", "")
     doc_ref.update(dados)
     return jsonify(ok=True, dados=dict(atual_dados, **dados))
+
+
+@app.route("/api/migracao/clientes/<cliente_id>/criar-planilha", methods=["POST"])
+def criar_planilha_migracao_legado(cliente_id):
+    doc_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
+    atual = doc_ref.get()
+    if not atual.exists:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    atual_dados = atual.to_dict() or {}
+    data = request.get_json(silent=True) or {}
+    if atual_dados.get("link_planilha") and not data.get("substituir"):
+        return jsonify(
+            ok=False,
+            error="Essa migração já tem uma planilha vinculada. Libere a edição antes de criar outra.",
+        ), 409
+    nome_cliente = atual_dados.get("nome", "")
+    link, erro = _criar_planilha_migracao_ou_erro(nome_cliente)
+    if erro:
+        return jsonify(ok=False, error=erro), 502
+    doc_ref.update({"link_planilha": link})
+    return jsonify(ok=True, link=link)
 
 
 # --- MODELOS DE RASTREADOR POR CLIENTE (padroniza o Comando pelo Equipamento) ---
@@ -3240,6 +3617,86 @@ def salvar_item_veiculo_cliente(cliente_id, migracao_id):
     return jsonify(ok=True, veiculo=resultado)
 
 
+@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/resumo-planilha", methods=["GET"])
+def resumo_planilha_migracao_cliente(cliente_id, migracao_id):
+    """Leitura "ao vivo", só-leitura (não grava nada) — chamada sozinha toda
+    vez que a aba Migração da Ficha é aberta, pra mostrar o resumo por
+    modelo e o % de progresso sempre em dia com a planilha, sem precisar
+    clicar em "Importar da planilha" (que é a ação pesada, grava os
+    veículos). % vem da linha "Total" do resumo por modelo (Comunicou/Total)
+    — mais leve que reler a aba Migração inteira só pra essa conta."""
+    migracao_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
+    doc = migracao_ref.get()
+    if not doc.exists:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    link_planilha = (doc.to_dict() or {}).get("link_planilha")
+    if not link_planilha:
+        return jsonify(ok=False, error="Essa migração não tem planilha vinculada."), 400
+    try:
+        resumo_modelos = planilha_migracao.ler_resumo_modelos_planilha_migracao(link_planilha)
+    except planilha_migracao.PlanilhaMigracaoError as err:
+        return jsonify(ok=False, error=str(err)), 502
+    except HttpError as err:
+        return jsonify(ok=False, error=f"Erro do Google Sheets ao ler a planilha: {err}"), 502
+    total_linha = next((r for r in resumo_modelos if r["modelo"].strip().lower() == "total"), None)
+    percentual_migracao = None
+    if total_linha:
+        try:
+            comunicou = float(total_linha.get("comunicou") or 0)
+            total = float(total_linha.get("total") or 0)
+            percentual_migracao = round(100 * comunicou / total) if total else 0
+        except ValueError:
+            percentual_migracao = None
+    return jsonify(ok=True, resumo_modelos=resumo_modelos, percentual_migracao=percentual_migracao)
+
+
+@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/importar-planilha", methods=["POST"])
+def importar_veiculos_planilha_cliente(cliente_id, migracao_id):
+    """Lê a aba "Migração" da planilha vinculada e faz upsert dos veículos —
+    por (cliente, veículo), mesma chave de _veiculo_doc_id, então reimportar
+    atualiza quem já existe em vez de duplicar. Diferente de
+    _salvar_item_veiculo_impl (que preserva o status ao editar manualmente),
+    aqui o status SEMPRE vem da planilha — é lá que o time marca
+    Aguardando/Enviar/Enviado/Comunicou, então reimportar deve refletir isso."""
+    container_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
+    doc = container_ref.get()
+    if not doc.exists:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    link_planilha = (doc.to_dict() or {}).get("link_planilha")
+    if not link_planilha:
+        return jsonify(ok=False, error="Essa migração não tem planilha vinculada."), 400
+    try:
+        veiculos = planilha_migracao.ler_veiculos_planilha_migracao(link_planilha)
+    except planilha_migracao.PlanilhaMigracaoError as err:
+        return jsonify(ok=False, error=str(err)), 502
+    except HttpError as err:
+        return jsonify(ok=False, error=f"Erro do Google Sheets ao ler a planilha: {err}"), 502
+    subcolecao = container_ref.collection("veiculos")
+    for v in veiculos:
+        subcolecao.document(_veiculo_doc_id(v["cliente"], v["veiculo"])).set(v, merge=True)
+    qtd_clientes = len({v["cliente"] for v in veiculos})
+    qtd_placas = len({v["veiculo"] for v in veiculos})
+    # Progresso da migração = % de veículos com status "Migrado" (equivalente
+    # ao "Comunicou" da planilha) sobre o total importado agora.
+    migrados = sum(1 for v in veiculos if v["status"] == "Migrado")
+    percentual_migracao = round(100 * migrados / len(veiculos)) if veiculos else 0
+    container_ref.update({
+        "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas, "percentual_migracao": percentual_migracao,
+    })
+    # Resumo por modelo (tabela da aba "Infos gerais") — são fórmulas da
+    # própria planilha, só lidas prontas aqui (ver docstring da função);
+    # falha em lê-lo não deve derrubar a importação dos veículos, que já
+    # aconteceu com sucesso nesse ponto.
+    try:
+        resumo_modelos = planilha_migracao.ler_resumo_modelos_planilha_migracao(link_planilha)
+    except Exception:
+        resumo_modelos = []
+    return jsonify(
+        ok=True, importados=len(veiculos), qtd_clientes=qtd_clientes, qtd_placas=qtd_placas,
+        percentual_migracao=percentual_migracao, resumo_modelos=resumo_modelos,
+    )
+
+
 @app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>", methods=["PATCH"])
 def atualizar_contagens_migracao_cliente(cliente_id, migracao_id):
     """Mesmo racional de atualizar_contagens_migracao, na tentativa nova."""
@@ -3255,39 +3712,58 @@ def atualizar_contagens_migracao_cliente(cliente_id, migracao_id):
     return jsonify(ok=True, **atualizacoes)
 
 
+def _contar(query):
+    """Contagem agregada do Firestore (count()) — custa 1 leitura a cada 1.000
+    documentos contados, em vez de 1 leitura por documento como .stream()."""
+    return int(query.count().get()[0][0].value)
+
+
+def _contar_por_valor(query, campo, valores, padrao):
+    """{valor: qtd} contando só com agregação. Doc sem o campo (ou com valor
+    fora da lista) entra no `padrao` — mesma regra do `or PADRAO` de antes."""
+    try:
+        total = _contar(query)
+        contagem = {v: _contar(query.where(filter=FieldFilter(campo, "==", v))) for v in valores if v != padrao}
+        contagem[padrao] = total - sum(contagem.values())
+        return {v: contagem[v] for v in valores}, total
+    except Exception as e:  # noqa: BLE001
+        # collection_group + where precisa de índice de "grupo de coleções"
+        # no Firestore (não vem ligado por padrão). Sem ele o Firestore recusa
+        # a consulta — aí conta do jeito antigo (lendo tudo) pra não quebrar o
+        # Dashboard; a mensagem do erro traz o link pra criar o índice.
+        print(f"[dashboard] contagem agregada de '{campo}' falhou, usando leitura completa: {e}")
+        contagem = {v: 0 for v in valores}
+        total = 0
+        for d in query.stream():
+            total += 1
+            valor = d.to_dict().get(campo) or padrao
+            contagem[valor if valor in contagem else padrao] += 1
+        return contagem, total
+
+
 @app.route("/api/dashboard")
 def dashboard_indicadores():
-    clientes_migracao = list(db.collection(MIGRACAO_COLLECTION).stream())
-    total_clientes = len(clientes_migracao)
-    migracao_ativos = sum(
-        1 for d in clientes_migracao
-        if (d.to_dict().get("etapa") or MIGRACAO_ETAPA_PADRAO) != "concluido"
-    )
+    # Tudo com contagem agregada: antes lia documento por documento (inclusive
+    # TODOS os veículos de todas as migrações) a cada abertura do Dashboard,
+    # que é a tela inicial — era a maior fonte de leitura do app.
+    total_clientes = _contar(db.collection(MIGRACAO_COLLECTION))
+    migracao_ativos = total_clientes - _contar(
+        db.collection(MIGRACAO_COLLECTION).where(filter=FieldFilter("etapa", "==", "concluido")))
 
-    clientes_implantacao = list(db.collection(IMPLANTACAO_CLIENTES_COLLECTION).stream())
-    total_implantacao = len(clientes_implantacao)
-    implantacao_ativos = sum(
-        1 for d in clientes_implantacao
-        if (d.to_dict().get("etapa") or IMPLANTACAO_ETAPA_PADRAO) != "concluido"
-    )
+    total_implantacao = _contar(db.collection(IMPLANTACAO_CLIENTES_COLLECTION))
+    implantacao_ativos = total_implantacao - _contar(
+        db.collection(IMPLANTACAO_CLIENTES_COLLECTION).where(filter=FieldFilter("etapa", "==", "concluido")))
 
-    por_status = {s: 0 for s in STATUS_VEICULO_VALIDOS}
-    total_veiculos = 0
-    for doc in db.collection_group("veiculos").stream():
-        total_veiculos += 1
-        status = doc.to_dict().get("status") or STATUS_VEICULO_PADRAO
-        por_status[status] = por_status.get(status, 0) + 1
+    por_status, total_veiculos = _contar_por_valor(
+        db.collection_group("veiculos"), "status", STATUS_VEICULO_VALIDOS, STATUS_VEICULO_PADRAO)
 
     # Coleção "clientes" nova (Fase de reestruturação) — roda em paralelo com os
     # contadores antigos acima até os dados serem migrados de verdade.
-    por_estagio = {e: 0 for e in ESTAGIOS_CLIENTE}
-    for d in db.collection(CLIENTES_COLLECTION).stream():
-        estagio = d.to_dict().get("estagio") or ESTAGIO_CLIENTE_PADRAO
-        por_estagio[estagio] = por_estagio.get(estagio, 0) + 1
-    migracoes_em_andamento = sum(
-        1 for d in db.collection_group("migracoes").stream()
-        if (d.to_dict().get("status") or STATUS_MIGRACAO_PADRAO) == "em_andamento"
-    )
+    por_estagio, _ = _contar_por_valor(
+        db.collection(CLIENTES_COLLECTION), "estagio", ESTAGIOS_CLIENTE, ESTAGIO_CLIENTE_PADRAO)
+    migracoes_por_status, _ = _contar_por_valor(
+        db.collection_group("migracoes"), "status", STATUS_MIGRACAO_VALIDOS, STATUS_MIGRACAO_PADRAO)
+    migracoes_em_andamento = migracoes_por_status["em_andamento"]
 
     return jsonify(
         ok=True,
@@ -3378,18 +3854,8 @@ IMPORT_JOBS = {}
 IMPORT_JOBS_LOCK = threading.Lock()
 
 
-def _extrair_aninhado(payload, *chaves):
-    atual = payload
-    for chave in chaves:
-        if not isinstance(atual, dict):
-            return None
-        atual = atual.get(chave)
-    return atual
-
-
-def _executar_import(job_id, tipo_config, mapping, df, endpoint, token, criar_planilha, nome_cliente_planilha):
+def _executar_import(job_id, tipo_config, mapping, df, endpoint, token):
     sucessos = erros = 0
-    veiculos_para_planilha = []
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     for pos, (index, row) in enumerate(df.iterrows()):
@@ -3398,22 +3864,6 @@ def _executar_import(job_id, tipo_config, mapping, df, endpoint, token, criar_pl
             resp = requests.post(f"{BASE_URL}{endpoint}", json=payload, headers=headers, timeout=20)
             if resp.status_code in (200, 201):
                 sucessos += 1
-                if criar_planilha:
-                    cliente = payload.get("ClientIntegrationCode")
-                    veiculo = payload.get("Identification")
-                    if cliente and veiculo:
-                        ddi = _extrair_aninhado(payload, "Tracker1", "Simcard1", "CountryCode") or ""
-                        ddd = _extrair_aninhado(payload, "Tracker1", "Simcard1", "AreaCode") or ""
-                        numero = _extrair_aninhado(payload, "Tracker1", "Simcard1", "PhoneNumber") or ""
-                        equipamento = _extrair_aninhado(payload, "Tracker1", "TrackerTemplateIntegrationCode") or ""
-                        id_equipamento = _extrair_aninhado(payload, "Tracker1", "IdTracker") or ""
-                        veiculos_para_planilha.append({
-                            "cliente": str(cliente),
-                            "veiculo": str(veiculo),
-                            "equipamento": str(equipamento),
-                            "id_equipamento": str(id_equipamento),
-                            "numero_linha": f"{ddi}{ddd}{numero}",
-                        })
             else:
                 erros += 1
                 with IMPORT_JOBS_LOCK:
@@ -3429,20 +3879,9 @@ def _executar_import(job_id, tipo_config, mapping, df, endpoint, token, criar_pl
             job["sucessos"] = sucessos
             job["erros"] = erros
 
-    resultado_planilha = None
-    if criar_planilha:
-        cliente_migracao_id = obter_ou_criar_cliente_migracao(nome_cliente_planilha)
-        if veiculos_para_planilha:
-            # Preenche o Comando sozinho quando o Equipamento bate com um modelo
-            # já cadastrado pra esse cliente (Modelo de rastreador / Porta / Comando).
-            _preencher_comandos_por_modelo(cliente_migracao_id, veiculos_para_planilha)
-            salvar_veiculos_migracao(cliente_migracao_id, veiculos_para_planilha)
-        qtd_clientes, qtd_placas = recalcular_contagens_migracao(cliente_migracao_id)
-        resultado_planilha = {"nome": nome_cliente_planilha, "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas}
-
     with IMPORT_JOBS_LOCK:
         IMPORT_JOBS[job_id]["status"] = "concluido"
-        IMPORT_JOBS[job_id]["planilha"] = resultado_planilha
+        IMPORT_JOBS[job_id]["planilha"] = None
 
 
 @app.route("/api/import/run", methods=["POST"])
@@ -3456,16 +3895,12 @@ def import_run():
     tipo = body.get("tipo")
     file_id = body.get("file_id")
     mapping = body.get("mapping") or {}
-    criar_planilha = bool(body.get("criar_planilha")) and tipo == "veiculo"
-    nome_cliente_planilha = str(body.get("nome_cliente_planilha", "")).strip()
 
     tipo_config = PARAMS.get(tipo)
     if not tipo_config:
         return jsonify(ok=False, error="Tipo desconhecido."), 404
     if not mapping:
         return jsonify(ok=False, error="Mapeie ao menos uma coluna."), 400
-    if criar_planilha and not nome_cliente_planilha:
-        return jsonify(ok=False, error="Informe o nome do cliente para criar a planilha em Clientes em migração."), 400
 
     with UPLOADS_LOCK:
         df = UPLOADS.pop(file_id, None)
@@ -3484,7 +3919,7 @@ def import_run():
 
     threading.Thread(
         target=_executar_import,
-        args=(job_id, tipo_config, mapping, df, endpoint, token, criar_planilha, nome_cliente_planilha),
+        args=(job_id, tipo_config, mapping, df, endpoint, token),
         daemon=True,
     ).start()
 
