@@ -34,10 +34,6 @@ const progressoBar = el("progresso-bar");
 const progressoStatus = el("progresso-status");
 const progressoPct = el("progresso-pct");
 const importLog = el("import-log");
-const blocoCriarPlanilha = el("bloco-criar-planilha");
-const chkCriarPlanilha = el("chk-criar-planilha");
-const inputNomePlanilha = el("input-nome-planilha");
-const selectClientePlanilhaExistente = el("select-cliente-planilha-existente");
 const btnExportarExcel = el("btn-exportar-excel");
 
 document.querySelectorAll(".menu-cabecalho").forEach((cabecalho) => {
@@ -72,6 +68,10 @@ const btnLimpar = el("btn-limpar");
 // Limpar mudam conforme quem está usando o painel no momento.
 function atualizarSaidaHeader(titulo, mostrarLimpar) {
   saidaTitulo.textContent = titulo;
+  // Implantação/Migração: o título já está na topbar, então esconde aqui
+  // (sem Limpar/Exportar visíveis, o cabeçalho inteiro some — ver CSS).
+  // "Saída" (Ferramentas) continua, é rótulo da área de resultado.
+  saidaTitulo.classList.toggle("oculto-topbar", !mostrarLimpar);
   btnLimpar.classList.toggle("hidden", !mostrarLimpar);
 }
 
@@ -773,6 +773,55 @@ const inputImplantacaoClienteDecisorNome = el("implantacao-cliente-decisor-nome"
 const inputImplantacaoClienteDecisorWhatsapp = el("implantacao-cliente-decisor-whatsapp");
 const wrapImplantacaoClienteComplementares = el("implantacao-cliente-campos-complementares");
 const btnSalvarImplantacaoCliente = el("btn-salvar-implantacao-cliente");
+const inputImplantacaoClienteImplantado = el("implantacao-cliente-implantado");
+const infoImplantacaoClienteImplantado = el("implantacao-cliente-implantado-info");
+
+function atualizarCampoImplantado(cliente) {
+  inputImplantacaoClienteImplantado.value = cliente && cliente.implantado ? "sim" : "nao";
+  infoImplantacaoClienteImplantado.textContent = cliente && cliente.implantado && cliente.implantado_em
+    ? `desde ${formatarDataBRSimples(cliente.implantado_em)}${cliente.implantado_por ? ` · ${cliente.implantado_por}` : ""}`
+    : "";
+}
+
+// Switch "Implantado" — salva na hora (endpoint próprio, com data/quem e
+// histórico), sem depender do "Salvar edição" do formulário. Também é
+// chamado pela sugestão que aparece quando o Marco 3 conclui.
+async function salvarImplantadoCliente(cliente, implantado, recarregar = true) {
+  try {
+    const r = await fetch(`/api/clientes/${cliente.id}/implantado`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ implantado }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
+    } else {
+      Object.assign(cliente, {
+        implantado: data.implantado, implantado_em: data.implantado_em, implantado_por: data.implantado_por,
+      });
+      // Atualiza o que está por trás do modal (tag "Implantado" da Ficha).
+      if (!recarregar) {
+        // quem chamou recarrega depois
+      } else if (fichaClienteAtual && fichaClienteAtual.implantacao && fichaClienteAtual.implantacao.id === cliente.id) {
+        await carregarFichaCliente(fichaClienteAtual.implantacao.idcentral, fichaAbaAtual);
+      } else {
+        await carregarImplantacaoClientes();
+      }
+    }
+  } catch (err) {
+    alert(`Erro ao salvar: ${String(err)}`);
+  }
+  atualizarCampoImplantado(cliente);
+}
+
+inputImplantacaoClienteImplantado.addEventListener("change", async () => {
+  const cliente = implantacaoClienteEmEdicao;
+  if (!cliente) return;
+  inputImplantacaoClienteImplantado.disabled = true;
+  await salvarImplantadoCliente(cliente, inputImplantacaoClienteImplantado.value === "sim");
+  inputImplantacaoClienteImplantado.disabled = false;
+});
 
 // Estado/Cidade do Decisor — comboboxes pesquisáveis. Estado vem de uma lista
 // fixa (carregada 1x); Cidade depende do estado escolhido (API do IBGE,
@@ -842,21 +891,24 @@ comboDecisorEstado.aoSelecionar = (uf) => carregarMunicipiosDoEstado(uf, "");
 let implantacaoClienteMigracaoAtual = null;
 
 let implantacaoClienteEditandoId = null;
-// Guarda o objeto do cliente sendo editado (não só o id) — o botão "Marcos"
-// do sidebar precisa dos dados dele (data_entrada, etapa, marcos_concluidos)
-// pra abrir o modal de marcos sem depender do contexto da Ficha.
+// Guarda o objeto do cliente sendo editado (não só o id) — o campo
+// "Cliente implantado?" lê/atualiza os dados dele.
 let implantacaoClienteEmEdicao = null;
 let implantacaoClientesCache = [];
 let implantacaoFiltroTexto = "";
 let implantacaoFiltroCsm = "";
+// Filtros da barra de números do Kanban ("" = sem filtro).
+let implantacaoFiltroStatus = ""; // "ok" | "atrasado"
+let implantacaoFiltroFlag = ""; // "Yellow Flag" | "Red Flag" | "Black Flag"
+let implantacaoFiltroParado = false;
 let implantacaoView = "kanban"; // "kanban" | "lista"
 // Precisa bater com as opções do <select id="implantacao-cliente-etapa"> e com
 // IMPLANTACAO_ETAPAS no app.py — são as colunas oficiais do Kanban de Implantação.
 const IMPLANTACAO_ETAPA_LABELS = {
   "marco-1": "Marco 1 (7 dias)",
   "marco-2": "Marco 2 (21 dias)",
-  "marco-3": "Marco 3 (49 dias)",
-  "marco-4": "Marco 4 (70 dias)",
+  "marco-3": "Marco 3 (60 dias)",
+  "marco-4": "Marco 4 (120 dias)",
   "marco-5": "Marco 5 (180 dias)",
   "concluido": "100% Implantados",
 };
@@ -902,35 +954,328 @@ function clientePossivelRisco(c) {
   return dias !== null && dias > 60 && !Number.isNaN(urs) && urs < 30;
 }
 
-function montarConteudoCardImplantacao(c) {
-  const wrap = document.createElement("div");
-  wrap.className = "kanban-card-conteudo";
-  if (clientePossivelRisco(c)) wrap.classList.add("risco-borda");
+// --- KANBAN DE IMPLANTAÇÃO (visual da tela de Marcos do painel de CS) ---
+// Só as 5 colunas de marco; quem concluiu os 5 (etapa "concluido") sai do
+// board e aparece no modal "Implantados", com a data de conclusão.
 
-  const linhaNome = document.createElement("div");
-  linhaNome.className = "kanban-card-linha-nome";
+// Placas (UR's) vêm da planilha (dados_planilha) — null quando não tem.
+function placasCliente(c) {
+  const urs = parseInt((c.dados_planilha || {})["7 - UR's"], 10);
+  return Number.isNaN(urs) ? null : urs;
+}
+
+function clienteAtrasadoNoMarco(c) {
+  return c.etapa !== "concluido" && marcoAtrasado(c.data_entrada, c.etapa, c.marcos_concluidos);
+}
+
+// Motivo do atraso — árvore de decisão do Playbook SSX (seção 17). As chaves
+// batem com MOTIVOS_ATRASO do app.py.
+const MOTIVOS_ATRASO = {
+  nao_executa: { rotulo: "Não consegue executar", acao: "Reforçar orientação, prática e validação." },
+  nao_entende: { rotulo: "Não entende o objetivo", acao: "Retomar contexto, dor e expectativa." },
+  sem_estrutura: { rotulo: "Não possui estrutura", acao: "Registrar impedimento e acionar responsável." },
+  nao_responde: { rotulo: "Não responde", acao: "Reengajar e avaliar risco de relacionamento." },
+  problema_tecnico: { rotulo: "Problema técnico", acao: "Acionar área técnica com contexto e evidência." },
+  expectativa: { rotulo: "Expectativa desalinhada", acao: "Revalidar o que foi prometido, possível e próximo passo." },
+};
+
+// Motivo só vale pro marco em que foi registrado — cliente que avançou (e
+// atrasou de novo em outro marco) precisa de um motivo novo.
+function motivoAtrasoAtual(c) {
+  const m = c && c.motivo_atraso;
+  return m && m.marco === c.etapa && MOTIVOS_ATRASO[m.motivo] ? m : null;
+}
+
+// "Implantação parada": nenhuma atividade (acontecimento na linha do tempo ou
+// salvamento do checklist de marcos) há mais de N dias. Cliente novo sem
+// nenhum registro conta a partir da data de entrada.
+const DIAS_IMPLANTACAO_PARADA = 15;
+
+function diasSemAtividade(c) {
+  const ultima = [c.ultima_acao_data, c.marcos_atualizado_em, c.data_entrada]
+    .filter((d) => /^\d{4}-\d{2}-\d{2}/.test(d || ""))
+    .map((d) => d.slice(0, 10))
+    .sort()
+    .pop();
+  return ultima ? diasDesdeEntrada(ultima) : null;
+}
+
+// Dias entre duas datas ISO (YYYY-MM-DD); null se alguma for inválida.
+function diasEntre(inicioIso, fimIso) {
+  const ini = diasDesdeEntrada(inicioIso);
+  const fim = diasDesdeEntrada(fimIso);
+  return ini === null || fim === null ? null : ini - fim;
+}
+
+function clienteParado(c) {
+  if (!c || c.etapa === "concluido") return false;
+  const dias = diasSemAtividade(c);
+  return dias !== null && dias > DIAS_IMPLANTACAO_PARADA;
+}
+
+const ICONES_CARD_MARCOS = {
+  calendario: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+  caminhao: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h15v13H1zM16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
+  pessoa: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+};
+
+function linhaCardMarcos(icone, html) {
+  const linha = document.createElement("div");
+  linha.className = "kmarcos-card-linha";
+  linha.innerHTML = `<span class="kmarcos-card-icone kmarcos-icone-${icone}">${ICONES_CARD_MARCOS[icone]}</span>`;
+  const texto = document.createElement("span");
+  if (html instanceof Node) texto.appendChild(html); else texto.textContent = html;
+  linha.appendChild(texto);
+  return linha;
+}
+
+function montarCardMarcos(c) {
+  const card = document.createElement("div");
+  card.className = "kmarcos-card";
+  if (clientePossivelRisco(c)) {
+    card.classList.add("kmarcos-card-risco");
+    card.title = "Possível risco: mais de 60 dias de casa e menos de 30 placas";
+  }
+  card.addEventListener("click", () => abrirClienteOuFicha(c, abrirTimelineImplantacao));
+
   const nome = document.createElement("div");
-  nome.className = "kanban-card-nome";
+  nome.className = "kmarcos-card-nome";
   nome.textContent = c.cliente || c.idcentral || "(sem nome)";
-  linhaNome.appendChild(nome);
-  const iconeFlag = criarIconeFlag(c.flag);
-  if (iconeFlag) linhaNome.appendChild(iconeFlag);
-  wrap.appendChild(linhaNome);
+  card.appendChild(nome);
 
-  const meta = document.createElement("div");
-  meta.className = "kanban-card-meta";
-  meta.textContent = c.csm ? `Responsável: ${c.csm}` : "Sem responsável";
-  wrap.appendChild(meta);
+  const linhaStatus = document.createElement("div");
+  linhaStatus.className = "kmarcos-card-status";
+  const corFlag = FLAG_ICONE_COR[c.flag];
+  if (corFlag) {
+    const flag = document.createElement("span");
+    flag.className = `kmarcos-card-flag kmarcos-flag-${c.flag.split(" ")[0].toLowerCase()}`;
+    flag.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M5 3v18h2v-7h11l-3-4 3-4H7V3z"/></svg>';
+    flag.appendChild(document.createTextNode(c.flag));
+    linhaStatus.appendChild(flag);
+  }
+  const atrasado = clienteAtrasadoNoMarco(c);
+  const selo = document.createElement("span");
+  selo.className = `kmarcos-selo ${atrasado ? "kmarcos-selo-atrasado" : "kmarcos-selo-ok"}`;
+  selo.textContent = atrasado ? "Atrasado" : "No prazo";
+  if (atrasado) {
+    const motivo = motivoAtrasoAtual(c);
+    selo.title = motivo ? `Motivo: ${MOTIVOS_ATRASO[motivo.motivo].rotulo}` : "Motivo do atraso não registrado";
+  }
+  linhaStatus.appendChild(selo);
+  if (clienteParado(c)) {
+    const parado = document.createElement("span");
+    parado.className = "kmarcos-selo kmarcos-selo-parado";
+    parado.textContent = `Parado ${diasSemAtividade(c)}d`;
+    parado.title = `Sem atividade há ${diasSemAtividade(c)} dias (acontecimentos ou checklist de marcos)`;
+    linhaStatus.appendChild(parado);
+  }
+  card.appendChild(linhaStatus);
 
-  if (c.etapa !== "concluido" && marcoAtrasado(c.data_entrada, c.etapa, c.marcos_concluidos)) {
-    const badge = document.createElement("span");
-    badge.className = "tag-resumo tag-flag-red kanban-card-badge-atrasado";
-    badge.textContent = "Atrasado";
-    wrap.appendChild(badge);
+  // Entrada e placas dividem a mesma linha (card mais baixo = mais cards
+  // visíveis por coluna).
+  const linhaDados = document.createElement("div");
+  linhaDados.className = "kmarcos-card-linha-dupla";
+  const dataBR = formatarDataBRSimples(c.data_entrada);
+  if (dataBR) {
+    const frag = document.createElement("span");
+    const forte = document.createElement("strong");
+    forte.textContent = dataBR;
+    frag.appendChild(forte);
+    const dias = diasDesdeEntrada(c.data_entrada);
+    if (dias !== null) {
+      const d = document.createElement("span");
+      d.className = "kmarcos-card-apagado";
+      d.textContent = ` (${dias}d)`;
+      frag.appendChild(d);
+    }
+    linhaDados.appendChild(linhaCardMarcos("calendario", frag));
   }
 
-  return wrap;
+  const placas = placasCliente(c);
+  if (placas !== null) {
+    const frag = document.createElement("span");
+    const forte = document.createElement("strong");
+    forte.textContent = String(placas);
+    frag.appendChild(forte);
+    linhaDados.appendChild(linhaCardMarcos("caminhao", frag));
+  }
+  if (linhaDados.childElementCount) card.appendChild(linhaDados);
+
+  card.appendChild(linhaCardMarcos("pessoa", c.csm || "Sem responsável"));
+  return card;
 }
+
+function construirKanbanMarcos(clientes) {
+  const board = document.createElement("div");
+  board.className = "kmarcos-board";
+  IMPLANTACAO_MARCOS.forEach((marco) => {
+    const doMarco = clientes.filter((c) => (c.etapa || "marco-1") === marco);
+    const coluna = document.createElement("div");
+    coluna.className = "kmarcos-coluna";
+
+    // Cabeçalho em 2 linhas: "Marco 1 (7 dias)" + contagem à direita; nome
+    // do marco + placas embaixo.
+    const cabecalho = document.createElement("div");
+    cabecalho.className = "kmarcos-coluna-cabecalho";
+    const linhaTitulo = document.createElement("div");
+    linhaTitulo.className = "kmarcos-coluna-linha";
+    const titulo = document.createElement("h2");
+    titulo.className = "kmarcos-coluna-titulo";
+    titulo.textContent = IMPLANTACAO_ETAPA_LABELS[marco];
+    const contagem = document.createElement("span");
+    contagem.className = "kmarcos-coluna-contagem";
+    contagem.textContent = String(doMarco.length);
+    contagem.title = `${doMarco.length} ${doMarco.length === 1 ? "cliente" : "clientes"}`;
+    linhaTitulo.appendChild(titulo);
+    linhaTitulo.appendChild(contagem);
+    cabecalho.appendChild(linhaTitulo);
+    const info = IMPLANTACAO_MARCOS_INFO[marco];
+    const totalPlacas = doMarco.reduce((soma, c) => soma + (placasCliente(c) || 0), 0);
+    const sub = document.createElement("div");
+    sub.className = "kmarcos-coluna-sub";
+    sub.textContent = `${info ? `${info.nome} · ` : ""}${totalPlacas} placas`;
+    sub.title = sub.textContent;
+    cabecalho.appendChild(sub);
+    coluna.appendChild(cabecalho);
+
+    const lista = document.createElement("div");
+    lista.className = "kmarcos-coluna-cards";
+    if (doMarco.length === 0) {
+      const vazio = document.createElement("div");
+      vazio.className = "kmarcos-vazio";
+      vazio.textContent = "Nenhum cliente neste marco";
+      lista.appendChild(vazio);
+    }
+    doMarco.forEach((c) => lista.appendChild(montarCardMarcos(c)));
+    coluna.appendChild(lista);
+    board.appendChild(coluna);
+  });
+  return board;
+}
+
+// Barra de números acima do Kanban. Conta sobre os clientes em andamento já
+// filtrados por busca/CSM (mas antes do filtro da própria barra, senão os
+// outros blocos zeravam). Clicar num bloco filtra; clicar de novo desfaz.
+function construirBarraStatsMarcos(clientes, aoMudarFiltro) {
+  const barra = document.createElement("div");
+  barra.className = "kmarcos-stats";
+
+  function bloco(rotulo, valor, classe, ativo, aoClicar, iconeFlag) {
+    const b = document.createElement(aoClicar ? "button" : "div");
+    if (aoClicar) b.type = "button";
+    b.className = `kmarcos-stat ${classe}${ativo ? " ativo" : ""}`;
+    const r = document.createElement("span");
+    r.className = "kmarcos-stat-rotulo";
+    if (iconeFlag) r.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M5 3v18h2v-7h11l-3-4 3-4H7V3z"/></svg>';
+    r.appendChild(document.createTextNode(rotulo));
+    const v = document.createElement("span");
+    v.className = "kmarcos-stat-valor";
+    v.textContent = String(valor);
+    b.appendChild(r);
+    b.appendChild(v);
+    if (aoClicar) b.addEventListener("click", aoClicar);
+    barra.appendChild(b);
+  }
+
+  const atrasados = clientes.filter(clienteAtrasadoNoMarco).length;
+  bloco("Total", clientes.length, "kmarcos-stat-total", false, null);
+  bloco("No prazo", clientes.length - atrasados, "kmarcos-stat-ok", implantacaoFiltroStatus === "ok", () => {
+    implantacaoFiltroStatus = implantacaoFiltroStatus === "ok" ? "" : "ok";
+    aoMudarFiltro();
+  });
+  bloco("Atrasados", atrasados, "kmarcos-stat-atrasado", implantacaoFiltroStatus === "atrasado", () => {
+    implantacaoFiltroStatus = implantacaoFiltroStatus === "atrasado" ? "" : "atrasado";
+    aoMudarFiltro();
+  });
+  bloco("Parados", clientes.filter(clienteParado).length, "kmarcos-stat-parado", implantacaoFiltroParado, () => {
+    implantacaoFiltroParado = !implantacaoFiltroParado;
+    aoMudarFiltro();
+  });
+  ["Yellow Flag", "Red Flag", "Black Flag"].forEach((flag) => {
+    const qtd = clientes.filter((c) => c.flag === flag).length;
+    bloco(flag.replace(" Flag", ""), qtd, `kmarcos-stat-flag kmarcos-flag-${flag.split(" ")[0].toLowerCase()}`, implantacaoFiltroFlag === flag, () => {
+      implantacaoFiltroFlag = implantacaoFiltroFlag === flag ? "" : flag;
+      aoMudarFiltro();
+    }, true);
+  });
+  return barra;
+}
+
+// --- MODAL "IMPLANTADOS" (concluíram os 5 marcos) ---
+const overlayImplantados = el("overlay-implantados");
+const implantadosTitulo = el("implantados-titulo");
+const implantadosBusca = el("implantados-busca");
+const implantadosLista = el("implantados-lista");
+
+function clientesImplantados() {
+  return implantacaoClientesCache.filter((c) => c.etapa === "concluido");
+}
+
+function renderizarListaImplantados() {
+  const filtro = implantadosBusca.value.trim().toLowerCase();
+  const todos = clientesImplantados();
+  // Mais recente primeiro; quem concluiu antes da data começar a ser gravada
+  // (sem concluido_em) vai pro fim, em ordem alfabética.
+  const lista = todos
+    .filter((c) => !filtro || (c.cliente || "").toLowerCase().includes(filtro) || (c.idcentral || "").toLowerCase().includes(filtro))
+    .sort((a, b) => {
+      const da = a.concluido_em || "";
+      const db = b.concluido_em || "";
+      if (da !== db) return db.localeCompare(da);
+      return (a.cliente || "").localeCompare(b.cliente || "", "pt-BR");
+    });
+  implantadosTitulo.textContent = `Clientes implantados (${todos.length})`;
+  implantadosLista.innerHTML = "";
+
+  if (lista.length === 0) {
+    const vazio = document.createElement("p");
+    vazio.className = "kmarcos-vazio";
+    vazio.textContent = todos.length === 0 ? "Nenhum cliente concluiu os 5 marcos ainda." : "Nenhum cliente encontrado com esse filtro.";
+    implantadosLista.appendChild(vazio);
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "tabela-saida tabela-implantados";
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  ["IdCentral", "Cliente", "Responsável", "Data de implantação"].forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  lista.forEach((c) => {
+    const tr = document.createElement("tr");
+    tr.className = "tabela-implantados-linha";
+    const dataBR = formatarDataBRSimples(c.concluido_em);
+    [c.idcentral || "-", c.cliente || "(sem nome)", c.csm || "-", dataBR || "sem data registrada"].forEach((valor, i) => {
+      const td = document.createElement("td");
+      td.textContent = valor;
+      if (i === 3 && !dataBR) td.className = "kmarcos-card-apagado";
+      tr.appendChild(td);
+    });
+    tr.addEventListener("click", () => {
+      overlayImplantados.classList.add("hidden");
+      abrirClienteOuFicha(c, abrirTimelineImplantacao);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  implantadosLista.appendChild(table);
+}
+
+function abrirModalImplantados() {
+  implantadosBusca.value = "";
+  renderizarListaImplantados();
+  overlayImplantados.classList.remove("hidden");
+  implantadosBusca.focus();
+}
+
+implantadosBusca.addEventListener("input", renderizarListaImplantados);
+el("implantados-fechar").addEventListener("click", () => overlayImplantados.classList.add("hidden"));
 
 async function carregarImplantacaoClientes() {
   mostrarPlaceholder("Carregando clientes em implantação...");
@@ -939,6 +1284,8 @@ async function carregarImplantacaoClientes() {
     const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao carregar.");
     implantacaoClientesCache = data.clientes || [];
+    // Mesma lista serve pra busca global da topbar (sem ler de novo).
+    buscaGlobalClientes = implantacaoClientesCache;
     await mostrarTabelaImplantacaoClientes();
   } catch (err) {
     mostrarErro(String(err));
@@ -1106,12 +1453,12 @@ async function mostrarTabelaImplantacaoClientes() {
   btnImportarPlanilha.addEventListener("click", () => abrirModalImportarClientes());
   toolbar.appendChild(btnImportarPlanilha);
 
-  const inputBusca = document.createElement("input");
-  inputBusca.type = "text";
-  inputBusca.className = "implantacao-busca";
-  inputBusca.placeholder = "Buscar cliente...";
-  inputBusca.value = implantacaoFiltroTexto;
-  toolbar.appendChild(inputBusca);
+  // Filtro local (só esconde cards/linhas desta tela) — diferente da busca da
+  // topbar, que é "ir para o cliente" e abre a Ficha.
+  toolbar.appendChild(criarCampoFiltroLista(implantacaoFiltroTexto, (valor) => {
+    implantacaoFiltroTexto = valor;
+    atualizarConteudo();
+  }));
 
   const selectFiltroCsm = document.createElement("select");
   selectFiltroCsm.className = "implantacao-filtro-csm";
@@ -1140,6 +1487,13 @@ async function mostrarTabelaImplantacaoClientes() {
   segView.appendChild(btnViewLista);
   toolbar.appendChild(segView);
 
+  const btnImplantados = document.createElement("button");
+  btnImplantados.type = "button";
+  btnImplantados.className = "btn-secondary btn-ver-implantados";
+  btnImplantados.textContent = `✓ Implantados (${clientesImplantados().length})`;
+  btnImplantados.addEventListener("click", abrirModalImplantados);
+  toolbar.appendChild(btnImplantados);
+
   wrapper.appendChild(toolbar);
 
   const tabelaContainer = document.createElement("div");
@@ -1149,10 +1503,16 @@ async function mostrarTabelaImplantacaoClientes() {
   let ordemClienteDir = null; // null = ordem padrão (Última ação); 1 = A-Z; -1 = Z-A
 
   function clientesFiltrados() {
-    const filtro = implantacaoFiltroTexto.trim().toLowerCase();
-    let filtrados = filtro
-      ? implantacaoClientesCache.filter((c) => (c.cliente || "").toLowerCase().includes(filtro))
-      : implantacaoClientesCache.slice();
+    const filtro = normalizarBusca(implantacaoFiltroTexto);
+    // Cliente criado pela tela de Migração sem par na Implantação
+    // (tem_implantacao=false) não aparece aqui — ele não passou por nenhum
+    // marco, não tem o que mostrar nesse Kanban. implantacaoClientesCache
+    // continua completo (sem esse filtro) pra busca global da topbar achar
+    // esse cliente e cair na Ficha dele.
+    let filtrados = implantacaoClientesCache.filter((c) => c.tem_implantacao !== false);
+    if (filtro) {
+      filtrados = filtrados.filter((c) => normalizarBusca(`${c.cliente || ""} ${c.idcentral || ""}`).includes(filtro));
+    }
     if (implantacaoFiltroCsm) {
       filtrados = filtrados.filter((c) => c.csm === implantacaoFiltroCsm);
     }
@@ -1162,9 +1522,18 @@ async function mostrarTabelaImplantacaoClientes() {
   function atualizarConteudo() {
     tabelaContainer.innerHTML = "";
     if (implantacaoView === "kanban") {
-      tabelaContainer.appendChild(
-        construirKanban(clientesFiltrados(), IMPLANTACAO_ETAPAS_ORDEM, IMPLANTACAO_ETAPA_LABELS, "etapa", montarConteudoCardImplantacao, (c) => abrirClienteOuFicha(c, abrirTimelineImplantacao))
-      );
+      const emAndamento = clientesFiltrados().filter((c) => c.etapa !== "concluido");
+      let noBoard = emAndamento;
+      if (implantacaoFiltroStatus) {
+        noBoard = noBoard.filter((c) => clienteAtrasadoNoMarco(c) === (implantacaoFiltroStatus === "atrasado"));
+      }
+      if (implantacaoFiltroFlag) noBoard = noBoard.filter((c) => c.flag === implantacaoFiltroFlag);
+      if (implantacaoFiltroParado) noBoard = noBoard.filter(clienteParado);
+      const wrapKanban = document.createElement("div");
+      wrapKanban.className = "kmarcos-wrap";
+      wrapKanban.appendChild(construirBarraStatsMarcos(emAndamento, atualizarConteudo));
+      wrapKanban.appendChild(construirKanbanMarcos(noBoard));
+      tabelaContainer.appendChild(wrapKanban);
     } else {
       let filtrados = clientesFiltrados();
       if (ordemClienteDir) {
@@ -1185,11 +1554,6 @@ async function mostrarTabelaImplantacaoClientes() {
     btnViewKanban.classList.toggle("ativo", implantacaoView === "kanban");
     btnViewLista.classList.toggle("ativo", implantacaoView === "lista");
   }
-
-  inputBusca.addEventListener("input", () => {
-    implantacaoFiltroTexto = inputBusca.value;
-    atualizarConteudo();
-  });
 
   selectFiltroCsm.addEventListener("change", () => {
     implantacaoFiltroCsm = selectFiltroCsm.value;
@@ -1239,19 +1603,18 @@ async function popularSelectUsuariosPorArea(select, valorAtual, queryString) {
 }
 
 async function abrirModalImplantacaoCliente(cliente) {
-  // Sidebar aparece sempre que edita um cliente já existente (o botão
-  // "Marcos" precisa estar disponível tanto vindo da Ficha quanto vindo
-  // direto da lista/kanban de Implantação) — só fica escondido criando um
-  // cliente novo. "Implantação"/"Migração" (troca de modal) só aparecem
-  // quando o contexto de Ficha é realmente deste mesmo cliente — evita usar
-  // um contexto antigo/de outro cliente que tenha ficado em memória.
+  // Sidebar (Implantação/Migração, troca de modal) só aparece quando o
+  // contexto de Ficha é realmente deste mesmo cliente — evita usar um
+  // contexto antigo/de outro cliente que tenha ficado em memória. Os marcos
+  // não ficam mais aqui: são a aba "Marcos" da Ficha.
   const contextoFichaValido = !!(fichaConfigContexto && cliente
     && fichaConfigContexto.implantacao.id === cliente.id);
-  implantacaoClienteSidebarConfig.classList.toggle("hidden", !cliente);
-  modalImplantacaoClienteEl.classList.toggle("tem-sidebar-config", !!cliente);
-  // "Implantação" fica sempre visível editando — é por ele que se volta do
-  // checklist de um marco pro formulário do cliente.
-  implantacaoClienteSidebarConfig.querySelector('[data-aba="migracao"]').classList.toggle("hidden", !contextoFichaValido);
+  implantacaoClienteSidebarConfig.classList.toggle("hidden", !contextoFichaValido);
+  modalImplantacaoClienteEl.classList.toggle("tem-sidebar-config", contextoFichaValido);
+  implantacaoClienteSidebarConfig.querySelector('[data-aba="migracao"]').classList.toggle(
+    "hidden", !contextoFichaValido || !fichaConfigContexto.migracao
+  );
+  implantacaoClienteSidebarConfig.querySelector('[data-aba="credenciais"]').classList.toggle("hidden", !contextoFichaValido);
   implantacaoClienteSidebarConfig.querySelectorAll('.modal-sidebar-config-item').forEach((b) => {
     b.classList.remove("ativo");
   });
@@ -1260,7 +1623,6 @@ async function abrirModalImplantacaoCliente(cliente) {
   }
   implantacaoClienteEditandoId = cliente ? cliente.id : null;
   implantacaoClienteEmEdicao = cliente;
-  iniciarRascunhoMarcos(cliente);
   mostrarFormularioCliente();
   implantacaoClienteModalTitulo.textContent = cliente ? "Editar cliente" : "Adicionar cliente";
   inputImplantacaoClienteIdcentral.value = cliente ? cliente.idcentral || "" : "";
@@ -1278,6 +1640,7 @@ async function abrirModalImplantacaoCliente(cliente) {
   // Cadastro rápido (criar) só mostra o essencial; campos complementares só
   // aparecem editando um cliente já existente (Editar/Configurar Cliente).
   wrapImplantacaoClienteComplementares.classList.toggle("hidden", !cliente);
+  atualizarCampoImplantado(cliente);
   inputImplantacaoClienteObjetivo.value = cliente ? cliente.objetivo || "" : "";
   inputImplantacaoClienteValor.value = cliente && cliente.valor_contrato ? cliente.valor_contrato : "";
   inputImplantacaoClienteMomento.value = cliente ? cliente.momento || "" : "";
@@ -1333,28 +1696,17 @@ async function abrirModalImplantacaoCliente(cliente) {
 }
 
 el("implantacao-cliente-modal-fechar").addEventListener("click", () => {
-  if (!confirmarDescartarMarcos()) return;
   overlayImplantacaoCliente.classList.add("hidden");
   fichaConfigContexto = null;
 });
 implantacaoClienteSidebarConfig.querySelectorAll(".modal-sidebar-config-item").forEach((btn) => {
   btn.addEventListener("click", () => {
-    // "Marcos" e "Implantação" trocam de painel dentro deste mesmo modal
-    // (funcionam também editando direto pela lista/kanban, sem Ficha);
-    // "Migração" troca de modal via o mecanismo de Configurações da Ficha.
-    if (btn.dataset.aba === "marcos") {
-      const aberto = !implantacaoMarcosSubmenu.classList.contains("hidden");
-      if (aberto) {
-        implantacaoMarcosSubmenu.classList.add("hidden");
-        btn.classList.remove("expandido");
-      } else {
-        const etapa = implantacaoClienteEmEdicao && implantacaoClienteEmEdicao.etapa;
-        mostrarPainelMarco(IMPLANTACAO_MARCOS.includes(etapa) ? etapa : IMPLANTACAO_MARCOS[IMPLANTACAO_MARCOS.length - 1]);
-      }
-    } else if (btn.dataset.aba === "implantacao") {
+    // "Implantação" é este próprio formulário; "Migração" troca de modal via
+    // o mecanismo de Configurações da Ficha. (Marcos saiu do modal — virou a
+    // aba "Marcos" da Ficha.)
+    if (btn.dataset.aba === "implantacao") {
       mostrarFormularioCliente();
     } else {
-      if (!confirmarDescartarMarcos()) return;
       mostrarConfigFichaAba(btn.dataset.aba);
     }
   });
@@ -1362,7 +1714,6 @@ implantacaoClienteSidebarConfig.querySelectorAll(".modal-sidebar-config-item").f
 
 formImplantacaoCliente.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!confirmarDescartarMarcos()) return;
   const payload = {
     idcentral: inputImplantacaoClienteIdcentral.value.trim(),
     cliente: inputImplantacaoClienteNome.value.trim(),
@@ -1380,6 +1731,10 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     decisor_cidade: comboDecisorCidade.valor || comboDecisorCidade.input.value.trim(),
   };
   if (!payload.idcentral) return alert("Informe o IdCentral do cliente.");
+  // Trava o botão enquanto salva — duplo clique mandava dois POSTs e podia
+  // criar o mesmo cliente duas vezes (o backend também barra, com lock).
+  if (btnSalvarImplantacaoCliente.disabled) return;
+  btnSalvarImplantacaoCliente.disabled = true;
   try {
     const url = implantacaoClienteEditandoId
       ? `/api/clientes/${implantacaoClienteEditandoId}`
@@ -1428,6 +1783,8 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     }
   } catch (err) {
     alert(`Erro ao salvar: ${String(err)}`);
+  } finally {
+    btnSalvarImplantacaoCliente.disabled = false;
   }
 });
 
@@ -1435,7 +1792,25 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
 // "concluido" fica de fora — é o estado derivado quando os 5 abaixo estão
 // marcados, calculado no backend (PUT /api/clientes/<id>/marcos).
 const IMPLANTACAO_MARCOS = ["marco-1", "marco-2", "marco-3", "marco-4", "marco-5"];
-const IMPLANTACAO_MARCO_PRAZOS = { "marco-1": 7, "marco-2": 21, "marco-3": 49, "marco-4": 70, "marco-5": 180 };
+const IMPLANTACAO_MARCO_PRAZOS = { "marco-1": 7, "marco-2": 21, "marco-3": 60, "marco-4": 120, "marco-5": 180 };
+// Nome, dono e janela de cada marco (Plano de Sucesso do Cliente — 180 dias).
+// Só usado na tela do cliente (modal de Marcos e Ficha) — o Kanban/dashboard
+// continuam com IMPLANTACAO_ETAPA_LABELS ("Marco 1 (7 dias)").
+const IMPLANTACAO_MARCOS_INFO = {
+  "marco-1": { nome: "Setup e Ativação Rápida", dono: "Implantação", inicio: 1 },
+  "marco-2": { nome: "Quick Win e Primeiro Valor Percebido", dono: "Implantação", inicio: 8 },
+  "marco-3": { nome: "Adoção e Expansão Inicial", dono: "Implantação", inicio: 22 },
+  "marco-4": { nome: "Consolidação e Otimização", dono: "Onboarding", inicio: 61 },
+  "marco-5": { nome: "Maturação e Advocacia", dono: "Onboarding", inicio: 121 },
+};
+// Marco onde ficam as prioridades acordadas com o cliente (mesmo do backend).
+const IMPLANTACAO_MARCO_PRIORIDADES = "marco-2";
+
+function nomeCompletoMarco(marco) {
+  const info = IMPLANTACAO_MARCOS_INFO[marco];
+  if (!info) return IMPLANTACAO_ETAPA_LABELS[marco] || marco;
+  return `${marco.replace("marco-", "Marco ")} · ${info.nome}`;
+}
 
 function marcoAtrasado(dataEntrada, marco, marcosConcluidos) {
   if ((marcosConcluidos || []).includes(marco)) return false;
@@ -1447,23 +1822,25 @@ function marcoAtrasado(dataEntrada, marco, marcosConcluidos) {
 // no backend e injetado no template) + itens extras só deste cliente. O
 // marco conclui sozinho com todos os itens feitos, ou marcado manualmente.
 // Tudo é editado num rascunho em memória e só vai pro servidor no "Salvar
-// marcos" — dá pra passar por vários marcos no submenu e salvar tudo de uma vez.
+// marcos" — dá pra passar por vários marcos na lista e salvar tudo de uma vez.
 const CHECKLIST_MARCOS = window.CHECKLIST_MARCOS_PADRAO || {};
 const implantacaoMarcosSubmenu = el("implantacao-marcos-submenu");
 const implantacaoMarcoPainel = el("implantacao-marco-painel");
 const implantacaoMarcoResumo = el("implantacao-marco-resumo");
 const implantacaoMarcoItens = el("implantacao-marco-itens");
-const formImplantacaoMarcoExtra = el("form-implantacao-marco-extra");
-const inputImplantacaoMarcoExtraTexto = el("implantacao-marco-extra-texto");
 const inputImplantacaoMarcoManual = el("implantacao-marco-manual");
 const btnSalvarImplantacaoMarcos = el("btn-salvar-implantacao-marcos");
+const implantacaoMarcoTitulo = el("implantacao-marco-titulo");
 let marcosRascunho = null;
 let marcosRascunhoAlterado = false;
 let marcoAberto = null;
+// Cliente (registro de Implantação da Ficha) cujos marcos estão na tela.
+let marcosCliente = null;
 
 function iniciarRascunhoMarcos(cliente) {
   marcosRascunhoAlterado = false;
   marcoAberto = null;
+  marcosCliente = cliente;
   if (!cliente) { marcosRascunho = null; return; }
   // Cliente de antes do checklist não tem marcos_concluidos_manual — o
   // progresso antigo (checkbox direto no marco, ou só a etapa da lista
@@ -1485,14 +1862,35 @@ function iniciarRascunhoMarcos(cliente) {
   marcosRascunho = {
     feitos: new Set(cliente.marcos_itens_feitos || []),
     extras,
+    prioridades: (cliente.marcos_prioridades || []).map((p) => ({ ...p, itens: (p.itens || []).map((i) => ({ ...i })) })),
     manual: new Set(manual),
   };
+  // Marco salvo como concluído que não fecharia mais pelo checklist atual
+  // (a lista padrão mudou depois) vira conclusão manual — senão o próximo
+  // "Salvar marcos" reabriria marcos que o cliente já tinha cumprido.
+  const concluidosAgora = marcosConcluidosNoRascunho();
+  (cliente.marcos_concluidos || []).forEach((m) => {
+    if (IMPLANTACAO_MARCOS.includes(m) && !concluidosAgora.includes(m)) marcosRascunho.manual.add(m);
+  });
 }
 
-function itensDoMarco(marco) {
+function novoIdItemMarco() {
+  return `x-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// Padrão + extras do cliente (a lista "Checklist do marco" do painel).
+function itensChecklistDoMarco(marco) {
   const padrao = (CHECKLIST_MARCOS[marco] || []).map((i) => ({ ...i, extra: false }));
   const extras = (marcosRascunho.extras[marco] || []).map((i) => ({ ...i, extra: true }));
   return padrao.concat(extras);
+}
+
+// Tudo que conta pro progresso do marco — no Marco 2 inclui as subtarefas
+// das prioridades.
+function itensDoMarco(marco) {
+  const itens = itensChecklistDoMarco(marco);
+  if (marco !== IMPLANTACAO_MARCO_PRIORIDADES) return itens;
+  return marcosRascunho.prioridades.flatMap((p) => p.itens).concat(itens);
 }
 
 function progressoMarco(marco) {
@@ -1513,41 +1911,74 @@ function dataPrazoMarco(dataEntrada, marco) {
   return new Date(ano, mes - 1, dia + IMPLANTACAO_MARCO_PRAZOS[marco]).toLocaleDateString("pt-BR");
 }
 
-// Chamado antes de qualquer coisa que feche/troque o modal — o rascunho dos
-// marcos só existe em memória.
+// Chamado antes de sair da aba Marcos da Ficha (trocar de aba, Voltar) — o
+// rascunho dos marcos só existe em memória.
 function confirmarDescartarMarcos() {
   if (!marcosRascunhoAlterado) return true;
   if (!confirm("Há alterações nos marcos que ainda não foram salvas. Descartar?")) return false;
-  iniciarRascunhoMarcos(implantacaoClienteEmEdicao);
+  iniciarRascunhoMarcos(marcosCliente);
   return true;
 }
 
 function mostrarFormularioCliente() {
-  marcoAberto = null;
   formImplantacaoCliente.classList.remove("hidden");
-  implantacaoMarcoPainel.classList.add("hidden");
-  implantacaoMarcosSubmenu.classList.add("hidden");
-  implantacaoClienteSidebarConfig.querySelector('[data-aba="marcos"]').classList.remove("ativo", "expandido");
   implantacaoClienteSidebarConfig.querySelector('[data-aba="implantacao"]').classList.toggle("ativo", !!implantacaoClienteEmEdicao);
   implantacaoClienteModalTitulo.textContent = implantacaoClienteEmEdicao ? "Editar cliente" : "Adicionar cliente";
+}
+
+// Aba "Marcos" da Ficha: lista dos 5 marcos à esquerda + checklist do marco
+// escolhido à direita. Os dois blocos são nós fixos do template (movidos pra
+// cá a cada render da aba), então os listeners ligados no carregamento valem.
+function construirFichaMarcos(implantacao, migracao) {
+  const wrap = document.createElement("div");
+  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
+  if (!implantacao) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Esse cliente não tem registro em Implantação.";
+    wrap.appendChild(p);
+    return wrap;
+  }
+  // Recarregar a Ficha depois de salvar volta pro mesmo marco que estava aberto.
+  const manterMarco = marcosCliente && marcosCliente.id === implantacao.id ? marcoAberto : null;
+  iniciarRascunhoMarcos(implantacao);
+
+  const layout = document.createElement("div");
+  layout.className = "ficha-marcos-layout";
+  const painel = document.createElement("div");
+  painel.className = "ficha-painel";
+  painel.appendChild(implantacaoMarcoPainel);
+  layout.appendChild(implantacaoMarcosSubmenu);
+  layout.appendChild(painel);
+  wrap.appendChild(layout);
+
+  const etapa = IMPLANTACAO_MARCOS.includes(implantacao.etapa) ? implantacao.etapa : IMPLANTACAO_MARCOS[IMPLANTACAO_MARCOS.length - 1];
+  mostrarPainelMarco(manterMarco || etapa);
+  return wrap;
 }
 
 function mostrarPainelMarco(marco) {
   if (!marcosRascunho) return;
   marcoAberto = marco;
-  formImplantacaoCliente.classList.add("hidden");
-  implantacaoMarcoPainel.classList.remove("hidden");
-  implantacaoMarcosSubmenu.classList.remove("hidden");
-  implantacaoClienteSidebarConfig.querySelectorAll(".modal-sidebar-config-item").forEach((b) => {
-    b.classList.toggle("ativo", b.dataset.aba === "marcos");
-  });
-  implantacaoClienteSidebarConfig.querySelector('[data-aba="marcos"]').classList.add("expandido");
-  inputImplantacaoMarcoExtraTexto.value = "";
+  marcoAdicionando = null;
   renderizarPainelMarco();
 }
 
+// Quanto falta pro prazo do marco (ou há quanto está atrasado), contando da
+// data de entrada — marco concluído não mostra prazo.
+function textoPrazoMarco(dataEntrada, marco, concluidos) {
+  if (concluidos.includes(marco)) return null;
+  const dias = diasDesdeEntrada(dataEntrada);
+  if (dias === null) return null;
+  const diff = IMPLANTACAO_MARCO_PRAZOS[marco] - dias;
+  const plural = (n) => `${n} dia${n === 1 ? "" : "s"}`;
+  if (diff < 0) return { texto: `Atrasado há ${plural(-diff)}`, classe: "atrasado" };
+  if (diff === 0) return { texto: "Vence hoje", classe: "atrasado" };
+  return { texto: `Faltam ${plural(diff)}`, classe: diff <= 3 ? "perto" : "" };
+}
+
 function renderizarSubmenuMarcos() {
-  const cliente = implantacaoClienteEmEdicao;
+  const cliente = marcosCliente;
   const concluidos = marcosConcluidosNoRascunho();
   implantacaoMarcosSubmenu.innerHTML = "";
   IMPLANTACAO_MARCOS.forEach((marco) => {
@@ -1557,7 +1988,40 @@ function renderizarSubmenuMarcos() {
     btn.classList.toggle("ativo", marco === marcoAberto);
 
     const nome = document.createElement("span");
+    nome.className = "subitem-nome";
     nome.textContent = marco.replace("marco-", "Marco ");
+    const info = IMPLANTACAO_MARCOS_INFO[marco];
+    if (info) {
+      const sub = document.createElement("small");
+      sub.textContent = info.nome;
+      nome.appendChild(sub);
+    }
+    const prazo = textoPrazoMarco(cliente.data_entrada, marco, concluidos);
+    if (prazo) {
+      const linhaPrazo = document.createElement("small");
+      linhaPrazo.className = `subitem-prazo ${prazo.classe}`;
+      linhaPrazo.textContent = prazo.texto;
+      nome.appendChild(linhaPrazo);
+    }
+    // Data de conclusão (só existe pra marcos concluídos depois que ela
+    // passou a ser gravada) + quantos dias após a entrada.
+    // Salvo como concluído mas sem data = concluído antes da data começar a
+    // ser gravada (ou ainda não salvo, no rascunho).
+    const salvoConcluido = (cliente.marcos_concluidos || []).includes(marco);
+    if (concluidos.includes(marco)) {
+      const dataConclusao = (cliente.marcos_concluidos_em || {})[marco];
+      const linhaData = document.createElement("small");
+      linhaData.className = "subitem-prazo concluido-em";
+      if (dataConclusao) {
+        const diasAposEntrada = diasEntre(cliente.data_entrada, dataConclusao);
+        linhaData.textContent = `Concluído em ${formatarDataBRSimples(dataConclusao)}`
+          + (diasAposEntrada !== null ? ` (dia ${diasAposEntrada})` : "");
+      } else {
+        linhaData.classList.add("sem-data");
+        linhaData.textContent = salvoConcluido ? "Concluído · sem data registrada" : "Concluído · salve para registrar a data";
+      }
+      nome.appendChild(linhaData);
+    }
     const status = document.createElement("span");
     status.className = "subitem-status";
     const { feitos, total } = progressoMarco(marco);
@@ -1578,15 +2042,230 @@ function renderizarSubmenuMarcos() {
   });
 }
 
+// Linha de checklist (checkbox + texto); com onRemover, ganha o "×" — o
+// callback só tira o item da lista dele, o resto (feitos/rascunho/render) é aqui.
+function criarLinhaItemMarco(item, onRemover) {
+  const linha = document.createElement("label");
+  linha.className = "marco-linha";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = marcosRascunho.feitos.has(item.id);
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) marcosRascunho.feitos.add(item.id);
+    else marcosRascunho.feitos.delete(item.id);
+    marcosRascunhoAlterado = true;
+    renderizarPainelMarco();
+  });
+
+  const nome = document.createElement("span");
+  nome.textContent = item.texto;
+  if (checkbox.checked) linha.classList.add("feito");
+
+  linha.appendChild(checkbox);
+  linha.appendChild(nome);
+
+  if (onRemover) {
+    const btnRemover = document.createElement("button");
+    btnRemover.type = "button";
+    btnRemover.className = "btn-remover-item-marco";
+    btnRemover.textContent = "×";
+    btnRemover.title = "Remover item";
+    btnRemover.addEventListener("click", (e) => {
+      e.preventDefault();
+      onRemover();
+      marcosRascunho.feitos.delete(item.id);
+      marcosRascunhoAlterado = true;
+      renderizarPainelMarco();
+    });
+    linha.appendChild(btnRemover);
+  }
+  return linha;
+}
+
+// Prioridades da Quick Win (Marco 2): cada cliente tem as dele, combinadas no
+// kick-off (ex.: Videotelemetria, Rede CAN), e cada uma tem subtarefas. O
+// analista adiciona/renomeia/remove livremente — tudo no rascunho, vai pro
+// servidor no "Salvar marcos" junto com o resto.
+function construirPrioridadesMarco() {
+  const wrap = document.createElement("div");
+  wrap.className = "marco-prioridades";
+
+  const titulo = document.createElement("h4");
+  titulo.className = "marco-secao-titulo";
+  titulo.textContent = "Prioridades acordadas com o cliente";
+  wrap.appendChild(titulo);
+
+  if (marcosRascunho.prioridades.length === 0) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhuma prioridade ainda. Adicione as prioridades combinadas no kick-off (ex.: Videotelemetria).";
+    wrap.appendChild(vazio);
+  }
+
+  marcosRascunho.prioridades.forEach((prio) => {
+    const bloco = document.createElement("div");
+    bloco.className = "marco-prioridade";
+
+    const cabecalho = document.createElement("div");
+    cabecalho.className = "marco-prioridade-cabecalho";
+    const nome = document.createElement("strong");
+    nome.textContent = prio.nome;
+    const feitos = prio.itens.filter((i) => marcosRascunho.feitos.has(i.id)).length;
+    const status = document.createElement("span");
+    status.className = "subitem-status";
+    if (prio.itens.length > 0 && feitos === prio.itens.length) {
+      status.textContent = "✓";
+      status.classList.add("concluido");
+    } else {
+      status.textContent = `${feitos}/${prio.itens.length}`;
+    }
+
+    const btnRenomear = document.createElement("button");
+    btnRenomear.type = "button";
+    btnRenomear.className = "btn-remover-item-marco";
+    btnRenomear.textContent = "✎";
+    btnRenomear.title = "Renomear prioridade";
+    btnRenomear.addEventListener("click", () => {
+      const novo = (prompt("Nome da prioridade:", prio.nome) || "").trim();
+      if (!novo || novo === prio.nome) return;
+      prio.nome = novo.slice(0, 100);
+      marcosRascunhoAlterado = true;
+      renderizarPainelMarco();
+    });
+
+    const btnRemover = document.createElement("button");
+    btnRemover.type = "button";
+    btnRemover.className = "btn-remover-item-marco";
+    btnRemover.textContent = "×";
+    btnRemover.title = "Remover prioridade";
+    btnRemover.addEventListener("click", () => {
+      const aviso = prio.itens.length
+        ? `Remover a prioridade "${prio.nome}" e as ${prio.itens.length} subtarefa(s) dela?`
+        : `Remover a prioridade "${prio.nome}"?`;
+      if (!confirm(aviso)) return;
+      prio.itens.forEach((i) => marcosRascunho.feitos.delete(i.id));
+      marcosRascunho.prioridades = marcosRascunho.prioridades.filter((p) => p.id !== prio.id);
+      marcosRascunhoAlterado = true;
+      renderizarPainelMarco();
+    });
+
+    cabecalho.appendChild(nome);
+    cabecalho.appendChild(status);
+    cabecalho.appendChild(btnRenomear);
+    cabecalho.appendChild(btnRemover);
+    bloco.appendChild(cabecalho);
+
+    prio.itens.forEach((item) => {
+      bloco.appendChild(criarLinhaItemMarco(item, () => {
+        prio.itens = prio.itens.filter((i) => i.id !== item.id);
+      }));
+    });
+
+    bloco.appendChild(criarAdicionarInline(`sub:${prio.id}`, "Adicionar subtarefa",
+      "Ex.: apontar câmera, criar regras/templates...", 200, (texto) => {
+        prio.itens.push({ id: novoIdItemMarco(), texto });
+      }));
+
+    wrap.appendChild(bloco);
+  });
+
+  wrap.appendChild(criarAdicionarInline("prioridade", "Adicionar prioridade",
+    "Ex.: Videotelemetria, Rede CAN...", 100, (nome) => {
+      const id = novoIdItemMarco();
+      marcosRascunho.prioridades.push({ id, nome, itens: [] });
+      // Já abre o campo de subtarefa da prioridade recém-criada.
+      return `sub:${id}`;
+    }));
+
+  return wrap;
+}
+
+// "+ Adicionar ..." que vira um campo só quando clicado — deixa o painel
+// limpo. Qual campo está aberto fica em marcoAdicionando (sobrevive aos
+// re-renders do painel, ex.: marcar um checkbox com o campo aberto). Enter
+// adiciona e mantém o campo aberto pra digitar o próximo; Esc/Cancelar fecha.
+// onAdicionar pode devolver a chave de outro campo pra abrir em seguida.
+let marcoAdicionando = null;
+let marcoAdicionandoTexto = "";
+
+function abrirAdicionarInline(chave) {
+  marcoAdicionando = chave;
+  marcoAdicionandoTexto = "";
+  renderizarPainelMarco();
+  const input = implantacaoMarcoItens.querySelector(`input[data-adicionar="${chave}"]`);
+  if (input) input.focus();
+}
+
+function criarAdicionarInline(chave, rotulo, placeholder, maxLength, onAdicionar) {
+  const wrap = document.createElement("div");
+  wrap.className = "marco-adicionar";
+
+  if (marcoAdicionando !== chave) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-adicionar-inline";
+    btn.textContent = `+ ${rotulo}`;
+    btn.addEventListener("click", () => abrirAdicionarInline(chave));
+    wrap.appendChild(btn);
+    return wrap;
+  }
+
+  const form = document.createElement("form");
+  form.className = "marco-extra-form";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = maxLength;
+  input.placeholder = placeholder;
+  input.dataset.adicionar = chave;
+  input.value = marcoAdicionandoTexto;
+  input.addEventListener("input", () => { marcoAdicionandoTexto = input.value; });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      marcoAdicionando = null;
+      renderizarPainelMarco();
+    }
+  });
+  const btnOk = document.createElement("button");
+  btnOk.type = "submit";
+  btnOk.className = "btn-secondary";
+  btnOk.textContent = "Adicionar";
+  const btnCancelar = document.createElement("button");
+  btnCancelar.type = "button";
+  btnCancelar.className = "btn-remover-item-marco";
+  btnCancelar.textContent = "×";
+  btnCancelar.title = "Cancelar";
+  btnCancelar.addEventListener("click", () => {
+    marcoAdicionando = null;
+    renderizarPainelMarco();
+  });
+  form.appendChild(input);
+  form.appendChild(btnOk);
+  form.appendChild(btnCancelar);
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const texto = input.value.trim();
+    if (!texto) return;
+    const proxima = onAdicionar(texto);
+    marcosRascunhoAlterado = true;
+    abrirAdicionarInline(proxima || chave);
+  });
+  wrap.appendChild(form);
+  return wrap;
+}
+
 function renderizarPainelMarco() {
   const marco = marcoAberto;
-  const cliente = implantacaoClienteEmEdicao;
-  const label = IMPLANTACAO_ETAPA_LABELS[marco] || marco;
-  implantacaoClienteModalTitulo.textContent = cliente.cliente ? `${label} — ${cliente.cliente}` : label;
+  const cliente = marcosCliente;
+  implantacaoMarcoTitulo.textContent = nomeCompletoMarco(marco);
 
   const { feitos, total } = progressoMarco(marco);
   const concluidos = marcosConcluidosNoRascunho();
-  const partes = [`${feitos} de ${total} ite${total === 1 ? "m feito" : "ns feitos"}`];
+  const info = IMPLANTACAO_MARCOS_INFO[marco];
+  const partes = [];
+  if (info) partes.push(`${info.dono} · dias ${info.inicio}–${IMPLANTACAO_MARCO_PRAZOS[marco]}`);
+  partes.push(`${feitos} de ${total} ite${total === 1 ? "m feito" : "ns feitos"}`);
   const prazo = dataPrazoMarco(cliente.data_entrada, marco);
   if (prazo) partes.push(`prazo: ${prazo}`);
   implantacaoMarcoResumo.className = "marco-resumo";
@@ -1600,7 +2279,14 @@ function renderizarPainelMarco() {
   implantacaoMarcoResumo.textContent = partes.join(" · ");
 
   implantacaoMarcoItens.innerHTML = "";
-  const itens = itensDoMarco(marco);
+  if (marco === IMPLANTACAO_MARCO_PRIORIDADES) {
+    implantacaoMarcoItens.appendChild(construirPrioridadesMarco());
+    const titulo = document.createElement("h4");
+    titulo.className = "marco-secao-titulo";
+    titulo.textContent = "Checklist do marco";
+    implantacaoMarcoItens.appendChild(titulo);
+  }
+  const itens = itensChecklistDoMarco(marco);
   if (itens.length === 0) {
     const vazio = document.createElement("p");
     vazio.className = "placeholder";
@@ -1608,49 +2294,21 @@ function renderizarPainelMarco() {
     implantacaoMarcoItens.appendChild(vazio);
   }
   itens.forEach((item) => {
-    const linha = document.createElement("label");
-    linha.className = "marco-linha";
-
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = marcosRascunho.feitos.has(item.id);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) marcosRascunho.feitos.add(item.id);
-      else marcosRascunho.feitos.delete(item.id);
-      marcosRascunhoAlterado = true;
-      renderizarPainelMarco();
-    });
-
-    const nome = document.createElement("span");
-    nome.textContent = item.texto;
-    if (checkbox.checked) linha.classList.add("feito");
-
-    linha.appendChild(checkbox);
-    linha.appendChild(nome);
-
+    const linha = criarLinhaItemMarco(item, item.extra ? () => {
+      marcosRascunho.extras[marco] = marcosRascunho.extras[marco].filter((i) => i.id !== item.id);
+    } : null);
     if (item.extra) {
       const tag = document.createElement("span");
       tag.className = "tag-resumo tag-persona";
       tag.textContent = "Só deste cliente";
-      linha.appendChild(tag);
-
-      const btnRemover = document.createElement("button");
-      btnRemover.type = "button";
-      btnRemover.className = "btn-remover-item-marco";
-      btnRemover.textContent = "×";
-      btnRemover.title = "Remover item";
-      btnRemover.addEventListener("click", (e) => {
-        e.preventDefault();
-        marcosRascunho.extras[marco] = marcosRascunho.extras[marco].filter((i) => i.id !== item.id);
-        marcosRascunho.feitos.delete(item.id);
-        marcosRascunhoAlterado = true;
-        renderizarPainelMarco();
-      });
-      linha.appendChild(btnRemover);
+      linha.insertBefore(tag, linha.querySelector(".btn-remover-item-marco"));
     }
-
     implantacaoMarcoItens.appendChild(linha);
   });
+  implantacaoMarcoItens.appendChild(criarAdicionarInline("extra", "Adicionar item só para este cliente",
+    "Descreva o item...", 200, (texto) => {
+      marcosRascunho.extras[marco].push({ id: novoIdItemMarco(), texto });
+    }));
 
   inputImplantacaoMarcoManual.checked = marcosRascunho.manual.has(marco);
   renderizarSubmenuMarcos();
@@ -1664,20 +2322,9 @@ inputImplantacaoMarcoManual.addEventListener("change", () => {
   renderizarPainelMarco();
 });
 
-formImplantacaoMarcoExtra.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const texto = inputImplantacaoMarcoExtraTexto.value.trim();
-  if (!texto || !marcoAberto) return;
-  const id = `x-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  marcosRascunho.extras[marcoAberto].push({ id, texto });
-  marcosRascunhoAlterado = true;
-  inputImplantacaoMarcoExtraTexto.value = "";
-  renderizarPainelMarco();
-  inputImplantacaoMarcoExtraTexto.focus();
-});
 
 btnSalvarImplantacaoMarcos.addEventListener("click", async () => {
-  const cliente = implantacaoClienteEmEdicao;
+  const cliente = marcosCliente;
   if (!cliente || !marcosRascunho) return;
   btnSalvarImplantacaoMarcos.disabled = true;
   try {
@@ -1687,33 +2334,28 @@ btnSalvarImplantacaoMarcos.addEventListener("click", async () => {
       body: JSON.stringify({
         itens_feitos: Array.from(marcosRascunho.feitos),
         itens_extras: marcosRascunho.extras,
+        prioridades: marcosRascunho.prioridades,
         concluidos_manual: Array.from(marcosRascunho.manual),
       }),
     });
     const data = await parseJsonResponse(r);
     if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
 
-    // Continua no mesmo marco (pra seguir marcando outros), com o objeto do
-    // cliente em edição atualizado com o que o servidor gravou.
-    Object.assign(cliente, {
-      etapa: data.etapa,
-      marcos_concluidos: data.marcos_concluidos,
-      marcos_itens_feitos: data.marcos_itens_feitos,
-      marcos_itens_extras: data.marcos_itens_extras,
-      marcos_concluidos_manual: data.marcos_concluidos_manual,
-    });
-    const marco = marcoAberto;
-    iniciarRascunhoMarcos(cliente);
-    mostrarPainelMarco(marco);
+    // Rascunho salvo — sem isso o recarregar da Ficha abaixo pediria pra
+    // "descartar alterações".
+    marcosRascunhoAlterado = false;
+    const passagemAntes = (cliente.marcos_concluidos || []).includes("marco-3");
 
-    // Atualiza o que está por trás do modal (Ficha ou lista/Kanban).
-    const clienteFichaAberta = fichaClienteAtual && fichaClienteAtual.implantacao
-      && fichaClienteAtual.implantacao.id === cliente.id;
-    if (clienteFichaAberta) {
-      await carregarFichaCliente(fichaClienteAtual.implantacao.idcentral);
-    } else {
-      await carregarImplantacaoClientes();
+    // Marco 3 (passagem pro Onboarding) acabou de concluir: só SUGERE ligar
+    // o "Implantado" — a decisão continua sendo da equipe.
+    if (!passagemAntes && data.marcos_concluidos.includes("marco-3") && !cliente.implantado
+        && confirm("Marco 3 concluído. Marcar o cliente como implantado?")) {
+      await salvarImplantadoCliente(cliente, true, false);
     }
+
+    // Recarrega a Ficha (cabeçalho, alertas, etapa) e volta pra aba Marcos,
+    // no mesmo marco que estava aberto (construirFichaMarcos mantém).
+    await carregarFichaCliente(cliente.idcentral, "marcos");
   } catch (err) {
     alert(`Erro ao salvar: ${String(err)}`);
   } finally {
@@ -2047,11 +2689,18 @@ const modalMigracaoEl = el("modal-migracao");
 const migracaoSidebarConfig = el("migracao-sidebar-config");
 const formMigracao = el("form-migracao");
 const migracaoModalTitulo = el("migracao-modal-titulo");
+const wrapMigracaoNome = el("migracao-nome-wrap");
+const inputMigracaoNome = el("migracao-nome");
 const inputMigracaoIdcentral = el("migracao-idcentral");
 const inputMigracaoCs = el("migracao-cs");
 const inputMigracaoEtapa = el("migracao-etapa");
 const inputMigracaoPlataforma = el("migracao-plataforma");
+const inputMigracaoLinkAcessoOrigem = el("migracao-link-acesso-origem");
+const inputMigracaoLoginAcessoOrigem = el("migracao-login-acesso-origem");
+const inputMigracaoSenhaAcessoOrigem = el("migracao-senha-acesso-origem");
 const inputMigracaoLinkPlanilha = el("migracao-link-planilha");
+const btnCriarPlanilhaMigracao = el("btn-criar-planilha-migracao");
+const btnLiberarLinkPlanilha = el("btn-liberar-link-planilha");
 const inputMigracaoQtdClientes = el("migracao-qtd-clientes");
 const inputMigracaoQtdPlacas = el("migracao-qtd-placas");
 const inputMigracaoPercentual = el("migracao-percentual");
@@ -2077,6 +2726,8 @@ let clienteMigracaoAtualId = null;
 let veiculosMigracaoModelosCache = []; // {modelo, porta, comando_template}[] do cliente atual
 let migracaoClientesCache = [];
 let migracaoView = "kanban"; // "kanban" | "lista"
+let migracaoFiltroTexto = "";
+let migracaoFiltroCs = "";
 
 async function carregarClientesMigracao() {
   mostrarPlaceholder("Carregando clientes em migração...");
@@ -2085,13 +2736,44 @@ async function carregarClientesMigracao() {
     const data = await parseJsonResponse(r);
     if (!data.ok) return mostrarErro(data.error || "Falha ao carregar.");
     migracaoClientesCache = data.clientes || [];
-    mostrarTabelaMigracao();
+    await mostrarTabelaMigracao();
   } catch (err) {
     mostrarErro(String(err));
   }
 }
 
 // Monta só o <table> — mesmo padrão de construirTabelaImplantacao.
+// "Excluir" na tela de Migração tem 3 casos, conforme a origem do item (ver
+// GET /api/migracao/clientes):
+// - legado: apaga o doc da coleção solta antiga, igual sempre foi.
+// - unificado + tem_implantacao=false: cliente só existe por causa dessa
+//   migração (criado pelo "+ Adicionar Cliente" sem IdCentral já existente)
+//   — exclui o cliente inteiro.
+// - unificado + tem_implantacao=true: cliente "de verdade" da Implantação
+//   que também tem migração — não dá pra apagar o cliente por aqui, só
+//   cancela a tentativa (mesma ação que a Ficha usa).
+async function excluirClienteMigracao(c) {
+  const unificado = c.origem === "unificado";
+  const apagaClienteTodo = !unificado || c.tem_implantacao === false;
+  const aviso = apagaClienteTodo
+    ? `Excluir o cliente "${c.nome}" e todos os veículos dele? Essa ação não pode ser desfeita.`
+    : `Remover a migração de "${c.nome}"? O cadastro dele na Implantação continua existindo — só a migração é cancelada.`;
+  if (!confirm(aviso)) return;
+  try {
+    const url = !unificado
+      ? `/api/migracao/clientes/${c.id}`
+      : apagaClienteTodo
+        ? `/api/clientes/${c.cliente_id}`
+        : `/api/clientes/${c.cliente_id}/migracoes/${c.migracao_id}/cancelar`;
+    const r = await fetch(url, { method: !unificado || apagaClienteTodo ? "DELETE" : "POST" });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
+    await carregarClientesMigracao();
+  } catch (err) {
+    mostrarErro(String(err));
+  }
+}
+
 function construirTabelaMigracao(clientes) {
   const headers = ["Nome", "Responsável", "Etapa", "Plataforma de origem", "Quantidade de Clientes", "Quantidade de Placas", "Porcentagem da migração", ""];
   const table = document.createElement("table");
@@ -2112,7 +2794,7 @@ function construirTabelaMigracao(clientes) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = headers.length;
-    td.textContent = "Nenhum cliente ainda. Adicione manualmente ou importe veículos com \"Criar planilha\" marcado.";
+    td.textContent = "Nenhum cliente ainda. Clique em \"+ Adicionar Cliente\" pra começar.";
     td.style.color = "#6b7280";
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -2146,17 +2828,9 @@ function construirTabelaMigracao(clientes) {
     btnExcluirCliente.className = "btn-engrenagem btn-excluir";
     btnExcluirCliente.textContent = "🗑";
     btnExcluirCliente.title = "Excluir cliente";
-    btnExcluirCliente.addEventListener("click", async (e) => {
+    btnExcluirCliente.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (!confirm(`Excluir o cliente "${c.nome}" e todos os veículos dele? Essa ação não pode ser desfeita.`)) return;
-      try {
-        const r = await fetch(`/api/migracao/clientes/${c.id}`, { method: "DELETE" });
-        const data = await parseJsonResponse(r);
-        if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
-        await carregarClientesMigracao();
-      } catch (err) {
-        mostrarErro(String(err));
-      }
+      excluirClienteMigracao(c);
     });
     tdAcoes.appendChild(btnExcluirCliente);
 
@@ -2169,10 +2843,17 @@ function construirTabelaMigracao(clientes) {
 }
 
 // Card genérico de Kanban: monta a coluna por etapa e delega o conteúdo de cada
-// card pra quem chama — reaproveitado por Implantação e Migração.
+// card pra quem chama (hoje só a Migração usa — o Kanban de Implantação, com
+// seus 5 marcos fixos, tem sua própria versão em construirKanbanMarcos).
+// Colunas em número fixo (uma por etapa, não rolagem infinita de cards), então
+// usa grid-template-columns com a MESMA contagem de colunas — igual ao
+// .kmarcos-board da Implantação — pra encolher direitinho em telas menores
+// (ex.: sidebar aberta) em vez de manter uma largura mínima grande e forçar
+// scroll horizontal à toa.
 function construirKanban(clientes, etapasOrdem, etapaLabels, campoEtapa, montarConteudoCard, aoClicarCard) {
   const board = document.createElement("div");
   board.className = "kanban-board";
+  board.style.gridTemplateColumns = `repeat(${etapasOrdem.length}, minmax(200px, 1fr))`;
   etapasOrdem.forEach((etapaId) => {
     const doColuna = clientes.filter((c) => (c[campoEtapa] || etapasOrdem[0]) === etapaId);
 
@@ -2218,6 +2899,20 @@ function construirKanban(clientes, etapasOrdem, etapaLabels, campoEtapa, montarC
   return board;
 }
 
+// Linha "rótulo: valor" com o mesmo padrão de hierarquia do card de
+// Implantação (.kmarcos-card-linha strong) — rótulo cinza, valor em negrito
+// escuro — em vez de tudo no mesmo cinza sem destaque.
+function criarMetaKanbanMigracao(prefixo, valorForte, sufixo) {
+  const linha = document.createElement("div");
+  linha.className = "kanban-card-meta";
+  if (prefixo) linha.appendChild(document.createTextNode(prefixo));
+  const forte = document.createElement("strong");
+  forte.textContent = valorForte;
+  linha.appendChild(forte);
+  if (sufixo) linha.appendChild(document.createTextNode(sufixo));
+  return linha;
+}
+
 function montarConteudoCardMigracao(c) {
   const wrap = document.createElement("div");
   wrap.className = "kanban-card-conteudo";
@@ -2227,16 +2922,32 @@ function montarConteudoCardMigracao(c) {
   nome.textContent = c.nome;
   wrap.appendChild(nome);
 
-  const meta = document.createElement("div");
-  meta.className = "kanban-card-meta";
-  meta.textContent = c.cs ? `Responsável: ${c.cs}` : "Sem responsável";
-  wrap.appendChild(meta);
+  // Mesmo ícone/linha do card de Implantação (linhaCardMarcos, já definida
+  // mais acima) — ícone de pessoa pro responsável.
+  wrap.appendChild(linhaCardMarcos("pessoa", c.cs || "Sem responsável"));
 
   if (c.plataforma_origem) {
-    const origem = document.createElement("div");
-    origem.className = "kanban-card-meta";
-    origem.textContent = `Origem: ${c.plataforma_origem}`;
-    wrap.appendChild(origem);
+    wrap.appendChild(criarMetaKanbanMigracao("Origem: ", c.plataforma_origem));
+  }
+
+  // Data + "(Xd)" no mesmo formato da data de entrada do card de Implantação
+  // (ícone de calendário, data em negrito, dias apagado entre parênteses).
+  // Coleção legada (ver GET /api/migracao/clientes) não tem data_inicio —
+  // sem ela não dá pra montar essa linha.
+  const dataInicioBR = formatarDataBRSimples(c.data_inicio);
+  if (dataInicioBR) {
+    const frag = document.createElement("span");
+    const forte = document.createElement("strong");
+    forte.textContent = dataInicioBR;
+    frag.appendChild(forte);
+    const dias = c.data_fim ? diasEntre(c.data_inicio, c.data_fim) : diasDesdeEntrada(c.data_inicio);
+    if (dias !== null) {
+      const d = document.createElement("span");
+      d.className = "kmarcos-card-apagado";
+      d.textContent = ` (${dias}d)`;
+      frag.appendChild(d);
+    }
+    wrap.appendChild(linhaCardMarcos("calendario", frag));
   }
 
   const barraBg = document.createElement("div");
@@ -2251,7 +2962,36 @@ function montarConteudoCardMigracao(c) {
   return wrap;
 }
 
-function mostrarTabelaMigracao() {
+// Barra de estatísticas acima do Kanban — mesmo padrão visual da barra de
+// Implantação (construirBarraStatsMarcos), só que com métricas que existem
+// de fato pros clientes em migração.
+function construirBarraStatsMigracao(clientes) {
+  const barra = document.createElement("div");
+  barra.className = "kmarcos-stats";
+
+  function bloco(rotulo, valor, classe) {
+    const b = document.createElement("div");
+    b.className = `kmarcos-stat${classe ? ` ${classe}` : ""}`;
+    const r = document.createElement("span");
+    r.className = "kmarcos-stat-rotulo";
+    r.textContent = rotulo;
+    const v = document.createElement("span");
+    v.className = "kmarcos-stat-valor";
+    v.textContent = String(valor);
+    b.appendChild(r);
+    b.appendChild(v);
+    barra.appendChild(b);
+  }
+
+  const concluidos = clientes.filter((c) => c.etapa === "concluido").length;
+  bloco("Total", clientes.length, "kmarcos-stat-total");
+  bloco("Concluídos", concluidos, "kmarcos-stat-ok");
+  bloco("Em andamento", clientes.length - concluidos, "kmarcos-stat-total");
+  bloco("Sem responsável", clientes.filter((c) => !c.cs).length, "kmarcos-stat-parado");
+  return barra;
+}
+
+async function mostrarTabelaMigracao() {
   const wrapper = document.createElement("div");
   wrapper.className = "saida-view";
 
@@ -2259,9 +2999,29 @@ function mostrarTabelaMigracao() {
   toolbar.className = "migracao-toolbar saida-view-toolbar";
   const btnAdicionarCliente = document.createElement("button");
   btnAdicionarCliente.className = "btn-primary";
-  btnAdicionarCliente.textContent = "Adicionar Cliente";
-  btnAdicionarCliente.addEventListener("click", adicionarClienteMigracao);
+  btnAdicionarCliente.textContent = "+ Adicionar Cliente";
+  btnAdicionarCliente.addEventListener("click", abrirModalMigracaoNovo);
   toolbar.appendChild(btnAdicionarCliente);
+
+  toolbar.appendChild(criarCampoFiltroLista(migracaoFiltroTexto, (valor) => {
+    migracaoFiltroTexto = valor;
+    atualizarConteudo();
+  }));
+
+  const selectFiltroCs = document.createElement("select");
+  selectFiltroCs.className = "toolbar-filtro-responsavel";
+  const optTodosCs = document.createElement("option");
+  optTodosCs.value = "";
+  optTodosCs.textContent = "Todos os responsáveis";
+  selectFiltroCs.appendChild(optTodosCs);
+  (await buscarUsuariosOpcoes("area_prefix=CS")).forEach((u) => {
+    const opt = document.createElement("option");
+    opt.value = u.nome;
+    opt.textContent = u.nome;
+    selectFiltroCs.appendChild(opt);
+  });
+  selectFiltroCs.value = migracaoFiltroCs;
+  toolbar.appendChild(selectFiltroCs);
 
   const segView = document.createElement("div");
   segView.className = "segmentado";
@@ -2282,16 +3042,27 @@ function mostrarTabelaMigracao() {
   wrapper.appendChild(conteudoContainer);
 
   function clientesFiltrados() {
-    return migracaoClientesCache.slice();
+    const filtro = normalizarBusca(migracaoFiltroTexto);
+    let filtrados = filtro
+      ? migracaoClientesCache.filter((c) => normalizarBusca(`${c.nome || ""} ${c.idcentral || ""}`).includes(filtro))
+      : migracaoClientesCache.slice();
+    if (migracaoFiltroCs) {
+      filtrados = filtrados.filter((c) => c.cs === migracaoFiltroCs);
+    }
+    return filtrados;
   }
 
   function atualizarConteudo() {
     const filtrados = clientesFiltrados();
     conteudoContainer.innerHTML = "";
     if (migracaoView === "kanban") {
-      conteudoContainer.appendChild(
+      const wrapKanban = document.createElement("div");
+      wrapKanban.className = "kmarcos-wrap";
+      wrapKanban.appendChild(construirBarraStatsMigracao(filtrados));
+      wrapKanban.appendChild(
         construirKanban(filtrados, MIGRACAO_ETAPAS_ORDEM, MIGRACAO_ETAPA_LABELS, "etapa", montarConteudoCardMigracao, (c) => abrirClienteOuFicha(c, abrirVeiculosMigracao))
       );
+      conteudoContainer.appendChild(wrapKanban);
     } else {
       conteudoContainer.appendChild(construirTabelaMigracao(filtrados));
     }
@@ -2299,30 +3070,16 @@ function mostrarTabelaMigracao() {
     btnViewLista.classList.toggle("ativo", migracaoView === "lista");
   }
 
+  selectFiltroCs.addEventListener("change", () => {
+    migracaoFiltroCs = selectFiltroCs.value;
+    atualizarConteudo();
+  });
+
   btnViewKanban.addEventListener("click", () => { migracaoView = "kanban"; atualizarConteudo(); });
   btnViewLista.addEventListener("click", () => { migracaoView = "lista"; atualizarConteudo(); });
 
   atualizarConteudo();
   setSaida(wrapper);
-}
-
-async function adicionarClienteMigracao() {
-  const nome = prompt("Nome do novo cliente:");
-  if (!nome || !nome.trim()) return;
-  try {
-    const r = await fetch("/api/migracao/clientes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nome: nome.trim() }),
-    });
-    const data = await parseJsonResponse(r);
-    if (!data.ok) return mostrarErro(data.error || "Falha ao criar cliente.");
-    await carregarClientesMigracao();
-    // Já abre o cliente recém-criado pra preencher CSM/plataforma/modelos na hora.
-    abrirModalMigracao(data.cliente);
-  } catch (err) {
-    mostrarErro(String(err));
-  }
 }
 
 // Caminho base da API dessa janela de configuração — muda conforme a origem:
@@ -2334,6 +3091,30 @@ let migracaoConfigBaseUrl = null;
 // true quando aberta via cliente da lista única (esconde IdCentral/Responsável,
 // que agora vivem no cadastro do cliente, não na tentativa de migração).
 let migracaoConfigModoNovo = false;
+// true só enquanto cria um cliente do zero (botão "+ Adicionar Cliente") —
+// mostra o campo Nome e esconde Modelos de rastreador (só existe depois que o
+// cliente é criado). Ver formMigracao.addEventListener("submit").
+let migracaoConfigModoCriar = false;
+const wrapMigracaoModelos = el("migracao-modelos-bloco");
+
+// Depois que o link da planilha é salvo uma vez, trava o campo (evita trocar
+// ou recriar a planilha sem querer) — só admin vê o botão "Liberar edição",
+// que pede confirmação (overlay-liberar-planilha) antes de destravar.
+// true só entre confirmar "Liberar edição" e a próxima criação/fechamento —
+// é o que diferencia, pro backend, "nunca teve planilha" de "tinha e um admin
+// decidiu substituir de propósito" (ver POST .../criar-planilha, campo
+// "substituir"). Reseta sempre que o estado do campo é recalculado (abrir
+// modal, ou depois de criar uma planilha nova).
+let migracaoPlanilhaSubstituir = false;
+
+function aplicarEstadoLinkPlanilha(linkAtual) {
+  const travado = Boolean(linkAtual);
+  inputMigracaoLinkPlanilha.readOnly = travado;
+  inputMigracaoLinkPlanilha.classList.toggle("input-travado", travado);
+  btnCriarPlanilhaMigracao.classList.toggle("hidden", travado);
+  btnLiberarLinkPlanilha.classList.toggle("hidden", !travado || USUARIO_PERFIL_ATUAL !== "adm");
+  migracaoPlanilhaSubstituir = false;
+}
 
 async function abrirModalMigracao(cliente) {
   // Sidebar de troca Implantação/Migração só aparece quando o modal é aberto
@@ -2341,11 +3122,20 @@ async function abrirModalMigracao(cliente) {
   // entrada (lista de Migração, etc.) começa sempre escondida.
   migracaoSidebarConfig.classList.add("hidden");
   modalMigracaoEl.classList.remove("tem-sidebar-config");
-  migracaoConfigBaseUrl = `/api/migracao/clientes/${cliente.id}`;
+  // "unificado" (ver GET /api/migracao/clientes): nome/idcentral/responsável
+  // já são do cliente (clientes/<id>), não da tentativa — edita só pela
+  // Ficha dele, mesmo tratamento que abrirConfigMigracaoCliente já dá.
+  const unificado = cliente.origem === "unificado";
+  migracaoConfigBaseUrl = unificado
+    ? `/api/clientes/${cliente.cliente_id}/migracoes/${cliente.migracao_id}`
+    : `/api/migracao/clientes/${cliente.id}`;
   migracaoConfigModoNovo = false;
+  migracaoConfigModoCriar = false;
   clienteMigracaoAtualId = cliente.id;
-  el("migracao-idcentral-wrap").classList.remove("hidden");
-  el("migracao-cs-wrap").classList.remove("hidden");
+  wrapMigracaoNome.classList.add("hidden");
+  wrapMigracaoModelos.classList.remove("hidden");
+  el("migracao-idcentral-wrap").classList.toggle("hidden", unificado);
+  el("migracao-cs-wrap").classList.toggle("hidden", unificado);
   migracaoModalTitulo.textContent = cliente.nome;
   inputMigracaoIdcentral.value = cliente.idcentral || "";
   const idcentralTravadoMig = USUARIO_PERFIL_ATUAL !== "adm";
@@ -2354,13 +3144,56 @@ async function abrirModalMigracao(cliente) {
   await popularSelectUsuariosPorArea(inputMigracaoCs, cliente.cs || "", "area_prefix=CS");
   inputMigracaoEtapa.value = cliente.etapa || "analise";
   inputMigracaoPlataforma.value = cliente.plataforma_origem || "";
+  inputMigracaoLinkAcessoOrigem.value = cliente.link_acesso_origem || "";
+  inputMigracaoLoginAcessoOrigem.value = cliente.login_acesso_origem || "";
+  inputMigracaoSenhaAcessoOrigem.value = cliente.senha_acesso_origem || "";
   inputMigracaoLinkPlanilha.value = cliente.link_planilha || "";
   inputMigracaoQtdClientes.value = cliente.qtd_clientes || 0;
   inputMigracaoQtdPlacas.value = cliente.qtd_placas || 0;
   inputMigracaoPercentual.value = cliente.percentual_migracao || 0;
+  aplicarEstadoLinkPlanilha(cliente.link_planilha);
   overlayMigracao.classList.remove("hidden");
   resetFormMigracaoModelo();
   carregarMigracaoModelos();
+}
+
+// Abre o mesmo modal de configuração, mas vazio e em modo criação — troca o
+// prompt() nativo que existia antes por um formulário de verdade, igual ao
+// "+ Adicionar cliente" da Implantação. O cliente só é criado de fato (POST)
+// no submit; até lá nada é gravado.
+async function abrirModalMigracaoNovo() {
+  migracaoSidebarConfig.classList.add("hidden");
+  modalMigracaoEl.classList.remove("tem-sidebar-config");
+  migracaoConfigBaseUrl = null;
+  migracaoConfigModoNovo = false;
+  migracaoConfigModoCriar = true;
+  clienteMigracaoAtualId = null;
+  wrapMigracaoNome.classList.remove("hidden");
+  wrapMigracaoModelos.classList.add("hidden");
+  inputMigracaoNome.value = "";
+  el("migracao-idcentral-wrap").classList.remove("hidden");
+  el("migracao-cs-wrap").classList.remove("hidden");
+  migracaoModalTitulo.textContent = "Adicionar cliente";
+  inputMigracaoIdcentral.value = "";
+  inputMigracaoIdcentral.disabled = false;
+  inputMigracaoIdcentral.title = "";
+  await popularSelectUsuariosPorArea(inputMigracaoCs, "", "area_prefix=CS");
+  inputMigracaoEtapa.value = "analise";
+  inputMigracaoPlataforma.value = "";
+  inputMigracaoLinkAcessoOrigem.value = "";
+  inputMigracaoLoginAcessoOrigem.value = "";
+  inputMigracaoSenhaAcessoOrigem.value = "";
+  inputMigracaoLinkPlanilha.value = "";
+  inputMigracaoQtdClientes.value = 0;
+  inputMigracaoQtdPlacas.value = 0;
+  inputMigracaoPercentual.value = 0;
+  // Só dá pra copiar a planilha-modelo depois que a migração existir de fato
+  // (o endpoint grava o link nela) — esconde até o cliente ser criado, e o
+  // campo começa destravado (nada foi salvo ainda).
+  aplicarEstadoLinkPlanilha("");
+  btnCriarPlanilhaMigracao.classList.add("hidden");
+  overlayMigracao.classList.remove("hidden");
+  inputMigracaoNome.focus();
 }
 
 // Ponto de entrada novo: "Configurações de Migração" de uma tentativa pendurada
@@ -2371,7 +3204,10 @@ function abrirConfigMigracaoCliente(implantacao, migracao) {
   modalMigracaoEl.classList.remove("tem-sidebar-config");
   migracaoConfigBaseUrl = `/api/clientes/${implantacao.id}/migracoes/${migracao.id}`;
   migracaoConfigModoNovo = true;
+  migracaoConfigModoCriar = false;
   clienteMigracaoAtualId = implantacao.id;
+  wrapMigracaoNome.classList.add("hidden");
+  wrapMigracaoModelos.classList.remove("hidden");
   // IdCentral/Responsável agora são do cliente (cadastro em Implantação), não
   // da tentativa — escondidos aqui pra não parecer que dá pra editar por aqui.
   el("migracao-idcentral-wrap").classList.add("hidden");
@@ -2379,10 +3215,14 @@ function abrirConfigMigracaoCliente(implantacao, migracao) {
   migracaoModalTitulo.textContent = `${implantacao.cliente} — Configurações de Migração`;
   inputMigracaoEtapa.value = migracao.etapa || "analise";
   inputMigracaoPlataforma.value = migracao.plataforma_origem || "";
+  inputMigracaoLinkAcessoOrigem.value = migracao.link_acesso_origem || "";
+  inputMigracaoLoginAcessoOrigem.value = migracao.login_acesso_origem || "";
+  inputMigracaoSenhaAcessoOrigem.value = migracao.senha_acesso_origem || "";
   inputMigracaoLinkPlanilha.value = migracao.link_planilha || "";
   inputMigracaoQtdClientes.value = migracao.qtd_clientes || 0;
   inputMigracaoQtdPlacas.value = migracao.qtd_placas || 0;
   inputMigracaoPercentual.value = migracao.percentual_migracao || 0;
+  aplicarEstadoLinkPlanilha(migracao.link_planilha);
   overlayMigracao.classList.remove("hidden");
   resetFormMigracaoModelo();
   carregarMigracaoModelos();
@@ -2395,14 +3235,174 @@ el("migracao-modal-fechar").addEventListener("click", () => {
 migracaoSidebarConfig.querySelectorAll(".modal-sidebar-config-item").forEach((btn) => {
   btn.addEventListener("click", () => mostrarConfigFichaAba(btn.dataset.aba));
 });
+
+// --- Confirmação "Vincular cliente" (checarVinculoMigracao) ---
+// Ao criar um cliente de Migração, o IdCentral pode já pertencer a um cliente
+// de Implantação — nesse caso perguntamos antes de criar qualquer coisa, pra
+// não duplicar cliente (ver formMigracao submit, modo criar). Modal próprio
+// em vez de confirm() nativo, pra não quebrar a identidade visual do app.
+const overlayVincularMigracao = el("overlay-vincular-migracao");
+const textoVincularMigracao = el("vincular-migracao-texto");
+let resolverVinculoMigracao = null;
+function fecharVincularMigracao(vincular) {
+  overlayVincularMigracao.classList.add("hidden");
+  const resolve = resolverVinculoMigracao;
+  resolverVinculoMigracao = null;
+  if (resolve) resolve(vincular);
+}
+function confirmarVincularMigracao(nomeCliente) {
+  textoVincularMigracao.textContent = `Encontramos um cliente${nomeCliente ? ` (${nomeCliente})` : ""} com este IdCentral na Implantação. Deseja vincular esta migração a ele?`;
+  overlayVincularMigracao.classList.remove("hidden");
+  return new Promise((resolve) => { resolverVinculoMigracao = resolve; });
+}
+el("vincular-migracao-fechar").addEventListener("click", () => fecharVincularMigracao(false));
+el("btn-vincular-migracao-sim").addEventListener("click", () => fecharVincularMigracao(true));
+el("btn-vincular-migracao-nao").addEventListener("click", () => fecharVincularMigracao(false));
+
+// Copia a planilha-modelo de cronograma de migração (Drive) e preenche o
+// campo "Link da planilha" com a cópia nova — só disponível depois que a
+// migração já existe (ver toggles de btnCriarPlanilhaMigracao acima).
+btnCriarPlanilhaMigracao.addEventListener("click", async () => {
+  if (!migracaoConfigBaseUrl) return;
+  const textoOriginal = btnCriarPlanilhaMigracao.textContent;
+  btnCriarPlanilhaMigracao.disabled = true;
+  btnCriarPlanilhaMigracao.textContent = "Criando...";
+  try {
+    const r = await fetch(`${migracaoConfigBaseUrl}/criar-planilha`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ substituir: migracaoPlanilhaSubstituir }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      alert(`Erro ao criar planilha: ${data.error || "falha desconhecida"}`);
+      return;
+    }
+    inputMigracaoLinkPlanilha.value = data.link;
+    aplicarEstadoLinkPlanilha(data.link);
+    // O back-end já salvou no Firestore (ver /criar-planilha), mas o cache
+    // local (fichaClienteAtual / migracaoClientesCache) continua com a versão
+    // antiga — sem isso, fechar o modal sem clicar "Salvar" e abrir de novo
+    // mostrava o campo vazio (dado certo no banco, só a tela desatualizada).
+    if (fichaConfigContexto && fichaConfigContexto.implantacao) {
+      await carregarFichaCliente(fichaConfigContexto.implantacao.idcentral);
+      if (fichaClienteAtual && fichaClienteAtual.migracao) {
+        fichaConfigContexto.migracao = fichaClienteAtual.migracao;
+      }
+    } else {
+      await carregarClientesMigracao();
+    }
+  } catch (err) {
+    alert(`Erro ao criar planilha: ${String(err)}`);
+  } finally {
+    btnCriarPlanilhaMigracao.disabled = false;
+    btnCriarPlanilhaMigracao.textContent = textoOriginal;
+  }
+});
+
+// "Liberar edição" (só admin, ver aplicarEstadoLinkPlanilha) — confirma antes
+// de destravar o campo/mostrar "Criar planilha" de novo, pra não substituir a
+// planilha já salva sem querer.
+const overlayLiberarPlanilha = el("overlay-liberar-planilha");
+function fecharLiberarPlanilha() {
+  overlayLiberarPlanilha.classList.add("hidden");
+}
+btnLiberarLinkPlanilha.addEventListener("click", () => overlayLiberarPlanilha.classList.remove("hidden"));
+el("liberar-planilha-fechar").addEventListener("click", fecharLiberarPlanilha);
+el("btn-liberar-planilha-nao").addEventListener("click", fecharLiberarPlanilha);
+el("btn-liberar-planilha-sim").addEventListener("click", () => {
+  fecharLiberarPlanilha();
+  inputMigracaoLinkPlanilha.readOnly = false;
+  inputMigracaoLinkPlanilha.classList.remove("input-travado");
+  btnCriarPlanilhaMigracao.classList.remove("hidden");
+  btnLiberarLinkPlanilha.classList.add("hidden");
+  migracaoPlanilhaSubstituir = true;
+  inputMigracaoLinkPlanilha.focus();
+});
+
 formMigracao.addEventListener("submit", async (e) => {
   e.preventDefault();
+  // IdCentral é obrigatório pra todo cliente de migração — é o que liga esse
+  // cadastro à Ficha do Cliente (Implantação). Só não vale quando o campo nem
+  // aparece (config de uma migração pendurada num cliente que já tem Ficha —
+  // abrirConfigMigracaoCliente esconde o wrap porque aí o IdCentral já vem de
+  // lá, não dessa tela).
+  if (!el("migracao-idcentral-wrap").classList.contains("hidden") && !inputMigracaoIdcentral.value.trim()) {
+    inputMigracaoIdcentral.focus();
+    return;
+  }
+  if (migracaoConfigModoCriar) {
+    const nome = inputMigracaoNome.value.trim();
+    if (!nome) {
+      inputMigracaoNome.focus();
+      return;
+    }
+    const idcentral = inputMigracaoIdcentral.value.trim();
+
+    // Todo cliente de Migração vive no modelo único (clientes + migracoes) —
+    // nunca cria mais na coleção solta antiga. Primeiro checa se o IdCentral
+    // já é de um cliente de Implantação (GET /api/ficha/<idcentral> é o mesmo
+    // lookup que a Ficha usa).
+    let existente = null;
+    try {
+      const rFicha = await fetch(`/api/ficha/${encodeURIComponent(idcentral)}`);
+      const dataFicha = await parseJsonResponse(rFicha);
+      if (dataFicha.ok) existente = dataFicha.implantacao;
+    } catch (err) {
+      return alert(`Erro ao checar IdCentral: ${String(err)}`);
+    }
+
+    if (existente) {
+      const vincular = await confirmarVincularMigracao(existente.cliente || idcentral);
+      if (!vincular) {
+        alert('Cliente não criado — para evitar clientes duplicados, não é possível criar esse cliente com o mesmo IdCentral de um já existente na Implantação.');
+        return;
+      }
+      try {
+        const rIniciar = await fetch(`/api/clientes/${existente.id}/migracoes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const dataIniciar = await parseJsonResponse(rIniciar);
+        if (!dataIniciar.ok) return alert(`Erro ao vincular migração: ${dataIniciar.error || "falha desconhecida"}`);
+        migracaoConfigBaseUrl = `/api/clientes/${existente.id}/migracoes/${dataIniciar.migracao.id}`;
+      } catch (err) {
+        return alert(`Erro ao vincular migração: ${String(err)}`);
+      }
+    } else {
+      try {
+        const rCriar = await fetch("/api/clientes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            idcentral, cliente: nome, csm: inputMigracaoCs.value.trim(), tem_implantacao: false,
+          }),
+        });
+        const dataCriar = await parseJsonResponse(rCriar);
+        if (!dataCriar.ok) return alert(`Erro ao criar cliente: ${dataCriar.error || "falha desconhecida"}`);
+        const rIniciar = await fetch(`/api/clientes/${dataCriar.cliente.id}/migracoes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const dataIniciar = await parseJsonResponse(rIniciar);
+        if (!dataIniciar.ok) return alert(`Erro ao iniciar migração: ${dataIniciar.error || "falha desconhecida"}`);
+        migracaoConfigBaseUrl = `/api/clientes/${dataCriar.cliente.id}/migracoes/${dataIniciar.migracao.id}`;
+      } catch (err) {
+        return alert(`Erro ao criar cliente: ${String(err)}`);
+      }
+    }
+  }
   if (!migracaoConfigBaseUrl) return;
   const payload = {
     idcentral: inputMigracaoIdcentral.value.trim(),
     cs: inputMigracaoCs.value.trim(),
     etapa: inputMigracaoEtapa.value,
     plataforma_origem: inputMigracaoPlataforma.value.trim(),
+    link_acesso_origem: inputMigracaoLinkAcessoOrigem.value.trim(),
+    login_acesso_origem: inputMigracaoLoginAcessoOrigem.value.trim(),
+    senha_acesso_origem: inputMigracaoSenhaAcessoOrigem.value,
     link_planilha: inputMigracaoLinkPlanilha.value.trim(),
     qtd_clientes: inputMigracaoQtdClientes.value,
     qtd_placas: inputMigracaoQtdPlacas.value,
@@ -2418,6 +3418,7 @@ formMigracao.addEventListener("submit", async (e) => {
     if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
     overlayMigracao.classList.add("hidden");
     fichaConfigContexto = null;
+    migracaoConfigModoCriar = false;
     if (migracaoConfigModoNovo) {
       if (fichaClienteAtual && fichaClienteAtual.idcentral) {
         await carregarFichaCliente(fichaClienteAtual.idcentral);
@@ -2588,6 +3589,8 @@ const veiculosMigracaoCorpo = el("veiculos-migracao-corpo");
 const btnEnviarSelecionados = el("veiculos-migracao-enviar-selecionados");
 const btnSelecionarTodosVeiculos = el("veiculos-migracao-selecionar-todos");
 const veiculosMigracaoEnvioStatus = el("veiculos-migracao-envio-status");
+const inputVeiculosMigracaoBusca = el("veiculos-migracao-busca");
+const chipsVeiculosMigracaoStatus = el("veiculos-migracao-chips-status");
 
 const STATUS_VEICULO_OPCOES = ["Aguardando", "Enviar", "Enviado", "Migrado", "Cancelado"];
 const STATUS_VEICULO_CLASSE = {
@@ -2605,6 +3608,8 @@ const STATUS_VEICULO_CLASSE = {
 let veiculosMigracaoBaseUrl = null;
 let veiculosMigracaoClienteIdAtual = null; // só de referência/depuração; não usado em nenhuma URL
 let veiculosMigracaoDadosAtuais = [];
+let veiculosMigracaoFiltroTexto = "";
+let veiculosMigracaoFiltroStatus = ""; // "" = todos
 
 el("veiculos-migracao-fechar").addEventListener("click", () => overlayVeiculosMigracao.classList.add("hidden"));
 async function carregarModelosCacheParaVeiculos(baseUrl) {
@@ -2624,13 +3629,23 @@ async function abrirVeiculosPorBaseUrl(baseUrl, clienteId, titulo) {
   veiculosMigracaoCorpo.innerHTML = '<p class="placeholder">Carregando...</p>';
   veiculosMigracaoEnvioStatus.textContent = "";
   btnSelecionarTodosVeiculos.textContent = "Selecionar todos";
+  veiculosMigracaoFiltroTexto = "";
+  veiculosMigracaoFiltroStatus = "";
+  inputVeiculosMigracaoBusca.value = "";
   overlayVeiculosMigracao.classList.remove("hidden");
   await carregarModelosCacheParaVeiculos(baseUrl);
   await recarregarVeiculosMigracao(true);
 }
 
-// Ponto de entrada de hoje: tela solta de Migração (coleção antiga migracao_clientes).
+// Ponto de entrada da tela de Migração — roteia pro container certo conforme
+// a origem do item (ver GET /api/migracao/clientes): "legado" ainda mora na
+// coleção solta antiga, "unificado" é uma tentativa pendurada num cliente de
+// verdade (mesmo container que abrirVeiculosCliente já usa).
 async function abrirVeiculosMigracao(cliente) {
+  if (cliente.origem === "unificado") {
+    await abrirVeiculosCliente(cliente.cliente_id, cliente.migracao_id, cliente.nome);
+    return;
+  }
   await abrirVeiculosPorBaseUrl(`/api/migracao/clientes/${cliente.id}`, cliente.id, cliente.nome);
 }
 
@@ -2955,6 +3970,8 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
       if (ok) {
         tr.className = STATUS_VEICULO_CLASSE[novoStatus] || "";
         atualizarContadoresClientes();
+        renderChipsStatusVeiculos();
+        aplicarFiltrosVeiculos();
       }
     });
     tdStatus.appendChild(selectStatus);
@@ -3076,7 +4093,61 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   veiculosMigracaoCorpo.appendChild(table);
   tornarColunasRedimensionaveis(table, "larguraColunas_veiculosMigracao");
   atualizarContadoresClientes();
+  renderChipsStatusVeiculos();
+  aplicarFiltrosVeiculos();
 }
+
+// --- Busca + filtro por status (ver STATUS_VEICULO_OPCOES) — a tabela pode
+// chegar com dezenas de linhas de uma importação da planilha, então precisa
+// de um jeito de achar/isolar veículos sem rolar tudo. Filtra escondendo
+// linhas (.hidden), não reconstruindo a tabela — preserva os listeners de
+// autosave de cada célula já montados.
+function renderChipsStatusVeiculos() {
+  chipsVeiculosMigracaoStatus.innerHTML = "";
+  const contagem = {};
+  STATUS_VEICULO_OPCOES.forEach((s) => { contagem[s] = 0; });
+  veiculosMigracaoDadosAtuais.forEach((v) => {
+    const s = v.status || "Aguardando";
+    if (s in contagem) contagem[s] += 1;
+  });
+  const opcoes = [["", "Todos", veiculosMigracaoDadosAtuais.length], ...STATUS_VEICULO_OPCOES.map((s) => [s, s, contagem[s]])];
+  opcoes.forEach(([valor, rotulo, qtd]) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "veiculo-chip-status";
+    if (valor) chip.classList.add(`chip-${valor.toLowerCase()}`);
+    if (veiculosMigracaoFiltroStatus === valor) chip.classList.add("ativo");
+    chip.textContent = `${rotulo} (${qtd})`;
+    chip.addEventListener("click", () => {
+      veiculosMigracaoFiltroStatus = veiculosMigracaoFiltroStatus === valor ? "" : valor;
+      renderChipsStatusVeiculos();
+      aplicarFiltrosVeiculos();
+    });
+    chipsVeiculosMigracaoStatus.appendChild(chip);
+  });
+}
+
+function aplicarFiltrosVeiculos() {
+  const filtro = normalizarBusca(veiculosMigracaoFiltroTexto);
+  veiculosMigracaoCorpo.querySelectorAll("tbody tr").forEach((tr) => {
+    const statusAtual = tr.querySelector(".veiculo-status-select")?.value || "";
+    const bateStatus = !veiculosMigracaoFiltroStatus || statusAtual === veiculosMigracaoFiltroStatus;
+    let bateTexto = true;
+    if (filtro) {
+      const partes = ["cliente", "veiculo", "equipamento"].map((campo) => {
+        const input = tr.querySelector(`[data-campo="${campo}"]`);
+        return input ? input.value : "";
+      });
+      bateTexto = normalizarBusca(partes.join(" ")).includes(filtro);
+    }
+    tr.classList.toggle("hidden", !(bateStatus && bateTexto));
+  });
+}
+
+inputVeiculosMigracaoBusca.addEventListener("input", () => {
+  veiculosMigracaoFiltroTexto = inputVeiculosMigracaoBusca.value;
+  aplicarFiltrosVeiculos();
+});
 
 btnSelecionarTodosVeiculos.addEventListener("click", () => {
   const checkboxes = Array.from(veiculosMigracaoCorpo.querySelectorAll(".veiculo-checkbox"));
@@ -3171,18 +4242,6 @@ async function abrirModalImport(tipo, idcentral) {
   btnIniciarImport.disabled = true;
   btnIniciarImport.textContent = "Iniciar Importação";
 
-  if (tipo === "veiculo") {
-    blocoCriarPlanilha.classList.remove("hidden");
-    chkCriarPlanilha.checked = false;
-    inputNomePlanilha.value = estado.credencialAtualNome || "";
-    inputNomePlanilha.classList.add("hidden");
-    selectClientePlanilhaExistente.value = "";
-    carregarClientesExistentesPlanilha();
-  } else {
-    blocoCriarPlanilha.classList.add("hidden");
-    chkCriarPlanilha.checked = false;
-  }
-
   const r = await fetch(`/api/import/params/${tipo}`);
   const data = await parseJsonResponse(r);
   if (!data.ok) return mostrarErro(data.error || "Tipo desconhecido.");
@@ -3192,34 +4251,6 @@ async function abrirModalImport(tipo, idcentral) {
   renderMapaCampos();
   overlay.classList.remove("hidden");
 }
-
-async function carregarClientesExistentesPlanilha() {
-  selectClientePlanilhaExistente.innerHTML = '<option value="">Cliente existente...</option>';
-  try {
-    const r = await fetch("/api/migracao/clientes");
-    const data = await parseJsonResponse(r);
-    if (!data.ok) return;
-    data.clientes.forEach((c) => {
-      const opt = document.createElement("option");
-      opt.value = c.nome;
-      opt.textContent = c.nome;
-      selectClientePlanilhaExistente.appendChild(opt);
-    });
-  } catch (err) {
-    // silencioso: a lista é só uma conveniência, não bloqueia a importação
-  }
-}
-
-chkCriarPlanilha.addEventListener("change", () => {
-  inputNomePlanilha.classList.toggle("hidden", !chkCriarPlanilha.checked);
-});
-
-selectClientePlanilhaExistente.addEventListener("change", () => {
-  if (!selectClientePlanilhaExistente.value) return;
-  chkCriarPlanilha.checked = true;
-  inputNomePlanilha.value = selectClientePlanilhaExistente.value;
-  inputNomePlanilha.classList.remove("hidden");
-});
 
 function renderMapaCampos() {
   mapaCampos.innerHTML = "";
@@ -3317,13 +4348,6 @@ function iniciarPollingImport(jobId, logContainer) {
         div.textContent = `Concluído! Sucessos: ${job.sucessos} | Erros: ${job.erros}`;
         logContainer.appendChild(div);
 
-        if (job.planilha) {
-          const divPlanilha = document.createElement("div");
-          divPlanilha.className = "resumo-final";
-          divPlanilha.textContent = `Cliente "${job.planilha.nome}" atualizado em Clientes em migração: ${job.planilha.qtd_clientes} clientes, ${job.planilha.qtd_placas} placas.`;
-          logContainer.appendChild(divPlanilha);
-        }
-
         // Fica aberto mostrando o resultado — fecha só quando clicar em "Fechar".
         progressoStatus.textContent = `Concluído! Sucessos: ${job.sucessos} | Erros: ${job.erros}`;
         btnIniciarImport.disabled = true;
@@ -3345,12 +4369,6 @@ btnIniciarImport.addEventListener("click", async () => {
   });
   if (Object.keys(mapping).length === 0) {
     return mostrarErro("Mapeie ao menos uma coluna antes de iniciar.");
-  }
-
-  const criarPlanilha = estado.importTipo === "veiculo" && chkCriarPlanilha.checked;
-  const nomeClientePlanilha = inputNomePlanilha.value.trim();
-  if (criarPlanilha && !nomeClientePlanilha) {
-    return mostrarErro("Informe o nome do cliente para criar a planilha em Clientes em migração.");
   }
 
   btnIniciarImport.disabled = true;
@@ -3376,8 +4394,6 @@ btnIniciarImport.addEventListener("click", async () => {
         idcentral: estado.importIdcentral,
         file_id: estado.fileId,
         mapping,
-        criar_planilha: criarPlanilha,
-        nome_cliente_planilha: nomeClientePlanilha,
       }),
     });
     const data = await parseJsonResponse(resp);
@@ -4943,12 +5959,24 @@ let editandoUsuarioId = null;
 
 const TIPO_ACESSO_LABELS = { adm: "Administrador", analista: "Analista", visualizacao: "Visualização" };
 
+// Erro dentro do próprio modal — mostrarErro() escreve na área principal, que
+// fica atrás do overlay, e a falha passava despercebida ("não faz nada").
+const usuariosErro = el("usuarios-erro");
+function mostrarErroUsuarios(msg) {
+  usuariosErro.textContent = msg ? "Erro: " + msg : "";
+  usuariosErro.classList.toggle("hidden", !msg);
+}
+
 async function carregarAppUsuarios() {
-  const r = await fetch("/api/app-usuarios");
-  const data = await parseJsonResponse(r);
-  if (!data.ok) return mostrarErro(data.error || "Falha ao carregar usuários.");
-  usuariosCache = data.usuarios || [];
-  renderListaUsuarios();
+  try {
+    const r = await fetch("/api/app-usuarios");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroUsuarios(data.error || "Falha ao carregar usuários.");
+    usuariosCache = data.usuarios || [];
+    renderListaUsuarios();
+  } catch (err) {
+    mostrarErroUsuarios(String(err));
+  }
 }
 
 function renderListaUsuarios() {
@@ -4970,12 +5998,14 @@ function renderListaUsuarios() {
   const tbody = document.createElement("tbody");
   usuariosCache
     .slice()
-    .sort((a, b) => a.usuario.localeCompare(b.usuario, "pt-BR"))
+    // Doc sem "usuario" (ex.: criado à mão no console do Firestore) quebrava
+    // o sort e a lista inteira não aparecia.
+    .sort((a, b) => String(a.usuario || "").localeCompare(String(b.usuario || ""), "pt-BR"))
     .forEach((u) => {
       const tr = document.createElement("tr");
 
       const tdNome = document.createElement("td");
-      tdNome.textContent = u.usuario;
+      tdNome.textContent = u.usuario || "(sem nome)";
 
       const tdTipoAcesso = document.createElement("td");
       tdTipoAcesso.textContent = TIPO_ACESSO_LABELS[u.perfil] || u.perfil;
@@ -5031,6 +6061,14 @@ function abrirEdicaoUsuario(u) {
   inputUsuarioSenha.placeholder = "Senha (deixe em branco pra manter)";
   inputUsuarioSenha.required = false;
   inputUsuarioTipoAcesso.value = u.perfil || "analista";
+  // Área antiga fora da lista atual (ex.: "CS") não tem <option> — sem isso
+  // o select caía em "Sem área definida" e salvar apagava a área do usuário.
+  inputUsuarioArea.querySelectorAll("option[data-legado]").forEach((o) => o.remove());
+  if (u.area && ![...inputUsuarioArea.options].some((o) => o.value === u.area)) {
+    const opt = new Option(`${u.area} (antiga)`, u.area);
+    opt.dataset.legado = "1";
+    inputUsuarioArea.add(opt);
+  }
   inputUsuarioArea.value = u.area || "";
   inputUsuarioResponsavel.value = u.nome_responsavel || "";
   editandoUsuarioId = u.id;
@@ -5062,20 +6100,26 @@ formNovoUsuario.addEventListener("submit", async (e) => {
       body: JSON.stringify(payload),
     });
     const data = await parseJsonResponse(r);
-    if (!data.ok) return mostrarErro(data.error || "Falha ao salvar usuário.");
+    if (!data.ok) return mostrarErroUsuarios(data.error || "Falha ao salvar usuário.");
+    mostrarErroUsuarios("");
     resetFormUsuario();
     await carregarAppUsuarios();
   } catch (err) {
-    mostrarErro(String(err));
+    mostrarErroUsuarios(String(err));
   }
 });
 
 async function excluirAppUsuario(id) {
   if (!confirm("Excluir este usuário?")) return;
-  const r = await fetch(`/api/app-usuarios/${id}`, { method: "DELETE" });
-  const data = await parseJsonResponse(r);
-  if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
-  await carregarAppUsuarios();
+  try {
+    const r = await fetch(`/api/app-usuarios/${id}`, { method: "DELETE" });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroUsuarios(data.error || "Falha ao excluir.");
+    mostrarErroUsuarios("");
+    await carregarAppUsuarios();
+  } catch (err) {
+    mostrarErroUsuarios(String(err));
+  }
 }
 
 // --- MENU DA ENGRENAGEM (perfil / usuários) ---
@@ -5096,6 +6140,7 @@ if (btnGerenciarUsuarios) {
   btnGerenciarUsuarios.addEventListener("click", () => {
     appMenuDropdown.classList.add("hidden");
     resetFormUsuario();
+    mostrarErroUsuarios("");
     overlayUsuarios.classList.remove("hidden");
     carregarAppUsuarios();
   });
@@ -5577,6 +6622,8 @@ const sidebarToggle = el("sidebar-toggle");
 function aplicarEstadoSidebar(recolhida) {
   sidebarEl.classList.toggle("recolhida", recolhida);
   sidebarToggle.title = recolhida ? "Expandir menu" : "Recolher menu";
+  sidebarToggle.setAttribute("aria-label", sidebarToggle.title);
+  sidebarToggle.setAttribute("aria-expanded", String(!recolhida));
 }
 
 aplicarEstadoSidebar(localStorage.getItem("sidebar_state") === "collapsed");
@@ -5685,6 +6732,202 @@ function limparAuthSeSaiuDaTela(estavaLa, continuaLa, endpoint, idcentralParaCon
   }
 }
 
+// Liga o layout compacto de Implantação/Migração (ver .tela-lista-compacta no
+// CSS) — menos moldura em volta da lista/kanban = mais cards visíveis.
+function marcarTelaListaCompacta(naListaCompacta) {
+  document.body.classList.toggle("tela-lista-compacta", naListaCompacta);
+}
+
+// Minúsculo e sem acento — "sao joao" acha "São João".
+function normalizarBusca(texto) {
+  return String(texto || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+}
+
+// Campo "Filtrar clientes…" das barras de Implantação/Migração: só filtra a
+// lista da tela atual. Ícone de funil de propósito, pra não parecer a busca
+// da topbar (que é "ir para o cliente").
+function criarCampoFiltroLista(valorInicial, aoMudar) {
+  const wrap = document.createElement("label");
+  wrap.className = "filtro-lista";
+  wrap.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>';
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "Filtrar clientes…";
+  input.value = valorInicial || "";
+  input.addEventListener("input", () => aoMudar(input.value));
+  wrap.appendChild(input);
+  return wrap;
+}
+
+// --- BUSCA GLOBAL DA TOPBAR: "ir para o cliente" ---
+// Em qualquer tela: digita, aparece uma lista de clientes, Enter/clique abre a
+// Ficha (ou a linha do tempo, se o cliente não tem IdCentral). Nunca filtra a
+// página. A lista de clientes é carregada UMA vez, no primeiro foco (ou
+// reaproveitada da tela de Implantação), pra não gastar leitura a cada letra.
+const topbarBuscaInput = el("topbar-busca-input");
+const topbarBuscaResultados = el("topbar-busca-resultados");
+let buscaGlobalClientes = null; // null = ainda não carregou
+let buscaGlobalCarregando = null;
+let buscaGlobalItens = [];
+let buscaGlobalIndice = -1;
+
+async function garantirClientesBuscaGlobal() {
+  if (buscaGlobalClientes) return buscaGlobalClientes;
+  if (implantacaoClientesCache.length) {
+    buscaGlobalClientes = implantacaoClientesCache;
+    return buscaGlobalClientes;
+  }
+  if (!buscaGlobalCarregando) {
+    buscaGlobalCarregando = fetch("/api/clientes")
+      .then(parseJsonResponse)
+      .then((data) => { buscaGlobalClientes = data.ok ? (data.clientes || []) : []; return buscaGlobalClientes; })
+      .catch(() => [])
+      .finally(() => { buscaGlobalCarregando = null; });
+  }
+  return buscaGlobalCarregando;
+}
+
+function fecharBuscaGlobal() {
+  topbarBuscaResultados.classList.add("hidden");
+  topbarBuscaResultados.innerHTML = "";
+  buscaGlobalItens = [];
+  buscaGlobalIndice = -1;
+}
+
+function abrirResultadoBuscaGlobal(c) {
+  topbarBuscaInput.value = "";
+  topbarBuscaInput.blur();
+  fecharBuscaGlobal();
+  abrirClienteOuFicha(c, abrirTimelineImplantacao);
+}
+
+function destacarResultadoBuscaGlobal(indice) {
+  buscaGlobalIndice = indice;
+  topbarBuscaResultados.querySelectorAll(".busca-global-item").forEach((item, i) => {
+    item.classList.toggle("ativo", i === indice);
+    if (i === indice) item.scrollIntoView({ block: "nearest" });
+  });
+}
+
+async function renderizarBuscaGlobal() {
+  const termo = normalizarBusca(topbarBuscaInput.value);
+  if (!termo) return fecharBuscaGlobal();
+  topbarBuscaResultados.classList.remove("hidden");
+  if (!buscaGlobalClientes) {
+    topbarBuscaResultados.innerHTML = '<div class="busca-global-vazio">Carregando clientes…</div>';
+  }
+  const clientes = await garantirClientesBuscaGlobal();
+  // O usuário pode ter apagado o texto enquanto carregava.
+  if (normalizarBusca(topbarBuscaInput.value) !== termo) return;
+
+  // Nome que começa com o termo vem antes de nome que só contém.
+  buscaGlobalItens = clientes
+    .map((c) => {
+      const nome = normalizarBusca(c.cliente);
+      const id = normalizarBusca(c.idcentral);
+      const rank = nome.startsWith(termo) || id === termo ? 0 : (nome.includes(termo) || id.includes(termo) ? 1 : -1);
+      return { c, rank };
+    })
+    .filter((x) => x.rank >= 0)
+    .sort((a, b) => a.rank - b.rank || (a.c.cliente || "").localeCompare(b.c.cliente || "", "pt-BR"))
+    .slice(0, 8)
+    .map((x) => x.c);
+
+  topbarBuscaResultados.innerHTML = "";
+  if (buscaGlobalItens.length === 0) {
+    topbarBuscaResultados.innerHTML = '<div class="busca-global-vazio">Nenhum cliente encontrado.</div>';
+    buscaGlobalIndice = -1;
+    return;
+  }
+  buscaGlobalItens.forEach((c, i) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "busca-global-item";
+    const nome = document.createElement("span");
+    nome.className = "busca-global-nome";
+    nome.textContent = c.cliente || "(sem nome)";
+    const meta = document.createElement("span");
+    meta.className = "busca-global-meta";
+    const etapa = c.etapa === "concluido" ? "Implantado" : nomeCurtoEtapaImplantacao(c.etapa || "marco-1");
+    meta.textContent = [c.idcentral ? `ID ${c.idcentral}` : "sem IdCentral", etapa].join(" · ");
+    item.appendChild(nome);
+    item.appendChild(meta);
+    // mousedown (não click): dispara antes do blur do input fechar a lista.
+    item.addEventListener("mousedown", (e) => { e.preventDefault(); abrirResultadoBuscaGlobal(c); });
+    item.addEventListener("mouseenter", () => destacarResultadoBuscaGlobal(i));
+    topbarBuscaResultados.appendChild(item);
+  });
+  destacarResultadoBuscaGlobal(0);
+}
+
+topbarBuscaInput.addEventListener("focus", () => {
+  garantirClientesBuscaGlobal();
+  if (topbarBuscaInput.value.trim()) renderizarBuscaGlobal();
+});
+topbarBuscaInput.addEventListener("input", renderizarBuscaGlobal);
+topbarBuscaInput.addEventListener("blur", fecharBuscaGlobal);
+topbarBuscaInput.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" && buscaGlobalItens.length) {
+    e.preventDefault();
+    destacarResultadoBuscaGlobal((buscaGlobalIndice + 1) % buscaGlobalItens.length);
+  } else if (e.key === "ArrowUp" && buscaGlobalItens.length) {
+    e.preventDefault();
+    destacarResultadoBuscaGlobal((buscaGlobalIndice - 1 + buscaGlobalItens.length) % buscaGlobalItens.length);
+  } else if (e.key === "Enter" && buscaGlobalItens[buscaGlobalIndice]) {
+    e.preventDefault();
+    abrirResultadoBuscaGlobal(buscaGlobalItens[buscaGlobalIndice]);
+  } else if (e.key === "Escape") {
+    topbarBuscaInput.value = "";
+    topbarBuscaInput.blur();
+  }
+});
+// Ctrl+K (ou Cmd+K) de qualquer lugar foca a busca.
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    topbarBuscaInput.focus();
+    topbarBuscaInput.select();
+  }
+});
+
+// Título da página fica na topbar (não repetido dentro do painel — os <h2>
+// das telas são escondidos via CSS). Subtelas de Ferramentas viram trilha:
+// "Ferramentas Auxiliares › Envio de Comandos", com o primeiro nível clicável.
+const topbarTitulo = el("topbar-titulo");
+const TITULO_TOPBAR_POR_TELA = {
+  dashboard: "Dashboard",
+  implantacao: "Controle de Implantação",
+  migracao: "Controle de Migração",
+  ferramentas: "Ferramentas Auxiliares",
+  ficha: "Ficha do cliente",
+  "minha-conta": "Minha conta",
+};
+const TITULO_TOPBAR_POR_SUB = {
+  "importacao-consulta": "Área de Importação e Consulta",
+  comandos: "Envio de Comandos",
+  "sync-planilha": "Sincronizar Planilha",
+};
+
+function atualizarTituloTopbar(tela, sub) {
+  topbarTitulo.innerHTML = "";
+  const principal = TITULO_TOPBAR_POR_TELA[tela] || "";
+  if (tela === "ferramentas" && TITULO_TOPBAR_POR_SUB[sub]) {
+    const pai = document.createElement("button");
+    pai.type = "button";
+    pai.className = "topbar-titulo-pai";
+    pai.textContent = principal;
+    pai.addEventListener("click", () => irParaTela("ferramentas"));
+    const sep = document.createElement("span");
+    sep.className = "topbar-titulo-sep";
+    sep.textContent = "›";
+    topbarTitulo.appendChild(pai);
+    topbarTitulo.appendChild(sep);
+    topbarTitulo.appendChild(document.createTextNode(TITULO_TOPBAR_POR_SUB[sub]));
+  } else {
+    topbarTitulo.textContent = principal;
+  }
+}
+
 function irParaTela(tela, opcoes) {
   opcoes = opcoes || {};
 
@@ -5745,6 +6988,8 @@ function irParaTela(tela, opcoes) {
       history.pushState({ tela, idcentral: opcoes.idcentral, sub: novoSub, origem: naFicha ? fichaOrigem : undefined }, "", caminho);
     }
   }
+  marcarTelaListaCompacta(tela === "implantacao" || tela === "migracao");
+  atualizarTituloTopbar(tela, novoSub);
   if (tela === "implantacao") { atualizarSaidaHeader("Controle de Implantação", false); carregarImplantacaoClientes(); }
   if (tela === "migracao") { atualizarSaidaHeader("Controle de Migração", false); carregarClientesMigracao(); }
   if (tela === "dashboard") carregarDashboardNovo();
@@ -5759,7 +7004,12 @@ function irParaFicha(idcentral) {
   irParaTela("ficha", { idcentral, origem });
 }
 
-el("sidebar-logo").addEventListener("click", () => irParaTela("dashboard"));
+// Na Ficha, o logo é a saída (não há mais botão "Voltar") — então também
+// protege o checklist de marcos não salvo.
+el("sidebar-logo").addEventListener("click", () => {
+  if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
+  irParaTela("dashboard");
+});
 NAV_BOTOES.dashboard.addEventListener("click", () => irParaTela("dashboard"));
 NAV_BOTOES.implantacao.addEventListener("click", () => irParaTela("implantacao"));
 NAV_BOTOES.migracao.addEventListener("click", () => irParaTela("migracao"));
@@ -5916,12 +7166,18 @@ window.addEventListener("popstate", (e) => {
   irParaTela(resolvido.tela, { semHistorico: true, idcentral: resolvido.idcentral, sub: resolvido.sub });
 });
 
-el("ficha-voltar").addEventListener("click", () => irParaTela(fichaOrigem));
-el("ficha-aba-geral").addEventListener("click", () => mostrarFichaAba("geral"));
-el("ficha-aba-implantacao").addEventListener("click", () => mostrarFichaAba("implantacao"));
-el("ficha-aba-migracao").addEventListener("click", () => mostrarFichaAba("migracao"));
-el("ficha-aba-consulta").addEventListener("click", () => mostrarFichaAba("consulta"));
-el("ficha-aba-importacao").addEventListener("click", () => mostrarFichaAba("importacao"));
+// Sair da aba Marcos com checklist alterado e não salvo pede confirmação.
+function podeSairDaAbaMarcos() {
+  return fichaAbaAtual !== "marcos" || confirmarDescartarMarcos();
+}
+["geral", "implantacao", "marcos", "migracao", "consulta", "importacao"].forEach((aba) => {
+  el(`ficha-aba-${aba}`).addEventListener("click", () => {
+    // Clicar de novo em "Marcos" re-renderizaria a aba e perderia o rascunho.
+    if (aba === fichaAbaAtual && aba === "marcos") return;
+    if (aba !== fichaAbaAtual && !podeSairDaAbaMarcos()) return;
+    mostrarFichaAba(aba);
+  });
+});
 
 el("card-ir-implantacao").addEventListener("click", () => irParaTela("implantacao"));
 el("card-ir-migracao").addEventListener("click", () => irParaTela("migracao"));
@@ -5939,10 +7195,14 @@ async function carregarDashboardNovo() {
     const rClientes = await fetch("/api/clientes");
     const dataClientes = await parseJsonResponse(rClientes);
     const clientes = dataClientes.ok ? (dataClientes.clientes || []) : [];
+    // Reaproveita na busca global da topbar (sem ler de novo).
+    if (dataClientes.ok) buscaGlobalClientes = clientes;
 
     const insights = el("dashboard-insights");
     insights.innerHTML = "";
     insights.appendChild(renderDashboardAtrasados(clientes));
+    insights.appendChild(renderDashboardParados(clientes));
+    insights.appendChild(renderDashboardTempoMarcos(clientes));
     insights.appendChild(renderDashboardFunil(clientes));
     insights.appendChild(renderDashboardFlags(clientes));
     insights.appendChild(renderDashboardVeiculosStatus(data));
@@ -5959,6 +7219,121 @@ function clientesComMarcoAtrasado(clientes) {
     .filter((c) => c.etapa !== "concluido" && marcoAtrasado(c.data_entrada, c.etapa, c.marcos_concluidos))
     .map((c) => ({ ...c, diasAtraso: (diasDesdeEntrada(c.data_entrada) || 0) - IMPLANTACAO_MARCO_PRAZOS[c.etapa] }))
     .sort((a, b) => b.diasAtraso - a.diasAtraso);
+}
+
+// "Implantações paradas": sem atividade há mais de DIAS_IMPLANTACAO_PARADA dias.
+function renderDashboardParados(clientes) {
+  const parados = clientes
+    .filter(clienteParado)
+    .map((c) => ({ c, dias: diasSemAtividade(c) }))
+    .sort((a, b) => b.dias - a.dias);
+  const card = document.createElement("div");
+  card.className = "insight-card";
+  const h = document.createElement("h3");
+  h.textContent = `Implantações paradas (sem atividade há mais de ${DIAS_IMPLANTACAO_PARADA} dias)`;
+  card.appendChild(h);
+  if (!parados.length) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhuma implantação parada no momento.";
+    card.appendChild(p);
+    return card;
+  }
+  const LIMITE_VISIVEL = 6;
+  const lista = document.createElement("div");
+  lista.className = "lista-atrasados";
+  parados.slice(0, LIMITE_VISIVEL).forEach(({ c, dias }) => {
+    const item = document.createElement("div");
+    item.className = "lista-atrasados-item";
+    item.addEventListener("click", () => abrirClienteOuFicha(c, abrirTimelineImplantacao));
+    const nome = document.createElement("span");
+    nome.className = "lista-atrasados-nome";
+    nome.textContent = c.cliente || c.idcentral || "(sem nome)";
+    const etapaSpan = document.createElement("span");
+    etapaSpan.className = "lista-atrasados-etapa";
+    etapaSpan.textContent = `${nomeCurtoEtapaImplantacao(c.etapa)}${c.csm ? ` · ${c.csm}` : ""}`;
+    nome.appendChild(etapaSpan);
+    const diasSpan = document.createElement("span");
+    diasSpan.className = "lista-atrasados-dias lista-parados-dias";
+    diasSpan.textContent = `${dias} dias sem atividade`;
+    item.appendChild(nome);
+    item.appendChild(diasSpan);
+    lista.appendChild(item);
+  });
+  card.appendChild(lista);
+  if (parados.length > LIMITE_VISIVEL) {
+    const resto = parados.length - LIMITE_VISIVEL;
+    const mais = document.createElement("div");
+    mais.className = "lista-atrasados-mais";
+    mais.textContent = resto === 1 ? "+ 1 outra implantação parada" : `+ ${resto} outras implantações paradas`;
+    card.appendChild(mais);
+  }
+  return card;
+}
+
+// "Tempo nos marcos": TTV (entrada → Marco 2 / Quick Win) e tempo médio de
+// cada marco (do fim do marco anterior — ou da entrada, no Marco 1 — até a
+// conclusão). Só entra quem tem as datas (gravadas a partir de 29/09/2026).
+function renderDashboardTempoMarcos(clientes) {
+  const card = document.createElement("div");
+  card.className = "insight-card";
+  const h = document.createElement("h3");
+  h.textContent = "Tempo nos marcos";
+  card.appendChild(h);
+
+  const media = (arr) => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null);
+  const plural = (n, s) => `${n} ${s}${n === 1 ? "" : "s"}`;
+  const ttv = [];
+  const porMarco = {};
+  IMPLANTACAO_MARCOS.forEach((m) => { porMarco[m] = []; });
+  clientes.forEach((c) => {
+    const datas = c.marcos_concluidos_em || {};
+    if (datas["marco-2"]) {
+      const d = diasEntre(c.data_entrada, datas["marco-2"]);
+      if (d !== null && d >= 0) ttv.push(d);
+    }
+    IMPLANTACAO_MARCOS.forEach((m, i) => {
+      if (!datas[m]) return;
+      const inicio = i === 0 ? c.data_entrada : datas[IMPLANTACAO_MARCOS[i - 1]];
+      const d = inicio ? diasEntre(inicio, datas[m]) : null;
+      if (d !== null && d >= 0) porMarco[m].push(d);
+    });
+  });
+
+  const grid = document.createElement("div");
+  grid.className = "tempo-marcos-grid";
+  const bloco = (rotulo, valor, detalhe, destaque) => {
+    const b = document.createElement("div");
+    b.className = `tempo-marcos-bloco${destaque ? " destaque" : ""}`;
+    const r = document.createElement("div");
+    r.className = "tempo-marcos-rotulo";
+    r.textContent = rotulo;
+    const v = document.createElement("div");
+    v.className = "tempo-marcos-valor";
+    v.textContent = valor === null ? "–" : plural(valor, "dia");
+    const d = document.createElement("div");
+    d.className = "tempo-marcos-detalhe";
+    d.textContent = detalhe;
+    b.appendChild(r);
+    b.appendChild(v);
+    b.appendChild(d);
+    grid.appendChild(b);
+  };
+  bloco("TTV médio (até a Quick Win)", media(ttv), plural(ttv.length, "cliente"), true);
+  IMPLANTACAO_MARCOS.forEach((m, i) => {
+    // Meta = janela do marco no Plano (Marco 3: dias 22 a 60 = 39 dias).
+    const meta = IMPLANTACAO_MARCO_PRAZOS[m] - (i === 0 ? 0 : IMPLANTACAO_MARCO_PRAZOS[IMPLANTACAO_MARCOS[i - 1]]);
+    bloco(nomeCurtoEtapaImplantacao(m), media(porMarco[m]), `meta ${meta} dias · ${plural(porMarco[m].length, "cliente")}`);
+  });
+  card.appendChild(grid);
+
+  if (!ttv.length && IMPLANTACAO_MARCOS.every((m) => !porMarco[m].length)) {
+    const p = document.createElement("p");
+    p.className = "placeholder tempo-marcos-aviso";
+    p.textContent = "As datas de conclusão dos marcos começaram a ser registradas agora — os números aparecem conforme os clientes forem concluindo marcos.";
+    card.appendChild(p);
+  }
+  return card;
 }
 
 function renderDashboardAtrasados(clientes) {
@@ -5982,6 +7357,24 @@ function renderDashboardAtrasados(clientes) {
     return card;
   }
 
+  // Resumo dos motivos (árvore de decisão do Playbook) — mostra o padrão da
+  // carteira: onde os clientes estão travando.
+  const porMotivo = {};
+  atrasados.forEach((c) => {
+    const m = motivoAtrasoAtual(c);
+    const chave = m ? MOTIVOS_ATRASO[m.motivo].rotulo : "Sem motivo registrado";
+    porMotivo[chave] = (porMotivo[chave] || 0) + 1;
+  });
+  const resumo = document.createElement("div");
+  resumo.className = "motivos-resumo";
+  Object.entries(porMotivo).sort((a, b) => b[1] - a[1]).forEach(([rotulo, qtd]) => {
+    const chip = document.createElement("span");
+    chip.className = `motivos-resumo-chip${rotulo === "Sem motivo registrado" ? " sem-motivo" : ""}`;
+    chip.textContent = `${rotulo}: ${qtd}`;
+    resumo.appendChild(chip);
+  });
+  card.appendChild(resumo);
+
   const LIMITE_VISIVEL = 6;
   const lista = document.createElement("div");
   lista.className = "lista-atrasados";
@@ -5997,6 +7390,11 @@ function renderDashboardAtrasados(clientes) {
     etapaSpan.className = "lista-atrasados-etapa";
     etapaSpan.textContent = IMPLANTACAO_ETAPA_LABELS[c.etapa] || c.etapa;
     nome.appendChild(etapaSpan);
+    const motivo = motivoAtrasoAtual(c);
+    const motivoSpan = document.createElement("span");
+    motivoSpan.className = `lista-atrasados-motivo${motivo ? "" : " sem-motivo"}`;
+    motivoSpan.textContent = motivo ? MOTIVOS_ATRASO[motivo.motivo].rotulo : "sem motivo";
+    nome.appendChild(motivoSpan);
 
     const dias = document.createElement("span");
     dias.className = "lista-atrasados-dias";
@@ -6511,17 +7909,20 @@ function construirFichaHeader(implantacao, migracao, comEngrenagem) {
   header.className = "ficha-header";
 
   const info = document.createElement("div");
+  // Nome + tag "Migração" na mesma linha. Sem migração, não mostra tag
+  // nenhuma (implantação é o padrão, não precisa de rótulo).
+  const linhaTitulo = document.createElement("div");
+  linhaTitulo.className = "ficha-header-titulo";
   const titulo = document.createElement("h2");
   titulo.textContent = (implantacao && implantacao.cliente) || (migracao && migracao.nome) || "Cliente";
-  info.appendChild(titulo);
-
-  const meta = document.createElement("div");
-  meta.className = "ficha-header-meta";
-  const badge = document.createElement("span");
-  badge.className = "badge-tipo " + (migracao ? "com-migracao" : "so-implantacao");
-  badge.textContent = migracao ? "+ Migração" : "Só Implantação";
-  meta.appendChild(badge);
-  info.appendChild(meta);
+  linhaTitulo.appendChild(titulo);
+  if (migracao) {
+    const badge = document.createElement("span");
+    badge.className = "badge-tipo com-migracao";
+    badge.textContent = "Migração";
+    linhaTitulo.appendChild(badge);
+  }
+  info.appendChild(linhaTitulo);
   header.appendChild(info);
 
   if (comEngrenagem) {
@@ -6531,7 +7932,8 @@ function construirFichaHeader(implantacao, migracao, comEngrenagem) {
   return header;
 }
 
-// Engrenagem de edição da Ficha (só na aba Visão Geral). Clica e já abre
+// Engrenagem de edição da Ficha — aparece em todas as abas (Visão Geral,
+// Implantação, Marcos, Migração, Consulta, Importação). Clica e já abre
 // direto a janela de configuração (abrirConfigFicha) — se o cliente só tem
 // Implantação ou só Migração, ela mesma decide qual modal mostrar.
 function construirFichaEngrenagem(implantacao, migracao) {
@@ -6550,32 +7952,50 @@ function construirFichaEngrenagem(implantacao, migracao) {
 let fichaConfigContexto = null;
 
 function abrirConfigFicha(implantacao, migracao) {
-  // Cliente é um cadastro só (implantação sempre existe pra quem chega até a
-  // Ficha); migração é separada — "Configurações de Migração" continua sendo
-  // um painel à parte, só que agora dentro do mesmo cliente, não outro cadastro.
+  // Cliente é um cadastro só; migração e credenciais SSX são separadas, cada
+  // uma seu painel, trocados pela mesma sidebar (Implantação/Migração/
+  // Credenciais SSX) independente de qual entrada foi clicada. Cliente sem
+  // Implantação (tem_implantacao false, nasceu pela tela de Migração) não
+  // tem o que editar em Implantação — a sidebar some esse item (ver
+  // ativarSidebarConfig) e a aba inicial cai em Migração ou Credenciais.
   if (!implantacao) return;
-  if (!migracao) { abrirModalImplantacaoCliente(implantacao); return; }
   fichaConfigContexto = { implantacao, migracao };
-  mostrarConfigFichaAba("implantacao");
+  const abaInicial = implantacao.tem_implantacao !== false ? "implantacao" : (migracao ? "migracao" : "credenciais");
+  mostrarConfigFichaAba(abaInicial);
 }
 
 function mostrarConfigFichaAba(aba) {
   if (!fichaConfigContexto) return;
   const { implantacao, migracao } = fichaConfigContexto;
+  overlayImplantacaoCliente.classList.add("hidden");
+  overlayMigracao.classList.add("hidden");
+  overlayFichaCredencial.classList.add("hidden");
   if (aba === "implantacao") {
-    overlayMigracao.classList.add("hidden");
     abrirModalImplantacaoCliente(implantacao);
-    ativarSidebarConfig(implantacaoClienteSidebarConfig, modalImplantacaoClienteEl, "implantacao");
-  } else {
-    overlayImplantacaoCliente.classList.add("hidden");
+    ativarSidebarConfig(implantacaoClienteSidebarConfig, modalImplantacaoClienteEl, "implantacao", implantacao, migracao);
+  } else if (aba === "migracao") {
+    if (!migracao) return;
     abrirConfigMigracaoCliente(implantacao, migracao);
-    ativarSidebarConfig(migracaoSidebarConfig, modalMigracaoEl, "migracao");
+    ativarSidebarConfig(migracaoSidebarConfig, modalMigracaoEl, "migracao", implantacao, migracao);
+  } else {
+    const loginAtual = fichaClienteAtual ? fichaClienteAtual.credencial_login : "";
+    abrirModalFichaCredencial(implantacao.idcentral, loginAtual || "");
+    ativarSidebarConfig(credencialSidebarConfig, modalFichaCredencialEl, "credenciais", implantacao, migracao);
   }
 }
 
-function ativarSidebarConfig(sidebarEl, modalEl, abaAtiva) {
+// implantacao/migracao: dados do cliente, pra decidir quais itens fazem
+// sentido mostrar (ex.: cliente só-migração não tem o que editar em
+// "Implantação"; "Credenciais SSX" fica sempre visível — todo cliente tem
+// IdCentral). Chamado pelos 3 modais de configuração (Implantação, Migração,
+// Credenciais) depois de abertos, pra manterem a mesma sidebar de navegação.
+function ativarSidebarConfig(sidebarEl, modalEl, abaAtiva, implantacao, migracao) {
   sidebarEl.classList.remove("hidden");
   modalEl.classList.add("tem-sidebar-config");
+  const itemImplantacao = sidebarEl.querySelector('[data-aba="implantacao"]');
+  if (itemImplantacao) itemImplantacao.classList.toggle("hidden", !implantacao || implantacao.tem_implantacao === false);
+  const itemMigracao = sidebarEl.querySelector('[data-aba="migracao"]');
+  if (itemMigracao) itemMigracao.classList.toggle("hidden", !migracao);
   sidebarEl.querySelectorAll(".modal-sidebar-config-item").forEach((b) => {
     b.classList.toggle("ativo", b.dataset.aba === abaAtiva);
   });
@@ -6773,10 +8193,6 @@ function nomeCurtoEtapaImplantacao(etapa) {
   return (IMPLANTACAO_ETAPA_LABELS[etapa] || etapa).replace(/\s*\([^)]*\)\s*$/, "");
 }
 
-// Limite (heurística de UX, sem relação com nenhuma regra de negócio) usado só
-// pra decidir quando "dias sem atualização" vira pendência na Visão Geral.
-const FICHA_LIMITE_DIAS_SEM_ATUALIZACAO = 15;
-
 // Valores de "Momento do Cliente" que por si só já indicam uma situação que
 // precisa de atenção (trava operacional, risco de perda etc).
 const FICHA_MOMENTOS_CRITICOS = ["Travado por Infraestrutura", "Possível Cancelamento", "Protestado", "Sumido"];
@@ -6811,27 +8227,53 @@ function construirFichaLinhaContato(implantacao) {
   blocos.className = "ficha-header-contato-blocos";
   blocos.appendChild(criarBlocoContato("Responsável (CS)", implantacao.csm || "não definido"));
 
-  if (temDecisor) {
-    const detalhes = [
-      implantacao.decisor_nome || "sem nome cadastrado",
-      implantacao.decisor_whatsapp,
-      [implantacao.decisor_cidade, implantacao.decisor_estado].filter(Boolean).join(" - "),
-    ].filter(Boolean).join(" · ");
-    blocos.appendChild(criarBlocoContato("Decisor (contato no cliente)", detalhes));
-  }
+  if (temDecisor) blocos.appendChild(construirCardDecisor(implantacao));
   linha.appendChild(blocos);
+  return linha;
+}
+
+// Cardzinho do decisor (contato do lado do cliente): nome, telefone e cidade
+// empilhados, com o botão do WhatsApp dentro do próprio card — antes era uma
+// linha só com tudo separado por "·" e o botão solto no canto.
+function construirCardDecisor(implantacao) {
+  const card = document.createElement("div");
+  card.className = "card-decisor";
+
+  const info = document.createElement("div");
+  info.className = "card-decisor-info";
+  const rotulo = document.createElement("div");
+  rotulo.className = "info-item-label";
+  rotulo.textContent = "Decisor";
+  const nome = document.createElement("div");
+  nome.className = "card-decisor-nome";
+  nome.textContent = implantacao.decisor_nome || "sem nome cadastrado";
+  info.appendChild(rotulo);
+  info.appendChild(nome);
+  const local = [implantacao.decisor_cidade, implantacao.decisor_estado].filter(Boolean).join(" - ");
+  [implantacao.decisor_whatsapp, local].filter(Boolean).forEach((texto) => {
+    const linha = document.createElement("div");
+    linha.className = "card-decisor-detalhe";
+    linha.textContent = texto;
+    info.appendChild(linha);
+  });
+  card.appendChild(info);
 
   const linkWpp = linkWhatsapp(implantacao.decisor_whatsapp);
   if (linkWpp) {
     const btnWpp = document.createElement("a");
-    btnWpp.className = "btn-primary btn-whatsapp";
+    btnWpp.className = "card-decisor-wpp";
     btnWpp.href = linkWpp;
     btnWpp.target = "_blank";
     btnWpp.rel = "noopener";
-    btnWpp.textContent = "WhatsApp do decisor";
-    linha.appendChild(btnWpp);
+    btnWpp.title = "Abrir conversa no WhatsApp";
+    btnWpp.setAttribute("aria-label", "WhatsApp do decisor");
+    btnWpp.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91A9.85 9.85 0 0 0 12.04 2zm0 18.15h-.01a8.23 8.23 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.25-8.23a8.2 8.2 0 0 1 8.24 8.24c0 4.54-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.46-.72-1.69-.8-.23-.08-.39-.12-.56.12-.16.25-.64.8-.78.97-.14.16-.29.18-.54.06-.25-.12-1.04-.38-1.99-1.23-.73-.66-1.23-1.47-1.37-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.16.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43h-.48c-.16 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.16 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.46-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.22-.16-.47-.28z"/></svg>';
+    const texto = document.createElement("span");
+    texto.textContent = "WhatsApp";
+    btnWpp.appendChild(texto);
+    card.appendChild(btnWpp);
   }
-  return linha;
+  return card;
 }
 
 // Junta num só lugar tudo que precisa da atenção do usuário — sem isso, cada
@@ -6850,9 +8292,9 @@ function coletarFichaAlertas(implantacao, migracao) {
         ? `${label} atrasado há ${diasAtraso} dia${diasAtraso === 1 ? "" : "s"}.`
         : `${label} está atrasado.`);
     }
-    const diasSemAcao = diasDesdeEntrada(implantacao.ultima_acao_data);
-    if (diasSemAcao !== null && diasSemAcao > FICHA_LIMITE_DIAS_SEM_ATUALIZACAO) {
-      alertas.push(`Sem atualização há ${diasSemAcao} dias.`);
+    // Mesma regra do selo "Parado" do Kanban (clienteParado).
+    if (clienteParado(implantacao)) {
+      alertas.push(`Implantação parada: sem atividade há ${diasSemAtividade(implantacao)} dias.`);
     }
     if (FICHA_MOMENTOS_CRITICOS.includes(implantacao.momento)) {
       alertas.push(`Momento do cliente: ${implantacao.momento}.`);
@@ -6882,7 +8324,120 @@ function construirFichaAlertasCard(implantacao, migracao) {
     item.textContent = `⚠️ ${texto}`;
     card.appendChild(item);
   });
+  if (implantacaoAtrasada(implantacao)) card.appendChild(construirBlocoMotivoAtraso(implantacao));
   return card;
+}
+
+// Motivo do atraso (árvore de decisão do Playbook): mostra o motivo + ação
+// sugerida quando já tem; senão (ou ao clicar em Alterar) pede o motivo.
+function construirBlocoMotivoAtraso(implantacao) {
+  const bloco = document.createElement("div");
+  bloco.className = "motivo-atraso";
+  const atual = motivoAtrasoAtual(implantacao);
+
+  function mostrarResumo(m) {
+    bloco.innerHTML = "";
+    const info = MOTIVOS_ATRASO[m.motivo];
+    const linha = document.createElement("div");
+    linha.className = "motivo-atraso-linha";
+    linha.innerHTML = "<strong>Motivo do atraso:</strong> ";
+    linha.appendChild(document.createTextNode(info.rotulo));
+    const btnAlterar = document.createElement("button");
+    btnAlterar.type = "button";
+    btnAlterar.className = "btn-link-inline";
+    btnAlterar.textContent = "Alterar";
+    btnAlterar.addEventListener("click", () => mostrarFormulario(m));
+    linha.appendChild(btnAlterar);
+    bloco.appendChild(linha);
+    const acao = document.createElement("div");
+    acao.className = "motivo-atraso-acao";
+    acao.textContent = `Ação sugerida: ${info.acao}`;
+    bloco.appendChild(acao);
+    if (m.obs) {
+      const obs = document.createElement("div");
+      obs.className = "motivo-atraso-meta";
+      obs.textContent = `Obs.: ${m.obs}`;
+      bloco.appendChild(obs);
+    }
+    const meta = document.createElement("div");
+    meta.className = "motivo-atraso-meta";
+    meta.textContent = `Registrado${m.por ? ` por ${m.por}` : ""} em ${formatarDataBRSimples(m.em) || m.em}`;
+    bloco.appendChild(meta);
+  }
+
+  function mostrarFormulario(m) {
+    bloco.innerHTML = "";
+    const rotulo = document.createElement("div");
+    rotulo.className = "motivo-atraso-linha";
+    rotulo.innerHTML = "<strong>Por que o cliente não está avançando?</strong>";
+    bloco.appendChild(rotulo);
+    const form = document.createElement("div");
+    form.className = "motivo-atraso-form";
+    const select = document.createElement("select");
+    select.innerHTML = '<option value="">Escolha o motivo...</option>';
+    Object.entries(MOTIVOS_ATRASO).forEach(([valor, info]) => {
+      const opt = document.createElement("option");
+      opt.value = valor;
+      opt.textContent = info.rotulo;
+      select.appendChild(opt);
+    });
+    select.value = m ? m.motivo : "";
+    const obs = document.createElement("input");
+    obs.type = "text";
+    obs.placeholder = "Observação (opcional)";
+    obs.maxLength = 300;
+    obs.value = m ? (m.obs || "") : "";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-primary";
+    btn.textContent = "Salvar";
+    const dica = document.createElement("div");
+    dica.className = "motivo-atraso-acao";
+    const atualizarDica = () => {
+      const info = MOTIVOS_ATRASO[select.value];
+      dica.textContent = info ? `Ação sugerida: ${info.acao}` : "";
+    };
+    select.addEventListener("change", atualizarDica);
+    atualizarDica();
+    btn.addEventListener("click", async () => {
+      if (!select.value) return alert("Escolha o motivo.");
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/api/clientes/${implantacao.id}/motivo-atraso`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ motivo: select.value, obs: obs.value }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
+        implantacao.motivo_atraso = data.motivo_atraso;
+        // Mantém a lista da Implantação/busca em dia sem reler do servidor.
+        const noCache = implantacaoClientesCache.find((c) => c.id === implantacao.id);
+        if (noCache) noCache.motivo_atraso = data.motivo_atraso;
+        mostrarResumo(data.motivo_atraso);
+      } catch (err) {
+        alert(`Erro ao salvar: ${String(err)}`);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    form.appendChild(select);
+    form.appendChild(obs);
+    form.appendChild(btn);
+    bloco.appendChild(form);
+    bloco.appendChild(dica);
+    if (m) {
+      const cancelar = document.createElement("button");
+      cancelar.type = "button";
+      cancelar.className = "btn-link-inline";
+      cancelar.textContent = "Cancelar";
+      cancelar.addEventListener("click", () => mostrarResumo(m));
+      bloco.appendChild(cancelar);
+    }
+  }
+
+  if (atual) mostrarResumo(atual); else mostrarFormulario(null);
+  return bloco;
 }
 
 // "Resumo do cliente" — mesmos dados do grid antigo, só que agora com título
@@ -6898,15 +8453,19 @@ function construirFichaResumoCard(implantacao, migracao) {
   grid.className = "info-grid";
   if (implantacao) {
     grid.appendChild(criarInfoItem("IdCentral", implantacao.idcentral));
-    grid.appendChild(criarInfoItem("Data de entrada", implantacao.data_entrada));
-    const dias = diasDesdeEntrada(implantacao.data_entrada);
-    grid.appendChild(criarInfoItem("Dias desde a entrada", dias === null ? "" : `${dias} dia${dias === 1 ? "" : "s"}`));
-    const diasSemAcao = diasDesdeEntrada(implantacao.ultima_acao_data);
-    grid.appendChild(criarInfoItem("Dias sem atualização", diasSemAcao === null ? "Sem registro" : `${diasSemAcao} dia${diasSemAcao === 1 ? "" : "s"}`));
     grid.appendChild(criarInfoItem("Responsável", implantacao.csm));
-    grid.appendChild(criarInfoItem("Vendedor", implantacao.vendedor));
-    grid.appendChild(criarInfoItem("Objetivo", implantacao.objetivo));
-    grid.appendChild(criarInfoItem("Valor de contrato", formatarMoeda(implantacao.valor_contrato)));
+    // Resto é da jornada de Implantação (data de entrada, objetivo, valor de
+    // contrato...) — não existe pra um cliente que só tem Migração.
+    if (implantacao.tem_implantacao !== false) {
+      grid.appendChild(criarInfoItem("Data de entrada", implantacao.data_entrada));
+      const dias = diasDesdeEntrada(implantacao.data_entrada);
+      grid.appendChild(criarInfoItem("Dias desde a entrada", dias === null ? "" : `${dias} dia${dias === 1 ? "" : "s"}`));
+      const diasSemAcao = diasSemAtividade(implantacao);
+      grid.appendChild(criarInfoItem("Dias sem atividade", diasSemAcao === null ? "Sem registro" : `${diasSemAcao} dia${diasSemAcao === 1 ? "" : "s"}`));
+      grid.appendChild(criarInfoItem("Vendedor", implantacao.vendedor));
+      grid.appendChild(criarInfoItem("Objetivo", implantacao.objetivo));
+      grid.appendChild(criarInfoItem("Valor de contrato", formatarMoeda(implantacao.valor_contrato)));
+    }
   }
   if (migracao) grid.appendChild(criarInfoItem("Plataforma de origem (Migração)", migracao.plataforma_origem));
   card.appendChild(grid);
@@ -7042,14 +8601,15 @@ function construirFichaTarefasPainel(implantacao) {
 // stepper e, quando existir atraso, um callout curto acima dele. Sem atraso,
 // não tem texto nenhum: o stepper já mostra em que marco o cliente está.
 function construirFichaProgressoCard(implantacao, migracao) {
-  if (!implantacao && !migracao) return null;
+  const temImplantacao = implantacao && implantacao.tem_implantacao !== false;
+  if (!temImplantacao && !migracao) return null;
   const card = document.createElement("div");
   card.className = "ficha-painel";
   const h = document.createElement("h3");
   h.textContent = "Progresso";
   card.appendChild(h);
 
-  if (implantacao) {
+  if (temImplantacao) {
     const bloco = document.createElement("div");
     bloco.className = "ficha-progresso-bloco";
     const titulo = document.createElement("div");
@@ -7070,6 +8630,21 @@ function construirFichaProgressoCard(implantacao, migracao) {
       bloco.appendChild(p);
     }
     bloco.appendChild(construirStepper(IMPLANTACAO_ETAPAS_ORDEM, IMPLANTACAO_ETAPA_LABELS, implantacao.etapa));
+    // O stepper usa os rótulos curtos do Kanban; o nome do marco atual (e de
+    // quem é a responsabilidade) aparece por extenso só aqui na Ficha.
+    const info = IMPLANTACAO_MARCOS_INFO[implantacao.etapa];
+    if (info) {
+      const atual = document.createElement("p");
+      atual.className = "ficha-marco-atual";
+      atual.textContent = `Agora: ${nomeCompletoMarco(implantacao.etapa)} · responsabilidade de ${info.dono} `;
+      const btnMarcos = document.createElement("button");
+      btnMarcos.type = "button";
+      btnMarcos.className = "btn-link-inline";
+      btnMarcos.textContent = "Abrir marcos →";
+      btnMarcos.addEventListener("click", () => mostrarFichaAba("marcos"));
+      atual.appendChild(btnMarcos);
+      bloco.appendChild(atual);
+    }
     card.appendChild(bloco);
   }
 
@@ -7211,13 +8786,18 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
   // Cliente. "Marco atual" não vira tag aqui: o card de Progresso já mostra
   // isso com muito mais clareza (stepper), então repetir seria peso duplicado.
   if (implantacao) {
-    const tags = document.createElement("div");
-    tags.className = "ficha-tags-resumo";
-    if (implantacao.momento) tags.appendChild(criarTagResumo(implantacao.momento, "tag-momento"));
-    if (implantacao.persona) tags.appendChild(criarTagResumo(implantacao.persona, "tag-persona"));
-    if (implantacao.flag) tags.appendChild(criarTagResumo(implantacao.flag, classeFlagTag(implantacao.flag)));
-    if (implantacaoAtrasada(implantacao)) tags.appendChild(criarTagResumo("Atrasado", "tag-flag-red"));
-    if (tags.children.length) wrap.appendChild(tags);
+    // Tags (Implantado/Momento/Persona/Flag/Atrasado) são todas da jornada de
+    // Implantação — não fazem sentido pra um cliente que só tem Migração.
+    if (implantacao.tem_implantacao !== false) {
+      const tags = document.createElement("div");
+      tags.className = "ficha-tags-resumo";
+      if (implantacao.implantado) tags.appendChild(criarTagResumo("Implantado", "tag-implantado"));
+      if (implantacao.momento) tags.appendChild(criarTagResumo(implantacao.momento, "tag-momento"));
+      if (implantacao.persona) tags.appendChild(criarTagResumo(implantacao.persona, "tag-persona"));
+      if (implantacao.flag) tags.appendChild(criarTagResumo(implantacao.flag, classeFlagTag(implantacao.flag)));
+      if (implantacaoAtrasada(implantacao)) tags.appendChild(criarTagResumo("Atrasado", "tag-flag-red"));
+      if (tags.children.length) wrap.appendChild(tags);
+    }
 
     const contato = construirFichaLinhaContato(implantacao);
     if (contato) wrap.appendChild(contato);
@@ -7249,7 +8829,7 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
 
 function construirFichaImplantacao(implantacao, migracao) {
   const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao));
+  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
 
   if (!implantacao) {
     const p = document.createElement("p");
@@ -7264,7 +8844,10 @@ function construirFichaImplantacao(implantacao, migracao) {
   const grid = document.createElement("div");
   grid.className = "info-grid";
   grid.appendChild(criarInfoItem("IdCentral", implantacao.idcentral));
-  grid.appendChild(criarInfoItem("Etapa", IMPLANTACAO_ETAPA_LABELS[implantacao.etapa] || implantacao.etapa));
+  grid.appendChild(criarInfoItem("Etapa", implantacao.etapa === "concluido"
+    ? IMPLANTACAO_ETAPA_LABELS.concluido : nomeCompletoMarco(implantacao.etapa)));
+  grid.appendChild(criarInfoItem("Implantado", implantacao.implantado
+    ? `Sim${implantacao.implantado_em ? `, desde ${formatarDataBRSimples(implantacao.implantado_em)}` : ""}` : "Não"));
   grid.appendChild(criarInfoItem("Responsável", implantacao.csm));
   grid.appendChild(criarInfoItem("Última ação", implantacao.ultima_acao));
   sec.appendChild(grid);
@@ -7282,15 +8865,144 @@ function construirFichaImplantacao(implantacao, migracao) {
   return wrap;
 }
 
+// Linha de acesso rápido (login/senha da plataforma de origem) com botão de
+// copiar e, pra senha, um "olhinho" (👁) pra revelar antes de copiar — ela
+// nasce mascarada (••••••••), igual ao padrão já usado na lista de logins
+// salvos da tela de entrada (spanSenha em renderListaCredenciais).
+function criarLinhaAcessoCopiavel(label, valor, mascarar) {
+  const linha = document.createElement("div");
+  linha.className = "acesso-origem-linha";
+
+  const lbl = document.createElement("span");
+  lbl.className = "acesso-origem-label";
+  lbl.textContent = label;
+  linha.appendChild(lbl);
+
+  const span = document.createElement("span");
+  span.className = "acesso-origem-valor";
+  let revelado = !mascarar;
+  const renderizar = () => { span.textContent = valor ? (revelado ? valor : "••••••••") : "-"; };
+  renderizar();
+  linha.appendChild(span);
+
+  if (mascarar && valor) {
+    const btnOlho = document.createElement("button");
+    btnOlho.type = "button";
+    btnOlho.className = "acesso-origem-botao";
+    btnOlho.title = "Mostrar/ocultar";
+    btnOlho.textContent = "👁";
+    btnOlho.addEventListener("click", () => {
+      revelado = !revelado;
+      renderizar();
+    });
+    linha.appendChild(btnOlho);
+  }
+
+  if (valor) {
+    const btnCopiar = document.createElement("button");
+    btnCopiar.type = "button";
+    btnCopiar.className = "acesso-origem-botao";
+    btnCopiar.title = "Copiar";
+    btnCopiar.textContent = "📋";
+    btnCopiar.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(valor);
+        btnCopiar.textContent = "✓";
+        setTimeout(() => { btnCopiar.textContent = "📋"; }, 1200);
+      } catch (err) {
+        alert(`Não foi possível copiar: ${String(err)}`);
+      }
+    });
+    linha.appendChild(btnCopiar);
+  }
+
+  return linha;
+}
+
+// Card de acesso rápido à plataforma de origem — o cliente costuma passar
+// link/login/senha de lá pra gente exportar os dados dele na migração.
+function construirCardAcessoOrigem(migracao) {
+  const card = document.createElement("div");
+  card.className = "acesso-origem-card";
+
+  const cabecalho = document.createElement("div");
+  cabecalho.className = "acesso-origem-cabecalho";
+  const titulo = document.createElement("h3");
+  titulo.textContent = "Acesso à plataforma de origem";
+  cabecalho.appendChild(titulo);
+  if (migracao.link_acesso_origem) {
+    const btnAbrir = document.createElement("button");
+    btnAbrir.type = "button";
+    btnAbrir.className = "acesso-origem-abrir";
+    btnAbrir.textContent = "Abrir ↗";
+    btnAbrir.addEventListener("click", () => window.open(migracao.link_acesso_origem, "_blank", "noopener"));
+    cabecalho.appendChild(btnAbrir);
+  }
+  card.appendChild(cabecalho);
+
+  if (!migracao.link_acesso_origem && !migracao.login_acesso_origem && !migracao.senha_acesso_origem) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhum acesso cadastrado ainda.";
+    card.appendChild(p);
+    return card;
+  }
+
+  const corpo = document.createElement("div");
+  corpo.className = "acesso-origem-corpo";
+  corpo.appendChild(criarLinhaAcessoCopiavel("Login", migracao.login_acesso_origem, false));
+  corpo.appendChild(criarLinhaAcessoCopiavel("Senha", migracao.senha_acesso_origem, true));
+  card.appendChild(corpo);
+
+  return card;
+}
+
+// Tabela "Modelo | % | Aguardando | Enviar | Enviado | Comunicou | Total" —
+// valores já calculados na aba "Infos gerais" da planilha (fórmulas de lá),
+// só lidos e exibidos aqui depois de "Importar da planilha". Sem textContent
+// com dado de planilha em innerHTML — evita XSS se alguém digitar algo
+// esquisito numa célula "Modelo".
+function renderResumoModelos(container, resumo) {
+  container.innerHTML = "";
+  if (!resumo || !resumo.length) return;
+  const titulo = document.createElement("h4");
+  titulo.className = "form-credencial-titulo";
+  titulo.textContent = "Resumo por modelo (da planilha)";
+  container.appendChild(titulo);
+  const table = document.createElement("table");
+  table.className = "tabela-credenciais";
+  const thead = document.createElement("thead");
+  const trCab = document.createElement("tr");
+  ["Modelo", "%", "Aguardando", "Enviar", "Enviado", "Comunicou", "Total"].forEach((rotulo) => {
+    const th = document.createElement("th");
+    th.textContent = rotulo;
+    trCab.appendChild(th);
+  });
+  thead.appendChild(trCab);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  resumo.forEach((linha) => {
+    const tr = document.createElement("tr");
+    ["modelo", "percentual", "aguardando", "enviar", "enviado", "comunicou", "total"].forEach((campo) => {
+      const td = document.createElement("td");
+      td.textContent = linha[campo] || "";
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
 function construirFichaMigracao(implantacao, migracao, migracoes) {
   const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao));
+  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
 
   if (!migracao) {
     const p = document.createElement("p");
     p.className = "placeholder";
-    p.textContent = "Esse cliente ainda não tem nenhuma tentativa de migração registrada. "
-      + 'Marque "Tem Migração? Sim" no cadastro do cliente pra iniciar uma.';
+    p.textContent = "Esse cliente ainda não tem nenhum processo de migração registrado. "
+      + 'Marque "Tem Migração? Sim" no cadastro do cliente pra iniciar um.';
     wrap.appendChild(p);
     return wrap;
   }
@@ -7299,10 +9011,22 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
   sec.className = "ficha-secao";
   const grid = document.createElement("div");
   grid.className = "info-grid";
+  // Dias em migração: enquanto está rodando, conta até hoje; depois de
+  // concluída/cancelada, fica fixo na duração real do processo (início → fim).
+  const diasMigracao = migracao.data_fim
+    ? diasEntre(migracao.data_inicio, migracao.data_fim)
+    : diasDesdeEntrada(migracao.data_inicio);
   grid.appendChild(criarInfoItem("Status", MIGRACAO_STATUS_LABELS[migracao.status] || migracao.status));
   grid.appendChild(criarInfoItem("Etapa", MIGRACAO_ETAPA_LABELS[migracao.etapa] || migracao.etapa));
   grid.appendChild(criarInfoItem("Plataforma de origem", migracao.plataforma_origem));
-  grid.appendChild(criarInfoItem("Progresso da migração", `${migracao.percentual_migracao || 0}%`));
+  // Referência guardada pra "Importar da planilha" atualizar o número na
+  // hora (percentual_migracao é recalculado a cada importação — ver abaixo).
+  const itemProgressoMigracao = criarInfoItem("Progresso da migração", `${migracao.percentual_migracao || 0}%`);
+  grid.appendChild(itemProgressoMigracao);
+  grid.appendChild(criarInfoItem(
+    "Dias em migração",
+    diasMigracao === null ? "-" : `${diasMigracao} dia${diasMigracao === 1 ? "" : "s"}`
+  ));
   grid.appendChild(criarInfoItem("Início", migracao.data_inicio));
   if (migracao.data_fim) grid.appendChild(criarInfoItem("Fim", migracao.data_fim));
   sec.appendChild(grid);
@@ -7326,15 +9050,68 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
   });
   acoes.appendChild(btnPlanilha);
 
-  // Cancelar só existe aqui (Ficha > Migração) — de propósito: o cadastro do
-  // cliente trava o campo assim que a migração está em andamento, então essa
-  // é a única forma de tirar uma migração do ar (não dá pra só "excluir").
+  if (migracao.link_planilha) {
+    const btnImportar = document.createElement("button");
+    btnImportar.className = "btn-secondary";
+    btnImportar.textContent = "Importar da planilha";
+    btnImportar.title = "Lê a aba \"Migração\" da planilha e atualiza os veículos aqui (cliente+veículo repetido só atualiza, não duplica).";
+    btnImportar.addEventListener("click", async () => {
+      const textoOriginal = btnImportar.textContent;
+      btnImportar.disabled = true;
+      btnImportar.textContent = "Importando...";
+      try {
+        const r = await fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/importar-planilha`, { method: "POST" });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return alert(`Erro ao importar: ${data.error || "falha desconhecida"}`);
+        alert(`Importação concluída: ${data.importados} veículo(s) (${data.qtd_clientes} cliente(s), ${data.qtd_placas} placa(s)).`);
+        renderResumoModelos(resumoModelosDiv, data.resumo_modelos);
+        const valorProgresso = itemProgressoMigracao.querySelector(".info-item-valor");
+        if (valorProgresso && data.percentual_migracao !== undefined) {
+          valorProgresso.textContent = `${data.percentual_migracao}%`;
+        }
+      } catch (err) {
+        alert(`Erro ao importar: ${String(err)}`);
+      } finally {
+        btnImportar.disabled = false;
+        btnImportar.textContent = textoOriginal;
+      }
+    });
+    acoes.appendChild(btnImportar);
+  }
+
+  // Finalizar/Cancelar só existem aqui (Ficha > Migração) — de propósito: o
+  // cadastro do cliente trava o campo assim que a migração está em
+  // andamento, então essa é a única forma de tirar uma migração do ar (não
+  // dá pra só "excluir").
   if (migracao.status === "em_andamento") {
+    const btnFinalizar = document.createElement("button");
+    btnFinalizar.className = "btn-secondary";
+    btnFinalizar.textContent = "Finalizar migração";
+    btnFinalizar.addEventListener("click", async () => {
+      if (!confirm(`Finalizar a migração de "${implantacao.cliente}"? Marca o processo como concluído e move a planilha (se tiver) pra pasta "Finalizadas" no Drive.`)) return;
+      try {
+        const r = await fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/finalizar`, { method: "POST" });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return alert(`Erro ao finalizar: ${data.error || "falha desconhecida"}`);
+        if (data.aviso) alert(data.aviso);
+        const rf = await fetch(`/api/ficha/${encodeURIComponent(implantacao.idcentral)}`);
+        const dataFicha = await parseJsonResponse(rf);
+        if (dataFicha.ok) {
+          fichaClienteAtual = dataFicha;
+          el("ficha-aba-migracao").classList.toggle("hidden", !dataFicha.migracao);
+          mostrarFichaAba("migracao");
+        }
+      } catch (err) {
+        alert(`Erro ao finalizar: ${String(err)}`);
+      }
+    });
+    acoes.appendChild(btnFinalizar);
+
     const btnCancelar = document.createElement("button");
     btnCancelar.className = "btn-secondary";
     btnCancelar.textContent = "Cancelar migração";
     btnCancelar.addEventListener("click", async () => {
-      if (!confirm(`Cancelar a migração de "${implantacao.cliente}"? Isso não exclui os veículos já cadastrados, só marca essa tentativa como cancelada.`)) return;
+      if (!confirm(`Cancelar a migração de "${implantacao.cliente}"? Isso não exclui os veículos já cadastrados, só marca esse processo como cancelado.`)) return;
       const motivo = prompt("Motivo do cancelamento (opcional):", "") || "";
       try {
         const r = await fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/cancelar`, {
@@ -7359,7 +9136,32 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
   }
 
   sec.appendChild(acoes);
+
+  // Tabela de fórmulas já calculadas na própria planilha (aba "Infos
+  // gerais"), só exibida aqui, nunca recalculada pelo sistema. Preenchida
+  // de dois jeitos: automático (busca "ao vivo" só-leitura toda vez que essa
+  // aba abre, logo abaixo) e manual, via "Importar da planilha" acima (que
+  // além de atualizar isso também grava os veículos no sistema).
+  const resumoModelosDiv = document.createElement("div");
+  resumoModelosDiv.className = "resumo-modelos-planilha";
+  sec.appendChild(resumoModelosDiv);
+
+  if (migracao.link_planilha) {
+    fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/resumo-planilha`)
+      .then(parseJsonResponse)
+      .then((data) => {
+        if (!data.ok) return; // planilha instável/sem permissão nesse momento — não interrompe a Ficha
+        renderResumoModelos(resumoModelosDiv, data.resumo_modelos);
+        if (data.percentual_migracao !== null && data.percentual_migracao !== undefined) {
+          const valorProgresso = itemProgressoMigracao.querySelector(".info-item-valor");
+          if (valorProgresso) valorProgresso.textContent = `${data.percentual_migracao}%`;
+        }
+      })
+      .catch(() => {}); // idem — falha silenciosa, é só um "a mais", a Ficha já carregou normalmente
+  }
+
   wrap.appendChild(sec);
+  wrap.appendChild(construirCardAcessoOrigem(migracao));
 
   // Histórico de tentativas anteriores (a atual/mais recente já aparece acima).
   const anteriores = (migracoes || []).filter((m) => m.id !== migracao.id);
@@ -7368,7 +9170,7 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
     historico.className = "ficha-secao";
     const h = document.createElement("h4");
     h.className = "form-credencial-titulo";
-    h.textContent = "Tentativas anteriores";
+    h.textContent = "Processos anteriores";
     historico.appendChild(h);
     anteriores.forEach((m) => {
       const linha = document.createElement("p");
@@ -7399,7 +9201,7 @@ const CONSULTA_TIPOS_FICHA = [
 
 function construirFichaConsulta(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin) {
   const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao));
+  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
   wrap.appendChild(construirFichaCredencialSecao(idcentral, credencialConfigurada, credencialLogin));
 
   const autenticadoAqui = estado.autenticado && estado.idcentralAutenticado === idcentral;
@@ -7545,7 +9347,7 @@ function construirFichaConsulta(idcentral, implantacao, migracao, credencialConf
 
 function construirFichaImportacao(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin) {
   const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao));
+  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
   wrap.appendChild(construirFichaCredencialSecao(idcentral, credencialConfigurada, credencialLogin));
 
   const autenticadoAqui = estado.autenticado && estado.idcentralAutenticado === idcentral;
@@ -7621,6 +9423,7 @@ function mostrarFichaAba(aba) {
   fichaAbaAtual = aba;
   el("ficha-aba-geral").classList.toggle("ativo", aba === "geral");
   el("ficha-aba-implantacao").classList.toggle("ativo", aba === "implantacao");
+  el("ficha-aba-marcos").classList.toggle("ativo", aba === "marcos");
   el("ficha-aba-migracao").classList.toggle("ativo", aba === "migracao");
   el("ficha-aba-consulta").classList.toggle("ativo", aba === "consulta");
   el("ficha-aba-importacao").classList.toggle("ativo", aba === "importacao");
@@ -7631,12 +9434,13 @@ function mostrarFichaAba(aba) {
   const { idcentral, implantacao, migracao, migracoes, credencial_configurada, credencial_login } = fichaClienteAtual;
   if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login));
   if (aba === "implantacao") corpo.appendChild(construirFichaImplantacao(implantacao, migracao));
+  if (aba === "marcos") corpo.appendChild(construirFichaMarcos(implantacao, migracao));
   if (aba === "migracao") corpo.appendChild(construirFichaMigracao(implantacao, migracao, migracoes));
   if (aba === "consulta") corpo.appendChild(construirFichaConsulta(idcentral, implantacao, migracao, credencial_configurada, credencial_login));
   if (aba === "importacao") corpo.appendChild(construirFichaImportacao(idcentral, implantacao, migracao, credencial_configurada, credencial_login));
 }
 
-async function carregarFichaCliente(idcentral) {
+async function carregarFichaCliente(idcentral, aba = "geral") {
   fichaClienteAtual = null;
   el("ficha-sidebar-nome").textContent = "Carregando...";
   const corpo = el("ficha-cliente-corpo");
@@ -7654,7 +9458,15 @@ async function carregarFichaCliente(idcentral) {
     const nome = (data.implantacao && data.implantacao.cliente) || (data.migracao && data.migracao.nome) || idcentral;
     el("ficha-sidebar-nome").textContent = nome;
     el("ficha-aba-migracao").classList.toggle("hidden", !data.migracao);
-    mostrarFichaAba("geral");
+    // Cliente criado pela tela de Migração sem par na Implantação
+    // (tem_implantacao=false) tem menu enxuto: só Visão Geral, Migração,
+    // Consulta e Importação — sem Implantação/Marcos, que não existem pra ele.
+    const semImplantacao = data.implantacao && data.implantacao.tem_implantacao === false;
+    el("ficha-aba-implantacao").classList.toggle("hidden", semImplantacao);
+    el("ficha-aba-marcos").classList.toggle("hidden", semImplantacao);
+    const abasEscondidas = semImplantacao ? ["implantacao", "marcos"] : [];
+    const abaFinal = (aba === "migracao" && !data.migracao) || abasEscondidas.includes(aba) ? "geral" : aba;
+    mostrarFichaAba(abaFinal);
   } catch (err) {
     mostrarErroEmNode(corpo, String(err));
   }
@@ -7662,12 +9474,19 @@ async function carregarFichaCliente(idcentral) {
 
 // --- CREDENCIAL SSX DA FICHA (edição, admin-only) ---
 const overlayFichaCredencial = el("overlay-ficha-credencial");
+const modalFichaCredencialEl = el("modal-ficha-credencial");
+const credencialSidebarConfig = el("credencial-sidebar-config");
 const formFichaCredencial = el("form-ficha-credencial");
 const inputFichaCredencialLogin = el("ficha-credencial-login");
 const inputFichaCredencialSenha = el("ficha-credencial-senha");
 let fichaCredencialIdcentralAtual = null;
 
 function abrirModalFichaCredencial(idcentral, loginAtual) {
+  // Sidebar só aparece quando aberto pela engrenagem da Ficha (mostrarConfigFichaAba
+  // chama ativarSidebarConfig logo depois) — nos atalhos diretos (Consulta,
+  // Importação, Visão Geral) fica escondida, igual aos outros 2 modais de config.
+  credencialSidebarConfig.classList.add("hidden");
+  modalFichaCredencialEl.classList.remove("tem-sidebar-config");
   fichaCredencialIdcentralAtual = idcentral;
   inputFichaCredencialLogin.value = loginAtual || "";
   inputFichaCredencialSenha.value = "";
@@ -7675,7 +9494,13 @@ function abrirModalFichaCredencial(idcentral, loginAtual) {
   inputFichaCredencialLogin.focus();
 }
 
-el("ficha-credencial-modal-fechar").addEventListener("click", () => overlayFichaCredencial.classList.add("hidden"));
+el("ficha-credencial-modal-fechar").addEventListener("click", () => {
+  overlayFichaCredencial.classList.add("hidden");
+  fichaConfigContexto = null;
+});
+credencialSidebarConfig.querySelectorAll(".modal-sidebar-config-item").forEach((btn) => {
+  btn.addEventListener("click", () => mostrarConfigFichaAba(btn.dataset.aba));
+});
 
 formFichaCredencial.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -7693,6 +9518,7 @@ formFichaCredencial.addEventListener("submit", async (e) => {
     const data = await parseJsonResponse(r);
     if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
     overlayFichaCredencial.classList.add("hidden");
+    fichaConfigContexto = null;
     await carregarFichaCliente(fichaCredencialIdcentralAtual);
   } catch (err) {
     alert(`Erro ao salvar: ${String(err)}`);
@@ -7702,6 +9528,7 @@ formFichaCredencial.addEventListener("submit", async (e) => {
 irParaTela(resolverCaminho(window.location.pathname).tela, {
   semHistorico: true,
   idcentral: resolverCaminho(window.location.pathname).idcentral,
+  sub: resolverCaminho(window.location.pathname).sub,
 });
 
 atualizarStatus();

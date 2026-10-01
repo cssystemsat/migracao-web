@@ -76,8 +76,16 @@ for doc in docs:
             "csm": dados.get("cs", ""),
             "etapa": app.IMPLANTACAO_ETAPA_PADRAO,
             "estagio": app.ESTAGIO_CLIENTE_PADRAO,
+            # Esse cliente só existe porque tinha uma migração solta sem par na
+            # Implantação — não é um cliente de Implantação de verdade, então
+            # a Ficha dele mostra o menu enxuto (sem Implantação/Marcos).
+            "tem_implantacao": False,
         })
         cliente_id = novo_cliente_ref.id
+        # Outra migração antiga com o mesmo idcentral anexa neste cliente em
+        # vez de criar um segundo.
+        if idcentral:
+            clientes_por_idcentral[idcentral] = cliente_id
 
     migracao_ref = app.db.collection(app.CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document()
     migracao_ref.set({

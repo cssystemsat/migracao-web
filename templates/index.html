@@ -18,18 +18,17 @@
 <body data-usuario-id="{{ app_usuario_id }}" data-usuario-responsavel="{{ app_usuario_responsavel }}" data-usuario-perfil="{{ app_usuario_perfil }}">
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-topo">
-      <button type="button" class="sidebar-logo" id="sidebar-logo" title="Ir para o Dashboard">
-        <span class="sidebar-logo-selo">🌐</span>
-        <span class="sidebar-logo-texto">Migração <span>{{ app_version }}</span></span>
+      <button type="button" class="sidebar-toggle" id="sidebar-toggle" title="Recolher menu" aria-label="Recolher menu" aria-expanded="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
       </button>
-      <button type="button" class="sidebar-toggle" id="sidebar-toggle" title="Recolher menu">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 5 8 12 15 19"></polyline></svg>
+      <button type="button" class="sidebar-logo" id="sidebar-logo" title="Ir para o Dashboard">
+        <span class="sidebar-logo-texto">Migração <span>{{ app_version }}</span></span>
       </button>
     </div>
 
     <div id="sidebar-raiz">
       <button type="button" class="sidebar-item" id="nav-dashboard" title="Dashboard">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"></rect><rect x="13" y="3" width="8" height="8" rx="1.5"></rect><rect x="3" y="13" width="8" height="8" rx="1.5"></rect><rect x="13" y="13" width="8" height="8" rx="1.5"></rect></svg>
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path><path d="M10 20v-6h4v6"></path></svg>
         <span class="sidebar-item-texto">Dashboard</span>
       </button>
       <button type="button" class="sidebar-item" id="nav-implantacao" title="Controle de Implantação">
@@ -37,7 +36,7 @@
         <span class="sidebar-item-texto">Controle de Implantação</span>
       </button>
       <button type="button" class="sidebar-item" id="nav-migracao" title="Controle de Migração">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.2"></rect><rect x="10" y="4" width="5" height="10" rx="1.2"></rect><rect x="17" y="4" width="4" height="13" rx="1.2"></rect></svg>
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 20 7 16 11"></polyline><line x1="4" y1="7" x2="20" y2="7"></line><polyline points="8 13 4 17 8 21"></polyline><line x1="20" y1="17" x2="4" y2="17"></line></svg>
         <span class="sidebar-item-texto">Controle de Migração</span>
       </button>
       <button type="button" class="sidebar-item" id="nav-ferramentas" title="Ferramentas Auxiliares">
@@ -47,32 +46,43 @@
     </div>
 
     <div id="sidebar-cliente" class="hidden">
-      <button type="button" class="sidebar-voltar" id="ficha-voltar" title="Voltar">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 5 8 12 15 19"></polyline></svg>
-        <span class="sidebar-item-texto">Voltar</span>
-      </button>
       <div class="sidebar-cliente-nome" id="ficha-sidebar-nome"></div>
-      <button type="button" class="sidebar-item" id="ficha-aba-geral">
+      <button type="button" class="sidebar-item" id="ficha-aba-geral" title="Visão Geral">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path><path d="M10 20v-6h4v6"></path></svg>
         <span class="sidebar-item-texto">Visão Geral</span>
       </button>
-      <button type="button" class="sidebar-item" id="ficha-aba-implantacao">
+      <button type="button" class="sidebar-item" id="ficha-aba-implantacao" title="Implantação">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 4V3h6v1"></path><line x1="9" y1="10" x2="15" y2="10"></line><line x1="9" y1="14" x2="15" y2="14"></line><line x1="9" y1="18" x2="12" y2="18"></line></svg>
         <span class="sidebar-item-texto">Implantação</span>
       </button>
-      <button type="button" class="sidebar-item hidden" id="ficha-aba-migracao">
+      <button type="button" class="sidebar-item" id="ficha-aba-marcos" title="Marcos">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="21" x2="5" y2="3"></line><path d="M5 4h12l-2.5 4L17 12H5"></path></svg>
+        <span class="sidebar-item-texto">Marcos</span>
+      </button>
+      <button type="button" class="sidebar-item hidden" id="ficha-aba-migracao" title="Migração">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 20 7 16 11"></polyline><line x1="4" y1="7" x2="20" y2="7"></line><polyline points="8 13 4 17 8 21"></polyline><line x1="20" y1="17" x2="4" y2="17"></line></svg>
         <span class="sidebar-item-texto">Migração</span>
       </button>
-      <button type="button" class="sidebar-item" id="ficha-aba-consulta">
+      <button type="button" class="sidebar-item" id="ficha-aba-consulta" title="Consulta">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"></circle><line x1="16" y1="16" x2="21" y2="21"></line></svg>
         <span class="sidebar-item-texto">Consulta</span>
       </button>
-      <button type="button" class="sidebar-item" id="ficha-aba-importacao">
+      <button type="button" class="sidebar-item" id="ficha-aba-importacao" title="Importação">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"></path><polyline points="8 9 12 5 16 9"></polyline><line x1="12" y1="5" x2="12" y2="16"></line></svg>
         <span class="sidebar-item-texto">Importação</span>
       </button>
     </div>
   </nav>
 
   <header class="topbar">
-    <div class="topbar-busca">
-      <input type="text" placeholder="Buscar cliente..." disabled title="Em breve">
+    <div class="topbar-esquerda">
+      <h1 class="topbar-titulo" id="topbar-titulo"></h1>
+      <div class="topbar-busca">
+        <svg class="topbar-busca-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>
+        <input type="text" id="topbar-busca-input" placeholder="Ir para cliente…" autocomplete="off" title="Abre a Ficha do cliente (Ctrl+K)">
+        <kbd class="topbar-busca-atalho">Ctrl K</kbd>
+        <div id="topbar-busca-resultados" class="busca-global-resultados hidden"></div>
+      </div>
     </div>
     <div class="topbar-direita">
       <div class="app-usuario-menu">
@@ -350,19 +360,6 @@
         </div>
         <div id="mapa-campos" class="mapa-campos"></div>
 
-        <div id="bloco-criar-planilha" class="bloco-criar-planilha hidden">
-          <div class="criar-planilha-linha-topo">
-            <label class="checkbox-linha">
-              <input type="checkbox" id="chk-criar-planilha">
-              Criar planilha
-            </label>
-            <select id="select-cliente-planilha-existente" class="select-cliente-existente">
-              <option value="">Cliente existente...</option>
-            </select>
-          </div>
-          <input type="text" id="input-nome-planilha" class="hidden" placeholder="Nome do cliente (vai aparecer em Clientes em migração)">
-        </div>
-
         <div id="progresso-container" class="progresso-container hidden">
           <div class="progresso-bar-bg"><div id="progresso-bar" class="progresso-bar"></div></div>
           <div class="progresso-info">
@@ -465,6 +462,7 @@
         <button id="usuarios-fechar" class="btn-secondary">Fechar</button>
       </div>
       <div class="modal-body">
+        <p id="usuarios-erro" class="placeholder hidden" style="color:#b91c1c"></p>
         <div id="lista-usuarios" class="lista-credenciais"></div>
 
         <h4 class="form-credencial-titulo" id="usuario-form-titulo">Adicionar usuário</h4>
@@ -583,8 +581,7 @@
       <div class="modal-sidebar-config hidden" id="implantacao-cliente-sidebar-config">
         <button type="button" class="modal-sidebar-config-item" data-aba="implantacao">Implantação</button>
         <button type="button" class="modal-sidebar-config-item" data-aba="migracao">Migração</button>
-        <button type="button" class="modal-sidebar-config-item" data-aba="marcos">Marcos <span class="sidebar-seta">▸</span></button>
-        <div id="implantacao-marcos-submenu" class="modal-sidebar-submenu hidden"></div>
+        <button type="button" class="modal-sidebar-config-item" data-aba="credenciais">Credenciais SSX</button>
       </div>
       <div class="modal-header">
         <h3 id="implantacao-cliente-modal-titulo">Adicionar cliente</h3>
@@ -619,6 +616,14 @@
           </label>
 
           <div id="implantacao-cliente-campos-complementares" class="implantacao-cliente-complementares hidden">
+            <label class="campo-migracao">
+              <span>Cliente implantado?</span>
+              <select id="implantacao-cliente-implantado">
+                <option value="nao">Não</option>
+                <option value="sim">Sim</option>
+              </select>
+              <span id="implantacao-cliente-implantado-info" class="campo-implantado-info"></span>
+            </label>
             <label class="campo-migracao">
               <span>Objetivo</span>
               <input type="text" id="implantacao-cliente-objetivo">
@@ -693,21 +698,24 @@
 
           <button type="submit" id="btn-salvar-implantacao-cliente" class="btn-primary">Adicionar</button>
         </form>
-
-        <div id="implantacao-marco-painel" class="marco-painel hidden">
-          <p id="implantacao-marco-resumo" class="marco-resumo"></p>
-          <div id="implantacao-marco-itens"></div>
-          <form id="form-implantacao-marco-extra" class="marco-extra-form">
-            <input type="text" id="implantacao-marco-extra-texto" maxlength="200" placeholder="Adicionar item só para este cliente...">
-            <button type="submit" class="btn-secondary">Adicionar</button>
-          </form>
-          <label class="marco-linha marco-manual">
-            <input type="checkbox" id="implantacao-marco-manual">
-            <span>Marcar este marco como concluído mesmo com itens pendentes</span>
-          </label>
-          <button type="button" id="btn-salvar-implantacao-marcos" class="btn-primary">Salvar marcos</button>
-        </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Página de Marcos (aba "Marcos" da Ficha do cliente). Fica guardada aqui
+       e é movida pra dentro da Ficha por construirFichaMarcos (script.js) —
+       os listeners dos elementos são ligados uma vez só, no carregamento. -->
+  <div id="marcos-pagina-reserva" class="hidden">
+    <div id="implantacao-marcos-submenu" class="ficha-marcos-lista"></div>
+    <div id="implantacao-marco-painel" class="marco-painel">
+      <h3 id="implantacao-marco-titulo" class="ficha-marcos-titulo"></h3>
+      <p id="implantacao-marco-resumo" class="marco-resumo"></p>
+      <div id="implantacao-marco-itens"></div>
+      <label class="marco-linha marco-manual">
+        <input type="checkbox" id="implantacao-marco-manual">
+        <span>Marcar este marco como concluído mesmo com itens pendentes</span>
+      </label>
+      <button type="button" id="btn-salvar-implantacao-marcos" class="btn-primary">Salvar marcos</button>
     </div>
   </div>
   <script>window.CHECKLIST_MARCOS_PADRAO = {{ checklist_marcos_padrao | tojson }};</script>
@@ -731,7 +739,12 @@
   </div>
 
   <div id="overlay-ficha-credencial" class="overlay hidden">
-    <div class="modal">
+    <div class="modal" id="modal-ficha-credencial">
+      <div class="modal-sidebar-config hidden" id="credencial-sidebar-config">
+        <button type="button" class="modal-sidebar-config-item" data-aba="implantacao">Implantação</button>
+        <button type="button" class="modal-sidebar-config-item" data-aba="migracao">Migração</button>
+        <button type="button" class="modal-sidebar-config-item" data-aba="credenciais">Credenciais SSX</button>
+      </div>
       <div class="modal-header">
         <h3>Credencial SSX do cliente</h3>
         <button id="ficha-credencial-modal-fechar" class="btn-secondary">Fechar</button>
@@ -760,6 +773,19 @@
       </div>
       <div class="modal-body">
         <div id="implantacao-timeline-setores"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-implantados" class="overlay hidden">
+    <div class="modal modal-implantados">
+      <div class="modal-header">
+        <h3 id="implantados-titulo">Clientes implantados</h3>
+        <button id="implantados-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="implantados-busca" class="implantacao-busca implantados-busca" placeholder="Buscar cliente...">
+        <div id="implantados-lista"></div>
       </div>
     </div>
   </div>
@@ -937,6 +963,7 @@
       <div class="modal-sidebar-config hidden" id="migracao-sidebar-config">
         <button type="button" class="modal-sidebar-config-item" data-aba="implantacao">Implantação</button>
         <button type="button" class="modal-sidebar-config-item" data-aba="migracao">Migração</button>
+        <button type="button" class="modal-sidebar-config-item" data-aba="credenciais">Credenciais SSX</button>
       </div>
       <div class="modal-header">
         <h3 id="migracao-modal-titulo">Cliente</h3>
@@ -944,9 +971,13 @@
       </div>
       <div class="modal-body">
         <form id="form-migracao" class="form-migracao">
+          <label class="campo-migracao hidden" id="migracao-nome-wrap">
+            <span>Nome do cliente</span>
+            <input type="text" id="migracao-nome" placeholder="Nome do cliente">
+          </label>
           <label class="campo-migracao" id="migracao-idcentral-wrap">
-            <span>IdCentral</span>
-            <input type="text" id="migracao-idcentral" placeholder="Precisa bater com o IdCentral da Implantação pra abrir a Ficha do Cliente unificada">
+            <span>IdCentral *</span>
+            <input type="text" id="migracao-idcentral" placeholder="Obrigatório — precisa bater com o IdCentral da Implantação pra abrir a Ficha do Cliente unificada">
           </label>
           <label class="campo-migracao" id="migracao-cs-wrap">
             <span>Responsável</span>
@@ -967,9 +998,30 @@
             <span>Plataforma de origem</span>
             <input type="text" id="migracao-plataforma" placeholder="Ex: iTrack, Fleety...">
           </label>
+          <div class="migracao-grupo-acesso">
+            <span class="migracao-grupo-titulo">Acesso à plataforma de origem</span>
+            <label class="campo-migracao">
+              <span>Link de acesso</span>
+              <input type="text" id="migracao-link-acesso-origem" placeholder="Link de login da plataforma que o cliente usava">
+            </label>
+            <div class="migracao-grupo-linha-dupla">
+              <label class="campo-migracao">
+                <span>Login</span>
+                <input type="text" id="migracao-login-acesso-origem" placeholder="Login de acesso">
+              </label>
+              <label class="campo-migracao">
+                <span>Senha</span>
+                <input type="password" id="migracao-senha-acesso-origem" placeholder="Senha de acesso" autocomplete="new-password">
+              </label>
+            </div>
+          </div>
           <label class="campo-migracao">
             <span>Link da planilha de migração</span>
-            <input type="text" id="migracao-link-planilha" placeholder="Cole aqui o link da planilha Google">
+            <div class="linha-input-botao">
+              <input type="text" id="migracao-link-planilha" placeholder="Cole aqui o link da planilha Google">
+              <button type="button" id="btn-criar-planilha-migracao" class="btn-secondary">Criar planilha</button>
+              <button type="button" id="btn-liberar-link-planilha" class="btn-secondary hidden">Liberar edição</button>
+            </div>
           </label>
           <label class="campo-migracao">
             <span>Quantidade de Clientes</span>
@@ -1007,6 +1059,45 @@
     </div>
   </div>
 
+  <!-- "+ Adicionar Cliente" de Migração, quando o IdCentral já bate com um
+       cliente de Implantação existente — pergunta se é o mesmo cliente antes
+       de criar qualquer coisa, pra não duplicar. Ver checarVinculoMigracao
+       (script.js). -->
+  <div id="overlay-vincular-migracao" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Cliente já cadastrado na Implantação</h3>
+        <button id="vincular-migracao-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <p id="vincular-migracao-texto" class="placeholder"></p>
+        <div class="form-credencial-botoes">
+          <button type="button" id="btn-vincular-migracao-sim" class="btn-primary">Vincular cliente</button>
+          <button type="button" id="btn-vincular-migracao-nao" class="btn-secondary">Não vincular</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirmação pra destravar o link da planilha de migração depois de já
+       ter sido salvo uma vez (só admin vê o botão que abre isso). Ver
+       btnLiberarLinkPlanilha (script.js). -->
+  <div id="overlay-liberar-planilha" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Liberar edição da planilha</h3>
+        <button id="liberar-planilha-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <p class="placeholder">Essa migração já tem uma planilha salva. Liberar a edição permite trocar o link ou criar uma nova planilha, substituindo a atual. Tem certeza?</p>
+        <div class="form-credencial-botoes">
+          <button type="button" id="btn-liberar-planilha-sim" class="btn-primary">Liberar edição</button>
+          <button type="button" id="btn-liberar-planilha-nao" class="btn-secondary">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="overlay-veiculos-migracao" class="overlay overlay-fullscreen hidden">
     <div class="modal modal-fullscreen">
       <div class="modal-header">
@@ -1019,6 +1110,10 @@
         </div>
       </div>
       <div class="modal-body">
+        <div class="veiculos-migracao-filtros">
+          <input type="text" id="veiculos-migracao-busca" placeholder="Buscar por cliente, veículo ou equipamento...">
+          <div id="veiculos-migracao-chips-status" class="veiculos-migracao-chips"></div>
+        </div>
         <div id="veiculos-migracao-corpo" class="veiculos-migracao-corpo"></div>
       </div>
     </div>
