@@ -1,5 +1,19 @@
 const el = (id) => document.getElementById(id);
 
+// Ícone único de engrenagem (configurar/editar) usado em toda a ferramenta. Botões do HTML marcam
+// com data-icone="engrenagem" e recebem o ícone no carregamento; os criados via JS usam
+// aplicarIconeEngrenagem. O title do botão vira também o aria-label.
+const ICONE_ENGRENAGEM =
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
+
+function aplicarIconeEngrenagem(btn) {
+  btn.innerHTML = ICONE_ENGRENAGEM;
+  if (btn.title) btn.setAttribute("aria-label", btn.title);
+  return btn;
+}
+
+document.querySelectorAll('[data-icone="engrenagem"]').forEach(aplicarIconeEngrenagem);
+
 // "adm" | "analista" | "visualizacao" — usado pra travar o campo IdCentral
 // (só admin altera um valor já existente) na tela.
 const USUARIO_PERFIL_ATUAL = document.body.dataset.usuarioPerfil || "adm";
@@ -1401,8 +1415,9 @@ function construirTabelaImplantacao(clientes, mensagemVazia, ordemClienteDir, on
 
     const btnEditar = document.createElement("button");
     btnEditar.className = "btn-engrenagem";
-    btnEditar.textContent = "⚙";
+    btnEditar.classList.add("btn-engrenagem-icone");
     btnEditar.title = "Editar cliente";
+    aplicarIconeEngrenagem(btnEditar);
     btnEditar.addEventListener("click", (e) => {
       e.stopPropagation();
       abrirModalImplantacaoCliente(c);
@@ -2542,8 +2557,9 @@ function construirCardEvento(ev) {
   acoes.className = "timeline-card-acoes";
   const btnEditar = document.createElement("button");
   btnEditar.className = "btn-engrenagem";
-  btnEditar.textContent = "⚙";
+  btnEditar.classList.add("btn-engrenagem-icone");
   btnEditar.title = "Editar";
+  aplicarIconeEngrenagem(btnEditar);
   btnEditar.addEventListener("click", () => abrirModalImplantacaoEvento(ev.setor, ev));
   const btnExcluir = document.createElement("button");
   btnExcluir.className = "btn-engrenagem btn-excluir";
@@ -2816,8 +2832,9 @@ function construirTabelaMigracao(clientes) {
 
     const btnConfig = document.createElement("button");
     btnConfig.className = "btn-engrenagem";
-    btnConfig.textContent = "⚙";
+    btnConfig.classList.add("btn-engrenagem-icone");
     btnConfig.title = "Configurar CS, plataforma, percentual...";
+    aplicarIconeEngrenagem(btnConfig);
     btnConfig.addEventListener("click", (e) => {
       e.stopPropagation();
       abrirModalMigracao(c);
@@ -4408,7 +4425,8 @@ btnIniciarImport.addEventListener("click", async () => {
 });
 
 // --- ENVIO DE COMANDO (SMS Market) ---
-const overlayComando = el("overlay-comando");
+// Formulário fica direto na sub-tela "/ferramentas/comandos"; a engrenagem do cabeçalho
+// abre o "Gerenciar modelos de comando" (modal).
 const comandoModelo = el("comando-modelo");
 const comandoTipo = el("comando-tipo");
 const comandoOperadora = el("comando-operadora");
@@ -4479,11 +4497,6 @@ comandoModelo.addEventListener("change", () => {
   popularSelect(comandoTipo, COMANDOS_POR_MODELO[comandoModelo.value] || [], "Selecione o comando...");
 });
 
-el("btn-abrir-envio-comando").addEventListener("click", () => {
-  overlayComando.classList.remove("hidden");
-});
-
-el("comando-modal-fechar").addEventListener("click", () => overlayComando.classList.add("hidden"));
 el("form-comando-auth").addEventListener("submit", async (e) => {
   e.preventDefault();
   const usuario = el("comando-usuario").value.trim();
@@ -4955,16 +4968,41 @@ btnAssociarRastreadoresIniciar.addEventListener("click", async () => {
 });
 
 // --- CONVERSOR KML -> SSX (Áreas/Rotas) ---
-const overlayConversor = el("overlay-conversor");
+// Sub-tela "/ferramentas/conversor-kml". Mesma engine e mesmo fluxo do conversor da Universidade
+// Systemsat (src/app/components/conversor-kml-ssx): roda 100% no navegador — parse, validação,
+// edição manual e geração do KML/CSV, sem enviar o arquivo pro servidor. conversorkml.py segue as
+// mesmas regras (uso por linha de comando).
 const conversorInputArquivo = el("conversor-input-arquivo");
 const conversorArquivoNome = el("conversor-arquivo-nome");
-const conversorTipo = el("conversor-tipo");
 const conversorCategoria = el("conversor-categoria");
 const conversorGrupo = el("conversor-grupo");
 const conversorTolerancia = el("conversor-tolerancia");
+const conversorForcarAreas = el("conversor-forcar-areas");
 const btnConversorConverter = el("btn-conversor-converter");
 const conversorResultado = el("conversor-resultado");
 const conversorCores = el("conversor-cores");
+
+// Limites do manual de importação SSX.
+const KML_MAX_NAME = 150;
+const KML_MAX_DESCRIPTION = 500;
+const KML_MAX_GEO_CODE = 40;
+const KML_MAX_CATEGORY_CODE = 8000;
+const KML_MAX_GROUP_CODE = 40;
+const KML_MAX_COORDINATES = 8000;
+const KML_MAX_LINHAS_IMPORTACAO = 3000; // manual SSX v1.4, 13/11/2025
+const KML_TAMANHO_PARTE = 1000; // abaixo do limite de importação, pra manter os arquivos leves
+const KML_LIMITE_PROBLEMATICOS = 500;
+const KML_NUM_RE = /^[+-]?(\d+\.?\d*|\.\d+)$/;
+
+// Avisos que aparecem em quase todo registro (ex.: forçar áreas): viram só uma contagem.
+const KML_AVISOS_COMPACTAVEIS = ["GeoIntegrationCode truncado", "polígono fechado automaticamente", "Coordenadas excedem"];
+
+const KML_TIPO_LABEL = { Polygon: "Área", LineString: "Rota", Point: "Ponto" };
+const KML_TIPO_OPCOES = [
+  { value: "Point", label: "Ponto" },
+  { value: "LineString", label: "Rota" },
+  { value: "Polygon", label: "Área" },
+];
 
 // Tabela de cores do manual de importação SSX (pág. 8).
 const CORES_SSX = [
@@ -4982,6 +5020,355 @@ const CORES_SSX = [
   { codigo: 12, hex: "#555555" },
   { codigo: 13, hex: "#F6F6F6" },
 ];
+const KML_CORES_VALIDAS = new Set(CORES_SSX.map((c) => String(c.codigo)));
+
+function kmlSemAcento(texto) {
+  return (texto || "").normalize("NFKD").replace(/[̀-ͯ]/g, "");
+}
+
+function kmlSlug(texto, maxLen = 20) {
+  const limpo = kmlSemAcento(texto).replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase();
+  return limpo.slice(0, maxLen) || "SEM_NOME";
+}
+
+function kmlEscapeXml(s) {
+  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function kmlTexto(elem) {
+  return elem ? (elem.textContent || "").trim() : "";
+}
+
+// Google Earth/My Maps salvam a <description> como HTML ("<div>texto<br></div>"); dentro de CDATA
+// o parser trata como texto, então as tags iriam literalmente pro SSX sem essa limpeza.
+function kmlLimparDescricaoHtml(bruta) {
+  const texto = (bruta || "").trim();
+  if (!texto || !/<[a-z][\s\S]*>/i.test(texto)) return texto;
+  const comQuebras = texto.replace(/<\s*br\s*\/?\s*>/gi, "\n").replace(/<\/\s*(p|div|li|tr)\s*>/gi, "\n");
+  const doc = new DOMParser().parseFromString(comQuebras, "text/html");
+  return (doc.body.textContent || "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{2,}/g, "\n")
+    .split("\n")
+    .map((l) => l.trim())
+    .join("\n")
+    .trim();
+}
+
+function kmlFilho(elem, nome) {
+  return Array.from(elem.children).find((c) => c.localName === nome) || null;
+}
+
+function kmlDescendente(elem, nome) {
+  for (const child of Array.from(elem.children)) {
+    if (child.localName === nome) return child;
+    const achado = kmlDescendente(child, nome);
+    if (achado) return achado;
+  }
+  return null;
+}
+
+// Bloco {{Nome|Cat|Grupo|Tolerância|CódÁrea|Cor}} na descrição (padrão do manual).
+function kmlExtrairBlocoDescricao(descricao) {
+  const m = /\{\{([\s\S]*?)\}\}/.exec(descricao || "");
+  if (!m) return [{}, (descricao || "").trim()];
+  const partes = m[1].split("|").map((p) => p.trim());
+  const campos = ["Name", "CategoryIntegrationCode", "GroupIntegrationCode", "Tolerance", "GeoIntegrationCode", "ColorCode"];
+  const dados = {};
+  campos.forEach((campo, i) => {
+    if (partes[i]) dados[campo] = partes[i];
+  });
+  return [dados, (descricao || "").replace(/\{\{[\s\S]*?\}\}/g, "").replace(/ +/g, " ").trim()];
+}
+
+function kmlExtrairExtendedData(placemark) {
+  const dados = {};
+  const ext = kmlFilho(placemark, "ExtendedData");
+  if (!ext) return dados;
+  Array.from(ext.children)
+    .filter((c) => c.localName === "Data")
+    .forEach((data) => {
+      const nome = (data.getAttribute("name") || "").trim();
+      if (nome) dados[nome] = kmlTexto(kmlFilho(data, "value"));
+    });
+  return dados;
+}
+
+function kmlExtrairGeometria(placemark) {
+  for (const tipo of ["Polygon", "LineString", "Point"]) {
+    const geom = kmlDescendente(placemark, tipo);
+    if (geom) return [tipo, kmlTexto(kmlDescendente(geom, "coordinates"))];
+  }
+  return [null, ""];
+}
+
+function kmlNormalizarCoordenadas(coordsTexto) {
+  return coordsTexto
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => {
+      const partes = token.split(",");
+      if (partes.length < 2) throw new Error(`Coordenada inválida: '${token}'`);
+      const lon = partes[0].trim();
+      const lat = partes[1].trim();
+      if (!KML_NUM_RE.test(lon) || !KML_NUM_RE.test(lat)) throw new Error(`Coordenada não numérica: '${token}'`);
+      const lonF = parseFloat(lon);
+      const latF = parseFloat(lat);
+      if (lonF < -180 || lonF > 180 || latF < -90 || latF > 90) {
+        throw new Error(`Coordenada fora do intervalo esperado (lon lat): '${token}'`);
+      }
+      return `${lon},${lat},0`;
+    });
+}
+
+// GeoIntegrationCode gerado: Grupo_Nome_número (o número garante unicidade).
+function kmlGerarGeoCode(grupo, nome, indice) {
+  const idx = String(indice).padStart(3, "0");
+  return `${(grupo || "").trim()}_${kmlSlug(nome)}_${idx}`.replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, KML_MAX_GEO_CODE);
+}
+
+function kmlMontarPlacemark(placemark, config, indice) {
+  const erros = [];
+  const avisos = [];
+
+  let nome = kmlTexto(kmlFilho(placemark, "name"));
+  const descricaoBruta = kmlLimparDescricaoHtml(kmlTexto(kmlFilho(placemark, "description")));
+
+  // A tag do KML só serve pra achar as coordenadas: o tipo (Ponto/Rota/Área) vem das próprias
+  // coordenadas, porque clientes exportam áreas como LineString quando o anel não fica fechado.
+  const [geometria, coordsTexto] = kmlExtrairGeometria(placemark);
+  if (geometria === null) erros.push("Placemark sem geometria (Polygon, LineString ou Point)");
+
+  let pontos = [];
+  let coordenadasInvalidas = false;
+  if (geometria !== null) {
+    try {
+      pontos = kmlNormalizarCoordenadas(coordsTexto);
+    } catch (e) {
+      erros.push(e.message);
+      coordenadasInvalidas = true;
+    }
+  }
+
+  // Ponto: 1 coordenada. Área: 2+ com anel fechado (1ª = última). Rota: 2+ sem fechamento.
+  let tipoOriginal = null;
+  if (pontos.length === 1) tipoOriginal = "Point";
+  else if (pontos.length >= 2) tipoOriginal = pontos[0] === pontos[pontos.length - 1] ? "Polygon" : "LineString";
+  else if (geometria !== null && !coordenadasInvalidas) erros.push("Nenhuma coordenada encontrada na geometria");
+
+  const dados = kmlExtrairExtendedData(placemark);
+  const [bloco, descricaoBase] = kmlExtrairBlocoDescricao(descricaoBruta);
+  let descricao = descricaoBase;
+  Object.assign(dados, bloco);
+  if (bloco.Name) nome = bloco.Name;
+
+  if (!dados.CategoryIntegrationCode) {
+    if (config.categoria) dados.CategoryIntegrationCode = config.categoria;
+    else erros.push("Campo obrigatório 'CategoryIntegrationCode' não informado (defina um valor padrão)");
+  }
+  if (!dados.GroupIntegrationCode) {
+    if (config.grupo) dados.GroupIntegrationCode = config.grupo;
+    else erros.push("Campo obrigatório 'GroupIntegrationCode' não informado (defina um valor padrão)");
+  }
+
+  // GeoIntegrationCode informado no KML (ExtendedData ou {{...}}) é mantido; só gera quando falta.
+  const codigoInformado = (dados.GeoIntegrationCode || "").trim();
+  if (codigoInformado) {
+    if (codigoInformado.length > KML_MAX_GEO_CODE) erros.push(`'GeoIntegrationCode' excede ${KML_MAX_GEO_CODE} caracteres`);
+    dados.GeoIntegrationCode = codigoInformado;
+  } else {
+    const codigoGerado = kmlGerarGeoCode(dados.GroupIntegrationCode, nome, indice);
+    if (`${dados.GroupIntegrationCode || ""}_${kmlSlug(nome)}_${String(indice).padStart(3, "0")}`.length > KML_MAX_GEO_CODE) {
+      avisos.push(`GeoIntegrationCode truncado para ${KML_MAX_GEO_CODE} caracteres: ${codigoGerado}`);
+    }
+    dados.GeoIntegrationCode = codigoGerado;
+  }
+
+  // Sem Name no Placemark: usa o código de integração como nome.
+  if (!nome) nome = dados.GeoIntegrationCode;
+
+  let tipoFinal = tipoOriginal;
+  let convertido = false;
+  if (config.forcarAreas && tipoOriginal === "LineString") {
+    tipoFinal = "Polygon";
+    convertido = true;
+    if (pontos.length > 0 && pontos[0] !== pontos[pontos.length - 1]) {
+      pontos.push(pontos[0]);
+      avisos.push("Rota convertida em área: polígono fechado automaticamente (ponto inicial repetido no final)");
+    }
+  }
+
+  if (tipoFinal === "Point" && !dados.Tolerance) {
+    if (config.tolerancia !== undefined && config.tolerancia !== null) dados.Tolerance = String(config.tolerancia);
+    else erros.push("Tolerance é obrigatório para o tipo Ponto (defina uma tolerância padrão)");
+  }
+
+  if (!dados.ColorCode && config.cor) dados.ColorCode = String(config.cor);
+
+  if (nome.length > KML_MAX_NAME) erros.push(`'Name' excede ${KML_MAX_NAME} caracteres (${nome.length})`);
+  if (descricao.length > KML_MAX_DESCRIPTION) {
+    avisos.push(`Descrição excedia ${KML_MAX_DESCRIPTION} caracteres (provável HTML bruto); substituída pelo nome da área`);
+    descricao = nome;
+  }
+  if ((dados.CategoryIntegrationCode || "").length > KML_MAX_CATEGORY_CODE) {
+    erros.push(`'CategoryIntegrationCode' excede ${KML_MAX_CATEGORY_CODE} caracteres`);
+  }
+  if ((dados.GroupIntegrationCode || "").length > KML_MAX_GROUP_CODE) {
+    erros.push(`'GroupIntegrationCode' excede ${KML_MAX_GROUP_CODE} caracteres`);
+  }
+  if (dados.Tolerance && !/^-?\d+$/.test(dados.Tolerance.trim())) {
+    erros.push(`'Tolerance' deve ser um número inteiro (metros): '${dados.Tolerance}'`);
+  }
+  if (dados.ColorCode) {
+    let col = dados.ColorCode.trim();
+    if (/^\d+$/.test(col)) col = String(parseInt(col, 10));
+    dados.ColorCode = col;
+    if (!KML_CORES_VALIDAS.has(col)) {
+      avisos.push(`ColorCode '${dados.ColorCode}' fora da tabela (1 a 13); campo removido`);
+      delete dados.ColorCode;
+    }
+  }
+
+  if (tipoFinal === "Polygon" && pontos.length > 0) {
+    const distintos = new Set(pontos).size;
+    if (distintos < 3) erros.push(`Área deve ter no mínimo 3 pontos (encontrados ${distintos})`);
+  }
+
+  const coordsFinal = pontos.join("\n          ");
+  if (coordsFinal.length > KML_MAX_COORDINATES) {
+    avisos.push(`Coordenadas excedem ${KML_MAX_COORDINATES} caracteres (${coordsFinal.length}); o sistema pode rejeitar este registro`);
+  }
+
+  return { indice, nome, descricao, tipoOriginal, tipoFinal, convertido, pontos, dados, avisos, erros };
+}
+
+function kmlProcessar(kmlText, config) {
+  const doc = new DOMParser().parseFromString(kmlText, "application/xml");
+  if (doc.querySelector("parsererror")) {
+    throw new Error(
+      "O arquivo de entrada não é um XML/KML válido. Dica: verifique se caracteres especiais na " +
+        "<description> estão dentro de <![CDATA[ ]]> (ver manual, pág. 8)."
+    );
+  }
+  const placemarks = Array.from(doc.getElementsByTagNameNS("*", "Placemark"));
+  if (placemarks.length === 0) throw new Error("Nenhum <Placemark> encontrado no arquivo.");
+  return placemarks.map((pm, i) => kmlMontarPlacemark(pm, config, i + 1));
+}
+
+function kmlMontarXmlPlacemark(registro) {
+  const { dados, nome, descricao, tipoFinal, pontos } = registro;
+  const coordsFinal = pontos.join("\n          ");
+  const linhasExt = ["GeoIntegrationCode", "CategoryIntegrationCode", "GroupIntegrationCode", "Tolerance", "ColorCode"]
+    .filter((campo) => dados[campo])
+    .map((campo) => `      <Data name="${campo}">\n        <value>${kmlEscapeXml(dados[campo])}</value>\n      </Data>`);
+  const extXml = `    <ExtendedData>\n${linhasExt.join("\n")}\n    </ExtendedData>`;
+  const descXml = descricao ? `    <description><![CDATA[${descricao}]]></description>\n` : "";
+
+  // Polygon precisa do wrapper OGC (outerBoundaryIs/LinearRing): sem ele o SSX aceita o arquivo
+  // mas diz "Não tem registros nesse arquivo" (confirmado em teste real, 2026-09-29).
+  let geomXml;
+  if (tipoFinal === "Polygon") {
+    geomXml =
+      `    <Polygon>\n      <outerBoundaryIs>\n        <LinearRing>\n          <coordinates>\n` +
+      `          ${coordsFinal}\n          </coordinates>\n        </LinearRing>\n      </outerBoundaryIs>\n    </Polygon>`;
+  } else if (tipoFinal === "LineString") {
+    geomXml = `    <LineString>\n      <coordinates>\n          ${coordsFinal}\n      </coordinates>\n    </LineString>`;
+  } else {
+    geomXml = `    <Point>\n      <coordinates>\n          ${coordsFinal}\n      </coordinates>\n    </Point>`;
+  }
+  return `  <Placemark>\n    <name>${kmlEscapeXml(nome)}</name>\n${descXml}${extXml}\n${geomXml}\n  </Placemark>`;
+}
+
+function kmlGerarKml(registros) {
+  const blocos = registros.filter((r) => r.erros.length === 0).map(kmlMontarXmlPlacemark);
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n' +
+    blocos.join("\n") +
+    "\n</Document>\n</kml>\n"
+  );
+}
+
+const KML_TIPO_CSV = { Polygon: "1", LineString: "2", Point: "3" };
+const KML_CSV_CABECALHO = "Nome;Descricao;Tipo;Coordenadas;Tolerancia;Cod.integracao;Cod.categoria;Cod.grupo;Cod.cor;";
+
+// CSV do manual (pág. 2): sem acentos, ';' como separador, \r\n, coordenadas "lon lat" separadas por ','.
+function kmlGerarCsv(registros) {
+  const linhas = [KML_CSV_CABECALHO];
+  registros
+    .filter((r) => r.erros.length === 0)
+    .forEach((r) => {
+      const coords = r.pontos
+        .map((p) => {
+          const [lon, lat] = p.split(",");
+          return `${lon} ${lat}`;
+        })
+        .join(",");
+      const campos = [
+        r.nome,
+        r.descricao,
+        KML_TIPO_CSV[r.tipoFinal || ""] || "",
+        coords,
+        r.dados.Tolerance || "",
+        r.dados.GeoIntegrationCode || "",
+        r.dados.CategoryIntegrationCode || "",
+        r.dados.GroupIntegrationCode || "",
+        r.dados.ColorCode || "",
+      ];
+      linhas.push(campos.map((c) => kmlSemAcento(c).replace(/\r/g, " ").replace(/\n/g, " ").replace(/;/g, ",")).join(";") + ";");
+    });
+  return linhas.join("\r\n") + "\r\n";
+}
+
+function kmlBaixarArquivo(nomeArquivo, conteudo, mimetype) {
+  const url = URL.createObjectURL(new Blob([conteudo], { type: mimetype }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nomeArquivo;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Resumo mostrado na tela: contagens, partes de até 1000 registros e lista de problemáticos.
+function kmlMontarResultado(registros) {
+  const nErro = registros.filter((r) => r.erros.length > 0).length;
+  const nOk = registros.length - nErro;
+  const nPartes = nOk > KML_TAMANHO_PARTE ? Math.ceil(nOk / KML_TAMANHO_PARTE) : 1;
+  const avisosCompactados = { geoTruncado: 0, anelFechado: 0, coordenadasLongas: 0 };
+  const problematicos = [];
+
+  registros.forEach((r) => {
+    if (r.erros.length === 0 && r.avisos.length === 0) return;
+    const soCompactaveis =
+      r.erros.length === 0 && r.avisos.every((av) => KML_AVISOS_COMPACTAVEIS.some((chave) => av.includes(chave)));
+    if (soCompactaveis) {
+      r.avisos.forEach((av) => {
+        if (av.includes("GeoIntegrationCode truncado")) avisosCompactados.geoTruncado++;
+        else if (av.includes("polígono fechado automaticamente")) avisosCompactados.anelFechado++;
+        else if (av.includes("Coordenadas excedem")) avisosCompactados.coordenadasLongas++;
+      });
+      return;
+    }
+    problematicos.push(r);
+  });
+
+  return {
+    registros,
+    nOk,
+    nErro,
+    nPartes,
+    avisosCompactados,
+    problematicos: problematicos.slice(0, KML_LIMITE_PROBLEMATICOS),
+    problematicosOcultos: Math.max(0, problematicos.length - KML_LIMITE_PROBLEMATICOS),
+  };
+}
+
+// --- Estado da tela ---
+let conversorNomeBase = "conversao";
+let conversorRegistrosOriginais = null;
+let conversorResultadoAtual = null;
 
 function renderConversorCores() {
   conversorCores.innerHTML = "";
@@ -5014,36 +5401,493 @@ function renderConversorCores() {
   });
 }
 
-function abrirModalConversor() {
+function limparConversor() {
   estado.conversorArquivo = null;
   estado.conversorCor = null;
+  conversorNomeBase = "conversao";
+  conversorRegistrosOriginais = null;
+  conversorResultadoAtual = null;
   conversorInputArquivo.value = "";
   conversorArquivoNome.textContent = "Nenhum arquivo selecionado";
-  conversorTipo.value = "areas";
   conversorCategoria.value = "";
   conversorGrupo.value = "";
   conversorTolerancia.value = "";
+  conversorForcarAreas.checked = false;
   conversorResultado.innerHTML = "";
   renderConversorCores();
   btnConversorConverter.disabled = true;
   btnConversorConverter.textContent = "Converter arquivo";
-  overlayConversor.classList.remove("hidden");
 }
 
-el("card-ferramentas-conversor-kml").addEventListener("click", () => {
-  abrirModalConversor();
-});
+// Estado inicial (inclusive quando a página abre direto em /ferramentas/conversor-kml).
+limparConversor();
 
-el("conversor-modal-fechar").addEventListener("click", () => overlayConversor.classList.add("hidden"));
 conversorInputArquivo.addEventListener("change", () => {
   const file = conversorInputArquivo.files[0];
   estado.conversorArquivo = file || null;
   conversorArquivoNome.textContent = file ? file.name : "Nenhum arquivo selecionado";
+  conversorNomeBase = file ? file.name.replace(/\.kml$/i, "") : "conversao";
+  conversorRegistrosOriginais = null;
+  conversorResultadoAtual = null;
+  conversorResultado.innerHTML = "";
   btnConversorConverter.disabled = !file;
 });
 
+function mostrarErroConversor(msg) {
+  conversorResultado.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  conversorResultado.appendChild(p);
+}
+
+function kmlMensagens(r) {
+  return [...r.erros.map((m) => `⛔ ${m}`), ...r.avisos.map((m) => `⚠️ ${m}`)].join("\n");
+}
+
+function baixarConversao(parte, formato) {
+  if (!conversorResultadoAtual) return;
+  const validos = conversorResultadoAtual.registros.filter((r) => r.erros.length === 0);
+  const fatia = validos.slice((parte - 1) * KML_TAMANHO_PARTE, parte * KML_TAMANHO_PARTE);
+  if (fatia.length === 0) return;
+  const sufixoParte = conversorResultadoAtual.nPartes > 1 ? `_parte${parte}` : "";
+  if (formato === "kml") {
+    kmlBaixarArquivo(`${conversorNomeBase}_SSX${sufixoParte}.kml`, kmlGerarKml(fatia), "application/vnd.google-earth.kml+xml");
+  } else {
+    kmlBaixarArquivo(`${conversorNomeBase}_SSX${sufixoParte}.csv`, kmlGerarCsv(fatia), "text/csv");
+  }
+}
+
+function renderConversorResultado() {
+  const r = conversorResultadoAtual;
+  conversorResultado.innerHTML = "";
+  if (!r) return;
+
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: r.nOk, label: "Prontos" },
+    { valor: r.nErro, label: "Com erro" },
+  ].forEach(({ valor, label }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    tile.appendChild(l);
+    tile.appendChild(v);
+    tiles.appendChild(tile);
+  });
+  conversorResultado.appendChild(tiles);
+
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${r.nOk} de ${r.registros.length} registro(s) prontos para importar.`;
+  conversorResultado.appendChild(legenda);
+
+  if (r.nOk > KML_TAMANHO_PARTE) {
+    const aviso = document.createElement("p");
+    aviso.className = "placeholder";
+    aviso.style.color = "#a16207";
+    aviso.textContent = `O SSX importa no máximo ${KML_MAX_LINHAS_IMPORTACAO} linhas por arquivo. Os ${r.nOk} registros prontos foram divididos em ${r.nPartes} arquivo(s) de até ${KML_TAMANHO_PARTE} cada — importe um de cada vez.`;
+    conversorResultado.appendChild(aviso);
+  }
+
+  const edicao = document.createElement("div");
+  edicao.className = "conversor-edicao-toggle";
+  const btnEditar = document.createElement("button");
+  btnEditar.type = "button";
+  btnEditar.className = "conversor-btn-editar";
+  btnEditar.textContent = "✎ Edição manual";
+  btnEditar.addEventListener("click", abrirEdicaoConversor);
+  edicao.appendChild(btnEditar);
+  conversorResultado.appendChild(edicao);
+
+  if (r.nOk > 0) {
+    const downloads = document.createElement("div");
+    downloads.className = "conversor-downloads";
+    for (let parte = 1; parte <= r.nPartes; parte++) {
+      const sufixoParte = r.nPartes > 1 ? ` (parte ${parte}/${r.nPartes})` : "";
+      ["kml", "csv"].forEach((formato) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn-secondary";
+        btn.textContent = `Baixar ${formato.toUpperCase()}${sufixoParte}`;
+        btn.addEventListener("click", () => baixarConversao(parte, formato));
+        downloads.appendChild(btn);
+      });
+    }
+    conversorResultado.appendChild(downloads);
+  }
+
+  const ac = r.avisosCompactados;
+  const compactados = [
+    ac.anelFechado ? `${ac.anelFechado} ${ac.anelFechado === 1 ? "polígono fechado" : "polígonos fechados"} automaticamente` : null,
+    ac.geoTruncado ? `${ac.geoTruncado} GeoIntegrationCode(s) truncados` : null,
+    ac.coordenadasLongas ? `${ac.coordenadasLongas} registro(s) com coordenadas longas` : null,
+  ].filter(Boolean);
+  if (compactados.length > 0) {
+    const info = document.createElement("p");
+    info.className = "placeholder";
+    info.textContent = `Informativos: ${compactados.join(" · ")}.`;
+    conversorResultado.appendChild(info);
+  }
+
+  if (r.problematicos.length > 0) {
+    const titulo = document.createElement("h4");
+    titulo.className = "conversor-problemas-titulo";
+    titulo.textContent = `Registros com erro/aviso (${r.problematicos.length})`;
+    conversorResultado.appendChild(titulo);
+
+    const table = document.createElement("table");
+    table.className = "tabela-saida";
+    const thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th></th><th>Registro</th><th>Código</th><th>Mensagens</th></tr>";
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    r.problematicos.forEach((p) => {
+      const tr = document.createElement("tr");
+      const tdStatus = document.createElement("td");
+      tdStatus.textContent = p.erros.length ? "🔴" : "🟢";
+      const tdInfo = document.createElement("td");
+      const nomeLinha = document.createElement("div");
+      nomeLinha.textContent = `#${p.indice} · ${p.nome}`;
+      const tipoLinha = document.createElement("div");
+      tipoLinha.className = "conversor-tipo-registro";
+      tipoLinha.textContent = (p.tipoOriginal || "sem geometria") + (p.convertido ? " → Área" : "");
+      tdInfo.appendChild(nomeLinha);
+      tdInfo.appendChild(tipoLinha);
+      const tdCodigo = document.createElement("td");
+      tdCodigo.className = "conversor-codigo";
+      tdCodigo.textContent = p.dados.GeoIntegrationCode || "";
+      const tdMsg = document.createElement("td");
+      tdMsg.className = "conversor-mensagens";
+      tdMsg.textContent = kmlMensagens(p);
+      [tdStatus, tdInfo, tdCodigo, tdMsg].forEach((td) => tr.appendChild(td));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    conversorResultado.appendChild(table);
+
+    if (r.problematicosOcultos > 0) {
+      const oculto = document.createElement("p");
+      oculto.className = "placeholder";
+      oculto.textContent = `... e mais ${r.problematicosOcultos} registro(s) com erro/aviso não exibido(s) aqui (os arquivos gerados já refletem todos).`;
+      conversorResultado.appendChild(oculto);
+    }
+  }
+}
+
+btnConversorConverter.addEventListener("click", async () => {
+  if (!estado.conversorArquivo) return;
+  btnConversorConverter.disabled = true;
+  btnConversorConverter.textContent = "Convertendo...";
+  conversorResultado.innerHTML = "";
+  try {
+    const kmlText = await estado.conversorArquivo.text();
+    const tolTexto = conversorTolerancia.value.trim();
+    const config = {
+      categoria: conversorCategoria.value.trim() || undefined,
+      grupo: conversorGrupo.value.trim() || undefined,
+      tolerancia: tolTexto === "" ? undefined : Number(tolTexto),
+      cor: estado.conversorCor === null ? undefined : estado.conversorCor,
+      forcarAreas: conversorForcarAreas.checked,
+    };
+    conversorRegistrosOriginais = kmlProcessar(kmlText, config);
+    conversorResultadoAtual = kmlMontarResultado(conversorRegistrosOriginais);
+    renderConversorResultado();
+  } catch (err) {
+    mostrarErroConversor(err.message || String(err));
+  } finally {
+    btnConversorConverter.disabled = false;
+    btnConversorConverter.textContent = "Converter arquivo";
+  }
+});
+
+// --- Edição manual ---
+// Uma linha por registro. Coordenadas só aparecem (não são editáveis): trocar o Tipo reaproveita as
+// que já existem (fechando o anel quando vira Área) — nunca inventa nem descarta coordenada.
+const overlayConversorEdicao = el("overlay-conversor-edicao");
+const conversorEdicaoTitulo = el("conversor-edicao-titulo");
+const conversorEdicaoTbody = el("conversor-edicao-tbody");
+const conversorEdicaoTamanho = el("conversor-edicao-tamanho");
+const conversorEdicaoPaginacao = el("conversor-edicao-paginacao");
+const conversorEdicaoFeedback = el("conversor-edicao-feedback");
+let conversorLinhasEdicao = [];
+let conversorEdicaoPagina = 1;
+let conversorEdicaoTimeout = null;
+
+function kmlParaLinhaEdicao(r) {
+  return {
+    indice: r.indice,
+    nome: r.nome,
+    descricao: r.descricao,
+    tipoOriginal: r.tipoOriginal,
+    tipo: r.tipoFinal || r.tipoOriginal || "LineString",
+    pontos: [...r.pontos],
+    tolerancia: r.dados.Tolerance || "",
+    geoCode: r.dados.GeoIntegrationCode || "",
+    categoria: r.dados.CategoryIntegrationCode || "",
+    grupo: r.dados.GroupIntegrationCode || "",
+    cor: r.dados.ColorCode ? parseInt(r.dados.ColorCode, 10) : null,
+    erros: [...r.erros],
+    avisos: [...r.avisos],
+  };
+}
+
+function kmlParaRegistroFinal(l) {
+  const dados = {
+    GeoIntegrationCode: l.geoCode.trim(),
+    CategoryIntegrationCode: l.categoria.trim(),
+    GroupIntegrationCode: l.grupo.trim(),
+  };
+  if (l.tolerancia.trim()) dados.Tolerance = l.tolerancia.trim();
+  if (l.cor) dados.ColorCode = String(l.cor);
+  return {
+    indice: l.indice,
+    nome: l.nome.trim(),
+    descricao: l.descricao.trim(),
+    tipoOriginal: l.tipoOriginal,
+    tipoFinal: l.tipo,
+    convertido: l.tipoOriginal !== null && l.tipo !== l.tipoOriginal,
+    pontos: l.pontos,
+    dados,
+    avisos: l.avisos,
+    erros: l.erros,
+  };
+}
+
+// Revalida só a linha alterada. Tipo incompatível com o nº de coordenadas vira erro (não trunca
+// nem gera coordenada); a única exceção é fechar o anel da Área com a 1ª coordenada existente.
+function kmlRevalidarLinha(l) {
+  const erros = [];
+  const avisos = [];
+  if (l.tipo === "Point") {
+    if (l.pontos.length !== 1) {
+      erros.push(
+        `'Ponto' aceita só 1 coordenada — este registro tem ${l.pontos.length}. Coordenadas não são ` +
+          "editáveis aqui: escolha outro tipo ou ajuste o KML original."
+      );
+    }
+  } else if (l.tipo === "Polygon") {
+    if (l.pontos.length > 0 && l.pontos[0] !== l.pontos[l.pontos.length - 1]) {
+      l.pontos = [...l.pontos, l.pontos[0]];
+      avisos.push("Polígono fechado automaticamente (ponto inicial repetido no final).");
+    }
+    const distintos = new Set(l.pontos).size;
+    if (distintos < 3) {
+      erros.push(`'Área' exige no mínimo 3 coordenadas distintas — este registro tem ${distintos}. Escolha outro tipo ou ajuste o KML original.`);
+    }
+  } else if (l.tipo === "LineString" && l.pontos.length < 2) {
+    erros.push(`'Rota' exige no mínimo 2 coordenadas — este registro tem ${l.pontos.length}. Escolha outro tipo ou ajuste o KML original.`);
+  }
+
+  if (l.tipoOriginal && l.tipo !== l.tipoOriginal) {
+    avisos.push(`Tipo alterado manualmente: ${KML_TIPO_LABEL[l.tipoOriginal]} → ${KML_TIPO_LABEL[l.tipo]}.`);
+  }
+  if (!l.nome.trim()) erros.push("'Nome' não pode ficar vazio.");
+  else if (l.nome.length > KML_MAX_NAME) erros.push(`'Nome' excede ${KML_MAX_NAME} caracteres.`);
+  if (l.descricao.length > KML_MAX_DESCRIPTION) erros.push(`'Descrição' excede ${KML_MAX_DESCRIPTION} caracteres.`);
+  if (!l.categoria.trim()) erros.push("'Cod.categoria' é obrigatório.");
+  else if (l.categoria.length > KML_MAX_CATEGORY_CODE) erros.push(`'Cod.categoria' excede ${KML_MAX_CATEGORY_CODE} caracteres.`);
+  if (!l.grupo.trim()) erros.push("'Cod.grupo' é obrigatório.");
+  else if (l.grupo.length > KML_MAX_GROUP_CODE) erros.push(`'Cod.grupo' excede ${KML_MAX_GROUP_CODE} caracteres.`);
+  if (l.tipo === "Point" && !l.tolerancia.trim()) erros.push("'Tolerância' é obrigatória para o tipo Ponto.");
+  else if (l.tolerancia.trim() && !/^-?\d+$/.test(l.tolerancia.trim())) erros.push("'Tolerância' deve ser um número inteiro (metros).");
+  if (!l.geoCode.trim()) erros.push("'Cod.integração' é obrigatório.");
+  else if (l.geoCode.length > KML_MAX_GEO_CODE) erros.push(`'Cod.integração' excede ${KML_MAX_GEO_CODE} caracteres.`);
+
+  l.erros = erros;
+  l.avisos = avisos;
+}
+
+function conversorEdicaoTotalPaginas() {
+  return Math.max(1, Math.ceil(conversorLinhasEdicao.length / Number(conversorEdicaoTamanho.value)));
+}
+
+// Monta (ou remonta) uma linha da tabela de edição; mudanças revalidam e redesenham só ela.
+function montarLinhaEdicao(l) {
+  const tr = document.createElement("tr");
+  if (l.erros.length > 0) tr.classList.add("conversor-edicao-linha-erro");
+
+  const atualizar = () => {
+    kmlRevalidarLinha(l);
+    tr.replaceWith(montarLinhaEdicao(l));
+  };
+  const tdInput = (campo, classe) => {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = l[campo];
+    if (classe) input.className = classe;
+    input.addEventListener("input", () => {
+      l[campo] = input.value;
+    });
+    input.addEventListener("change", atualizar);
+    td.appendChild(input);
+    return td;
+  };
+
+  tr.appendChild(tdInput("nome"));
+  tr.appendChild(tdInput("descricao"));
+
+  const tdTipo = document.createElement("td");
+  tdTipo.className = "conversor-edicao-col-tipo";
+  const select = document.createElement("select");
+  KML_TIPO_OPCOES.forEach(({ value, label }) => {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    select.appendChild(opt);
+  });
+  select.value = l.tipo;
+  select.addEventListener("change", () => {
+    l.tipo = select.value;
+    atualizar();
+  });
+  tdTipo.appendChild(select);
+  tr.appendChild(tdTipo);
+
+  const tdCoords = document.createElement("td");
+  tdCoords.className = "conversor-edicao-col-coords";
+  tdCoords.textContent = `${l.pontos.length} ${l.pontos.length === 1 ? "ponto" : "pontos"}`;
+  tdCoords.title = l.pontos.join(" ");
+  tr.appendChild(tdCoords);
+
+  tr.appendChild(tdInput("tolerancia", "conversor-edicao-estreito"));
+  tr.appendChild(tdInput("geoCode"));
+  tr.appendChild(tdInput("categoria"));
+  tr.appendChild(tdInput("grupo"));
+
+  const tdCor = document.createElement("td");
+  const grupoCores = document.createElement("div");
+  grupoCores.className = "conversor-cor-mini-grupo";
+  [{ codigo: null, hex: null }, ...CORES_SSX].forEach(({ codigo, hex }) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "conversor-cor-mini" + (codigo === null ? " conversor-cor-mini-nenhuma" : "");
+    if (hex) b.style.background = hex;
+    b.textContent = codigo === null ? "1" : String(codigo);
+    b.title = codigo === null ? "Padrão (1)" : `Código ${codigo} (${hex})`;
+    if (l.cor === codigo) b.classList.add("selecionada");
+    b.addEventListener("click", () => {
+      l.cor = codigo;
+      atualizar();
+    });
+    grupoCores.appendChild(b);
+  });
+  tdCor.appendChild(grupoCores);
+  tr.appendChild(tdCor);
+
+  const tdStatus = document.createElement("td");
+  tdStatus.className = "conversor-edicao-col-status";
+  if (l.erros.length > 0) tdStatus.classList.add("status-erro");
+  else if (l.avisos.length > 0) tdStatus.classList.add("status-aviso");
+  tdStatus.textContent = kmlMensagens(l) || "OK";
+  tr.appendChild(tdStatus);
+  return tr;
+}
+
+function renderEdicaoConversor() {
+  conversorEdicaoTitulo.textContent = `Edição manual — ${conversorLinhasEdicao.length} registro(s)`;
+  const tamanho = Number(conversorEdicaoTamanho.value);
+  conversorEdicaoPagina = Math.min(Math.max(1, conversorEdicaoPagina), conversorEdicaoTotalPaginas());
+  const inicio = (conversorEdicaoPagina - 1) * tamanho;
+  conversorEdicaoTbody.innerHTML = "";
+  conversorLinhasEdicao.slice(inicio, inicio + tamanho).forEach((l) => conversorEdicaoTbody.appendChild(montarLinhaEdicao(l)));
+
+  conversorEdicaoPaginacao.innerHTML = "";
+  const total = conversorEdicaoTotalPaginas();
+  if (total > 1) {
+    const anterior = document.createElement("button");
+    anterior.type = "button";
+    anterior.className = "btn-secondary";
+    anterior.textContent = "‹ Anterior";
+    anterior.disabled = conversorEdicaoPagina === 1;
+    anterior.addEventListener("click", () => {
+      conversorEdicaoPagina--;
+      renderEdicaoConversor();
+    });
+    const info = document.createElement("span");
+    info.textContent = `Página ${conversorEdicaoPagina} de ${total}`;
+    const proxima = document.createElement("button");
+    proxima.type = "button";
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima ›";
+    proxima.disabled = conversorEdicaoPagina === total;
+    proxima.addEventListener("click", () => {
+      conversorEdicaoPagina++;
+      renderEdicaoConversor();
+    });
+    [anterior, info, proxima].forEach((n) => conversorEdicaoPaginacao.appendChild(n));
+  }
+}
+
+function feedbackEdicaoConversor(mensagem, tipo) {
+  conversorEdicaoFeedback.textContent = `${tipo === "erro" ? "⚠️" : tipo === "info" ? "↺" : "✔️"} ${mensagem}`;
+  conversorEdicaoFeedback.className = `conversor-edicao-feedback conversor-edicao-feedback-${tipo}`;
+  clearTimeout(conversorEdicaoTimeout);
+  conversorEdicaoTimeout = setTimeout(() => conversorEdicaoFeedback.classList.add("hidden"), 5000);
+}
+
+function abrirEdicaoConversor() {
+  if (!conversorResultadoAtual) return;
+  conversorLinhasEdicao = conversorResultadoAtual.registros.map(kmlParaLinhaEdicao);
+  conversorEdicaoPagina = 1;
+  conversorEdicaoFeedback.classList.add("hidden");
+  renderEdicaoConversor();
+  overlayConversorEdicao.classList.remove("hidden");
+}
+
+function fecharEdicaoConversor() {
+  overlayConversorEdicao.classList.add("hidden");
+}
+
+conversorEdicaoTamanho.addEventListener("change", () => {
+  conversorEdicaoPagina = 1;
+  renderEdicaoConversor();
+});
+el("conversor-edicao-fechar-x").addEventListener("click", fecharEdicaoConversor);
+el("btn-conversor-edicao-fechar").addEventListener("click", fecharEdicaoConversor);
+overlayConversorEdicao.addEventListener("click", (e) => {
+  if (e.target === overlayConversorEdicao) fecharEdicaoConversor();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !overlayConversorEdicao.classList.contains("hidden")) fecharEdicaoConversor();
+});
+
+el("btn-conversor-edicao-aplicar").addEventListener("click", () => {
+  conversorResultadoAtual = kmlMontarResultado(conversorLinhasEdicao.map(kmlParaRegistroFinal));
+  renderConversorResultado();
+  const r = conversorResultadoAtual;
+  feedbackEdicaoConversor(
+    r.nErro > 0
+      ? `Alterações aplicadas — ${r.nOk} pronto(s), ${r.nErro} ainda com erro.`
+      : `Alterações aplicadas — ${r.nOk} registro(s) pronto(s) para importar.`,
+    r.nErro > 0 ? "erro" : "sucesso"
+  );
+});
+
+el("btn-conversor-edicao-reverter").addEventListener("click", () => {
+  if (!conversorRegistrosOriginais) return;
+  conversorResultadoAtual = kmlMontarResultado(conversorRegistrosOriginais);
+  renderConversorResultado();
+  conversorLinhasEdicao = conversorResultadoAtual.registros.map(kmlParaLinhaEdicao);
+  conversorEdicaoPagina = 1;
+  renderEdicaoConversor();
+  const r = conversorResultadoAtual;
+  feedbackEdicaoConversor(
+    `Revertido — voltou para o resultado original da conversão (${r.nOk} pronto(s), ${r.nErro} com erro).`,
+    "info"
+  );
+});
+
 // --- QUEBRA STRING (rastreadores) ---
-const overlayQuebraString = el("overlay-quebra-string");
+// Sub-tela "/ferramentas/quebra-string": entrada + bytes à esquerda, tabela à direita.
 const quebraStringInput = el("quebra-string-input");
 const quebraStringBytesView = el("quebra-string-bytes");
 const btnQuebraString = el("btn-quebra-string");
@@ -5054,24 +5898,103 @@ const quebraStringResultado = el("quebra-string-resultado");
 const QUEBRA_STRING_CAMPOS = [
   { chave: "possivelRastreador", label: "Possível rastreador" },
   { chave: "tipoPacote", label: "Tipo de pacote" },
-  { chave: "idImei", label: "ID/IMEI" },
+  { chave: "numeroSerial", label: "Número serial" },
+  { chave: "idImei", label: "IMEI/ID do Equipamento" },
+  { chave: "apelido", label: "Apelido" },
+  { chave: "contador", label: "Contador de mensagens" },
+  { chave: "firmware", label: "Firmware / Versão" },
+  { chave: "iccid", label: "ICCID do chip" },
+  { chave: "telefone", label: "Telefone (consulta)" },
+  { chave: "comando", label: "Comando / resposta" },
   { chave: "data", label: "Data" },
   { chave: "hora", label: "Hora" },
+  { chave: "envio", label: "Data/hora de envio" },
+  { chave: "motivoEnvio", label: "Motivo do envio" },
+  { chave: "backup", label: "Dado de backup" },
+  { chave: "gpsFixo", label: "Posição GPS" },
+  { chave: "satelites", label: "Satélites" },
+  { chave: "hdop", label: "HDOP" },
   { chave: "latitude", label: "Latitude" },
   { chave: "longitude", label: "Longitude" },
+  { chave: "altitude", label: "Altitude" },
   { chave: "velocidade", label: "Velocidade" },
+  { chave: "curso", label: "Curso" },
+  { chave: "lbs", label: "Torre de celular (LBS)" },
   { chave: "ignicao", label: "Ignição" },
+  { chave: "modo", label: "Modo do veículo" },
+  { chave: "corteOleo", label: "Óleo/eletricidade" },
+  { chave: "alarme", label: "Alarme" },
+  { chave: "evento", label: "Evento" },
+  { chave: "statusExtra", label: "Outros status" },
+  { chave: "tensao", label: "Bateria Principal (Veículo)" },
+  { chave: "bateria", label: "Bateria Interna (Backup)" },
+  { chave: "sinalGsm", label: "Sinal GSM" },
+  { chave: "operadora", label: "Operadora" },
+  { chave: "tecnologia", label: "Tecnologia celular" },
+  { chave: "temperatura", label: "Temperatura" },
   { chave: "odometro", label: "Odômetro" },
   { chave: "horimetro", label: "Horímetro" },
   { chave: "tipoUpload", label: "Tipo de upload" },
   { chave: "motorista", label: "Motorista" },
-  { chave: "entrada1", label: "Entrada 1" },
-  { chave: "entrada2", label: "Entrada 2" },
-  { chave: "entrada3", label: "Entrada 3" },
-  { chave: "saida1", label: "Saída 1" },
-  { chave: "saida2", label: "Saída 2" },
-  { chave: "saida3", label: "Saída 3" },
+  { chave: "entrada1", label: "Entrada Digital 1 (Input 1)" },
+  { chave: "entrada2", label: "Entrada Digital 2 (Input 2)" },
+  { chave: "saida1", label: "Saída 1 (Output 1)" },
+  { chave: "saida2", label: "Saída 2 (Output 2)" },
+  { chave: "entradas", label: "Entradas Digitais (Inputs)" },
+  { chave: "saidas", label: "Saídas (Outputs)" },
+  { chave: "assigns", label: "Campos configuráveis (ASSIGN)" },
+  { chave: "entradaAnalogica", label: "Entrada analógica (4–20 mA)" },
+  { chave: "mensagemTransparente", label: "Mensagem transparente (RS232)" },
+  { chave: "canOdometro", label: "CAN odômetro" },
+  { chave: "canHorimetro", label: "CAN horímetro" },
+  { chave: "canVelocidade", label: "CAN velocidade" },
+  { chave: "canRpm", label: "CAN RPM" },
+  { chave: "canOnOff", label: "CAN liga/desliga" },
+  { chave: "canPedal", label: "CAN pedal do acelerador" },
+  { chave: "canCombustivel", label: "CAN nível de combustível" },
+  { chave: "canAutonomia", label: "CAN autonomia" },
+  { chave: "canConsumo", label: "CAN consumo" },
+  { chave: "canCombustivelUsado", label: "CAN combustível utilizado" },
+  { chave: "canTempOleo", label: "CAN temperatura do óleo" },
 ];
+
+// Campos que cada equipamento consegue enviar (em qualquer tipo de pacote). A tabela mostra só
+// esses, na ordem de QUEBRA_STRING_CAMPOS; o que o pacote atual não trouxe aparece como "-".
+// Protocolo novo: criar o perfil aqui e devolver `perfil` no parser.
+const QUEBRA_STRING_PERFIS = {
+  GT06: [
+    "possivelRastreador", "tipoPacote", "idImei", "telefone", "comando",
+    "data", "hora", "gpsFixo", "satelites", "latitude", "longitude", "velocidade", "curso", "lbs",
+    "ignicao", "corteOleo", "alarme", "statusExtra", "bateria", "sinalGsm", "odometro", "tipoUpload",
+  ],
+  E3: [
+    "possivelRastreador", "tipoPacote", "idImei", "telefone", "comando",
+    "data", "hora", "gpsFixo", "satelites", "latitude", "longitude", "altitude", "velocidade", "curso", "lbs",
+    "ignicao", "corteOleo", "alarme", "statusExtra", "bateria", "tensao", "sinalGsm", "temperatura", "odometro",
+    "motorista", "entrada1", "entrada2", "saida1", "saida2",
+  ],
+  JR12: [
+    "possivelRastreador", "tipoPacote", "numeroSerial", "idImei", "apelido", "contador",
+    "data", "hora", "envio", "backup", "gpsFixo", "satelites", "hdop", "latitude", "longitude", "altitude",
+    "velocidade", "curso", "ignicao", "corteOleo", "evento", "bateria", "tensao", "sinalGsm", "operadora",
+    "tecnologia", "odometro", "horimetro", "motorista", "entrada1", "entrada2", "saida1", "saida2",
+    "entradaAnalogica", "mensagemTransparente",
+    "canOdometro", "canHorimetro", "canVelocidade", "canRpm", "canOnOff", "canPedal", "canCombustivel",
+    "canAutonomia", "canConsumo", "canCombustivelUsado", "canTempOleo",
+  ],
+  SUNTECH: [
+    "possivelRastreador", "tipoPacote", "idImei", "firmware", "contador", "iccid", "telefone",
+    "data", "hora", "backup", "motivoEnvio", "gpsFixo", "satelites", "latitude", "longitude",
+    "velocidade", "curso", "lbs", "ignicao", "modo", "alarme", "statusExtra", "sinalGsm",
+    "entradas", "saidas", "mensagemTransparente", "assigns",
+  ],
+  MT2000: [
+    "possivelRastreador", "tipoPacote", "numeroSerial", "idImei", "iccid", "telefone", "firmware", "contador",
+    "comando", "data", "hora", "backup", "motivoEnvio", "gpsFixo", "satelites", "hdop", "latitude", "longitude",
+    "velocidade", "curso", "lbs", "ignicao", "alarme", "statusExtra", "tensao", "bateria", "sinalGsm",
+    "odometro", "horimetro", "entrada1", "saida1",
+  ],
+};
 
 function hexParaBytes(hexLimpo) {
   const bytes = [];
@@ -5098,6 +6021,21 @@ function formatarHoraBR(d) {
   return `${hh}:${mi}:${ss}`;
 }
 
+// Protocolo GT06 (Concox e compatíveis), conforme o GPS Tracker Communication Protocol v1.8.1.
+// Estrutura geral: 78 78 | tamanho (1) | protocolo (1) | conteúdo | serial (2) | CRC-ITU (2) | 0D 0A
+// tamanho = bytes entre o campo tamanho e o CRC, inclusive (total do pacote = tamanho + 5).
+const GT06_TIPO_PACOTE = {
+  "01": "Login",
+  "12": "Localização (GPS + LBS)",
+  "13": "Status (heartbeat)",
+  "15": "Resposta a comando",
+  "16": "Alarme (GPS + LBS + status)",
+  "17": "Endereço em chinês (resposta do servidor)",
+  "1A": "Consulta de endereço por telefone",
+  "22": "Posição (layout de exemplo)",
+  "80": "Comando do servidor",
+};
+
 // GPS data upload mode (não vale para a série 06).
 const GT06_TIPO_UPLOAD = {
   "00": "Envio por intervalo de tempo",
@@ -5108,96 +6046,1371 @@ const GT06_TIPO_UPLOAD = {
   "05": "Envio do último ponto válido ao recuperar a rede",
 };
 
+// Alarme (primeiro byte de alarme/idioma), tabela 5.3.1.17 do protocolo.
+const GT06_ALARME = ["Normal", "SOS", "Corte de energia", "Vibração/choque", "Entrada em cerca", "Saída de cerca"];
+// Nível de tensão, tabela 5.3.1.15.
+const GT06_NIVEL_BATERIA = [
+  "Sem energia (desligado)",
+  "Extremamente baixa",
+  "Muito baixa (alarme)",
+  "Baixa (uso normal)",
+  "Média",
+  "Alta",
+  "Muito alta",
+];
+// Sinal GSM, tabela 5.3.1.16.
+const GT06_SINAL_GSM = ["Sem sinal", "Extremamente fraco", "Muito fraco", "Bom", "Forte"];
+
 // Formato brasileiro: vírgula decimal, sinal negativo quando aplicável (sul/oeste).
 function formatarCoordenada(valor) {
   return valor.toFixed(6).replace(".", ",");
 }
 
-// Protocolo GT06 (Concox e compatíveis) — pacote de posição, Protocol Number 0x22.
-// Layout mapeado a partir de um exemplo de pacote real informado pelo usuário;
-// bytes sem correspondência num dos campos padronizados (curso/status e outros
-// ainda não mapeados) ficam de fora do resultado.
-function parseGT06Pacote22(bytes) {
-  const campos = {};
+function hexParaTexto(hex) {
+  return (hex.match(/../g) || []).map((h) => String.fromCharCode(parseInt(h, 16))).join("");
+}
 
-  const marcar = (chave, inicioByte, qtdBytes, calcularFinal) => {
-    const bruto = bytes.slice(inicioByte, inicioByte + qtdBytes).join("");
-    campos[chave] = { bruto, final: calcularFinal(bruto), inicioByte, fimByte: inicioByte + qtdBytes };
-  };
+// CRC-ITU (CRC-16/X-25), mesmo cálculo do Apêndice A do protocolo, em forma bit a bit.
+function crc16Itu(bytesHex) {
+  let crc = 0xffff;
+  for (const h of bytesHex) {
+    crc ^= parseInt(h, 16);
+    for (let i = 0; i < 8; i++) crc = crc & 1 ? (crc >> 1) ^ 0x8408 : crc >> 1;
+  }
+  return ~crc & 0xffff;
+}
 
-  // Início "7878" identifica a família de protocolo GT06.
-  campos.possivelRastreador = {
-    bruto: bytes.slice(0, 2).join(""),
-    final: "GT06 (J16, CRX, ETC)",
-    inicioByte: 0,
-    fimByte: 2,
-  };
+// Registra um campo: bytes [inicio, inicio+qtd) em hex + valor convertido.
+// Se o pacote não tem esses bytes, o campo fica de fora (aparece como "-").
+function gt06Campo(campos, bytes, chave, inicio, qtd, calcularFinal) {
+  if (!(qtd > 0) || bytes.length < inicio + qtd) return;
+  const bruto = bytes.slice(inicio, inicio + qtd).join("");
+  campos[chave] = { bruto, final: calcularFinal(bruto), inicioByte: inicio, fimByte: inicio + qtd };
+}
 
-  marcar("tipoPacote", 3, 1, () => "Pacote de posição x22");
+// Bloco GPS comum a 0x12, 0x16, 0x1A e ao layout 0x22:
+// data/hora (4-9), latitude (11-14), longitude (15-18), velocidade (19), curso/status (20-21).
+function gt06PreencherGps(campos, bytes) {
+  if (bytes.length >= 10) {
+    // Bytes 4-9: Ano, Mês, Dia, Hora, Min, Seg — valor hex direto (não BCD), em UTC.
+    const [ano, mes, dia, hora, min, seg] = bytes.slice(4, 10).map(hexParaInt);
+    const dataUtc = new Date(Date.UTC(2000 + ano, mes - 1, dia, hora, min, seg));
+    // Exibição em horário de Brasília (UTC-3).
+    const dataBrasilia = new Date(dataUtc.getTime() - 3 * 60 * 60 * 1000);
+    gt06Campo(campos, bytes, "data", 4, 3, () => formatarDataBR(dataBrasilia));
+    gt06Campo(campos, bytes, "hora", 7, 3, () => formatarHoraBR(dataBrasilia));
+  }
 
-  // Bytes 4-9: Ano, Mês, Dia, Hora, Min, Seg — cada um é o valor hex direto (não BCD).
-  const anoB = hexParaInt(bytes[4]);
-  const mesB = hexParaInt(bytes[5]);
-  const diaB = hexParaInt(bytes[6]);
-  const horaB = hexParaInt(bytes[7]);
-  const minB = hexParaInt(bytes[8]);
-  const segB = hexParaInt(bytes[9]);
-  const dataUtc = new Date(Date.UTC(2000 + anoB, mesB - 1, diaB, horaB, minB, segB));
-  // Pacote vem em UTC; exibição em horário de Brasília (UTC-3).
-  const dataBrasilia = new Date(dataUtc.getTime() - 3 * 60 * 60 * 1000);
+  // Byte 10: nibble alto = tamanho da info GPS, nibble baixo = satélites usados no posicionamento.
+  gt06Campo(campos, bytes, "satelites", 10, 1, (b) => String(hexParaInt(b) & 0x0f));
+  gt06Campo(campos, bytes, "velocidade", 19, 1, (bruto) => `${hexParaInt(bruto)} km/h`);
 
-  campos.data = {
-    bruto: bytes.slice(4, 7).join(""),
-    final: formatarDataBR(dataBrasilia),
-    inicioByte: 4,
-    fimByte: 7,
-  };
-  campos.hora = {
-    bruto: bytes.slice(7, 10).join(""),
-    final: formatarHoraBR(dataBrasilia),
-    inicioByte: 7,
-    fimByte: 10,
-  };
+  // Sem os bytes 20-21 não dá para saber o hemisfério: as coordenadas ficam de fora.
+  if (bytes.length < 22) return;
 
-  // Bytes 20-21 ("Course and Status"): bit10 = hemisfério da latitude (1=Norte, 0=Sul),
-  // bit11 = hemisfério da longitude (1=Oeste, 0=Leste). Não fazia parte da lista de
-  // campos que você mapeou — usei o layout padrão do protocolo GT06 para o sinal.
+  // Bytes 20-21: bit13 = GPS diferencial (0 = tempo real), bit12 = GPS posicionado,
+  // bit11 = hemisfério da longitude (1=Oeste), bit10 = hemisfério da latitude (1=Norte), bits 0-9 = curso.
   const cursoStatus = hexParaInt(bytes[20] + bytes[21]);
   const sinalLat = cursoStatus & 0x0400 ? 1 : -1;
   const sinalLon = cursoStatus & 0x0800 ? -1 : 1;
 
-  marcar("latitude", 11, 4, (bruto) => formatarCoordenada(sinalLat * (hexParaInt(bruto) / 1800000)));
-  marcar("longitude", 15, 4, (bruto) => formatarCoordenada(sinalLon * (hexParaInt(bruto) / 1800000)));
-  marcar("velocidade", 19, 1, (bruto) => `${hexParaInt(bruto)} km/h`);
-  marcar("ignicao", 30, 1, (bruto) => (hexParaInt(bruto) === 0 ? "Desligada" : "Ligada"));
-  marcar("tipoUpload", 31, 1, (bruto) => GT06_TIPO_UPLOAD[bruto] || `Desconhecido (0x${bruto})`);
-  marcar("odometro", 33, 4, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} km`);
+  // Coordenadas: valor = minutos × 30000, então graus = valor / 1800000.
+  gt06Campo(campos, bytes, "latitude", 11, 4, (bruto) => formatarCoordenada(sinalLat * (hexParaInt(bruto) / 1800000)));
+  gt06Campo(campos, bytes, "longitude", 15, 4, (bruto) => formatarCoordenada(sinalLon * (hexParaInt(bruto) / 1800000)));
+  gt06Campo(campos, bytes, "curso", 20, 2, () => `${cursoStatus & 0x03ff}°`);
+  gt06Campo(campos, bytes, "gpsFixo", 20, 2, () =>
+    `${cursoStatus & 0x1000 ? "Posicionado" : "Não posicionado"} (${cursoStatus & 0x2000 ? "diferencial" : "tempo real"})`
+  );
+}
+
+// LBS: MCC (2), MNC (1), LAC (2), Cell ID (3), a partir de "base" (22 no 0x12/0x22, 23 no 0x16).
+function gt06PreencherLbs(campos, bytes, base) {
+  gt06Campo(campos, bytes, "lbs", base, 8, () => {
+    const mcc = hexParaInt(bytes[base] + bytes[base + 1]);
+    const mnc = hexParaInt(bytes[base + 2]);
+    const lac = hexParaInt(bytes[base + 3] + bytes[base + 4]);
+    const cell = hexParaInt(bytes.slice(base + 5, base + 8).join(""));
+    return `MCC ${mcc}, MNC ${mnc}, LAC ${lac}, Cell ID ${cell}`;
+  });
+}
+
+// Bloco de status: terminal (1 byte), tensão (1), sinal GSM (1), alarme/idioma (2).
+// Começa no byte 4 no status 0x13 e no byte 31 no alarme 0x16.
+function gt06PreencherStatus(campos, bytes, base) {
+  // Bit7 do byte de terminal: 1 = óleo e eletricidade cortados. Bit1: 1 = ACC alto (ignição ligada).
+  gt06Campo(campos, bytes, "corteOleo", base, 1, (b) => (hexParaInt(b) & 0x80 ? "Cortado" : "Conectado"));
+  gt06Campo(campos, bytes, "ignicao", base, 1, (b) => (hexParaInt(b) & 0x02 ? "Ligada" : "Desligada"));
+  // Bit0: antifurto ativado, bit2: carregando, bit6: rastreamento GPS ligado.
+  gt06Campo(campos, bytes, "statusExtra", base, 1, (b) => {
+    const v = hexParaInt(b);
+    return [
+      v & 0x01 ? "Antifurto ativado" : "Antifurto desativado",
+      v & 0x04 ? "Carregando" : "Sem carga",
+      v & 0x40 ? "Rastreamento GPS ligado" : "Rastreamento GPS desligado",
+    ].join("; ");
+  });
+  gt06Campo(campos, bytes, "bateria", base + 1, 1, (b) => GT06_NIVEL_BATERIA[hexParaInt(b)] || `Desconhecido (0x${b})`);
+  gt06Campo(campos, bytes, "sinalGsm", base + 2, 1, (b) => GT06_SINAL_GSM[hexParaInt(b)] || `Desconhecido (0x${b})`);
+  // Primeiro byte do alarme/idioma (o segundo é o idioma, que não exibimos).
+  gt06Campo(campos, bytes, "alarme", base + 3, 1, (b) => GT06_ALARME[hexParaInt(b)] || `Desconhecido (0x${b})`);
+}
+
+// Login (0x01): IMEI em BCD, 8 bytes a partir do byte 4.
+function gt06PreencherLogin(campos, bytes) {
+  // Os 16 dígitos vêm com um 0 à esquerda quando o IMEI tem 15 dígitos.
+  gt06Campo(campos, bytes, "idImei", 4, 8, (bruto) => bruto.replace(/^0/, ""));
+}
+
+// Comando de texto (0x15 e 0x80): byte 4 = tamanho (4 bytes de Server Flag + conteúdo ASCII).
+function gt06PreencherComando(campos, bytes) {
+  const tamanhoComando = hexParaInt(bytes[4]);
+  gt06Campo(campos, bytes, "comando", 9, tamanhoComando - 4, (bruto) => hexParaTexto(bruto));
+}
+
+// Layout de exemplo do protocolo 0x22, mapeado a partir de um pacote real informado pelo usuário.
+// O GPS é o mesmo dos demais pacotes; os campos após o byte 29 seguem esse exemplo.
+function gt06PreencherLayout22(campos, bytes) {
+  gt06Campo(campos, bytes, "ignicao", 30, 1, (bruto) => (hexParaInt(bruto) === 0 ? "Desligada" : "Ligada"));
+  gt06Campo(campos, bytes, "tipoUpload", 31, 1, (bruto) => GT06_TIPO_UPLOAD[bruto] || `Desconhecido (0x${bruto})`);
+  gt06Campo(campos, bytes, "odometro", 33, 4, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} km`);
+}
+
+// Identifica o pacote pelo Protocol Number (byte 3) e extrai os campos que ele traz.
+function parseGT06(bytes) {
+  const campos = {
+    possivelRastreador: { bruto: bytes.slice(0, 2).join(""), final: "GT06 (Concox e compatíveis)", inicioByte: 0, fimByte: 2 },
+  };
+  if (bytes.length > 3) {
+    campos.tipoPacote = {
+      bruto: bytes[3],
+      final: GT06_TIPO_PACOTE[bytes[3]] || `Desconhecido (0x${bytes[3]})`,
+      inicioByte: 3,
+      fimByte: 4,
+    };
+  }
+
+  switch (bytes[3]) {
+    case "01":
+      gt06PreencherLogin(campos, bytes);
+      break;
+    case "12":
+      gt06PreencherGps(campos, bytes);
+      gt06PreencherLbs(campos, bytes, 22);
+      break;
+    case "13":
+      gt06PreencherStatus(campos, bytes, 4);
+      break;
+    case "15":
+    case "80":
+      gt06PreencherComando(campos, bytes);
+      break;
+    case "16":
+      gt06PreencherGps(campos, bytes);
+      // Byte 22 = tamanho do bloco LBS; o LBS começa no 23.
+      gt06PreencherLbs(campos, bytes, 23);
+      gt06PreencherStatus(campos, bytes, 31);
+      break;
+    case "1A":
+      gt06PreencherGps(campos, bytes);
+      // Bytes 22-42: telefone ASCII com preenchimento de 0x00 à direita.
+      gt06Campo(campos, bytes, "telefone", 22, 21, (bruto) => hexParaTexto(bruto).replace(/\0[\s\S]*$/, ""));
+      break;
+    case "22":
+      gt06PreencherGps(campos, bytes);
+      gt06PreencherLbs(campos, bytes, 22);
+      gt06PreencherLayout22(campos, bytes);
+      break;
+  }
 
   return campos;
 }
 
-// Identifica o protocolo pelo cabeçalho e delega a extração dos campos.
-// Devolve { campos, bytes }: campos[chave] = { bruto, final, inicioByte, fimByte }
-// (inicioByte/fimByte faltando = campo não encontrado nessa string → exibe "-").
+// Confere tamanho, stop bit e CRC-ITU. Não bloqueia a leitura: só devolve o aviso.
+function gt06Validar(bytes) {
+  if (bytes.length < 3) return "Pacote incompleto.";
+  const tamanho = hexParaInt(bytes[2]);
+  const problemas = [];
+  if (bytes.length !== tamanho + 5) {
+    problemas.push(`tamanho declarado ${tamanho + 5} bytes, recebidos ${bytes.length}`);
+  }
+  if (bytes.slice(-2).join("") !== "0D0A") problemas.push("stop bit 0D 0A ausente");
+  if (bytes.length >= tamanho + 3) {
+    const crcRecebido = hexParaInt(bytes[tamanho + 1] + bytes[tamanho + 2]);
+    if (crcRecebido !== crc16Itu(bytes.slice(2, tamanho + 1))) problemas.push("CRC-ITU não confere");
+  }
+  return problemas.length ? `Aviso: ${problemas.join("; ")}.` : "";
+}
+
+// Protocolo E3 (BWS IoT) v3.7.2: texto ASCII *ET,SN,CMD,DADO1,DADO2,...#
+// Cada campo separado por vírgula ocupa uma posição em "bytes" (inicioByte/fimByte = índice do campo).
+const E3_TIPO_PACOTE = {
+  RG: "Registro",
+  HB: "Posição (heartbeat)",
+  GZ: "Rastreamento em tempo real",
+  FD: "Modo alarme / controle de saídas",
+  AM: "Alarme",
+  FE: "Cerca quadrada",
+  UP: "Manter conexão UDP",
+  PW: "Consulta de senha de serviço",
+  MM: "Consulta de senha do equipamento",
+  DW: "Posição (consulta de endereço)",
+  OD: "Limite de velocidade",
+  TX: "Manter conexão (online)",
+  DX: "Envio de SMS pelo servidor",
+  IP: "Alteração de IP e porta",
+  LC: "Correção de odômetro",
+  SP: "Período de sono",
+  AC: "Tempo até dormir após desligar a ignição",
+  ZD: "Sensibilidade do sensor de movimento",
+  HT: "Intervalo de transmissão",
+  PM: "Modo de economia de energia",
+  ZH: "Número de monitoramento principal",
+  FH: "Números de monitoramento secundários",
+  SQ: "Fuso horário",
+  LG: "Idioma do SMS",
+  WL: "Cerca circular",
+  MG: "Resposta por SMS ligada/desligada",
+  CQ: "Reiniciar equipamento",
+  KS: "Comando SMS enviado pelo servidor",
+  CX: "Consulta de status",
+  JZ: "Localização por torre de celular",
+  CC: "Registro de ignição (ACC)",
+  MQ: "Envio de dados armazenados sem GSM",
+};
+
+// Comandos cuja mensagem pode vir em Uni_Str (UTF-16 em hex), quando têm um único campo de dados.
+const E3_COMANDOS_UNICODE = new Set(["RG", "PW", "DW", "DX", "JZ", "CX"]);
+
+// Código de status (4 bytes, hex). Saída 1/2, entrada 2 e ACC têm linhas próprias na tabela.
+const E3_STATUS = [
+  [0x01000000, "Modo alarme ativado", "status"],
+  [0x02000000, "Entrada em cerca da plataforma (quadrada)", "alarme"],
+  [0x04000000, "Saída de cerca da plataforma (quadrada)", "alarme"],
+  [0x08000000, "Bateria de backup baixa", "alarme"],
+  [0x10000000, "Falha no GPS", "alarme"],
+  [0x20000000, "Vibração", "alarme"],
+  [0x40000000, "Veículo em movimento", "status"],
+  [0x80000000, "Excesso de velocidade", "alarme"],
+  [0x00010000, "SOS", "alarme"],
+  [0x00020000, "Movimento", "alarme"],
+  [0x00040000, "Corte de alimentação externa", "alarme"],
+  [0x00400000, "Modo de economia de energia", "status"],
+  [0x00000100, "Entrada na cerca circular 1", "alarme"],
+  [0x00000200, "Saída da cerca circular 1", "alarme"],
+  [0x00000400, "Entrada na cerca circular 2", "alarme"],
+  [0x00000800, "Saída da cerca circular 2", "alarme"],
+  [0x00001000, "Entrada na cerca circular 3", "alarme"],
+  [0x00002000, "Saída da cerca circular 3", "alarme"],
+  [0x00004000, "Alarme ADC", "alarme"],
+  [0x00008000, "Temperatura", "alarme"],
+  [0x00000001, "Aceleração brusca", "alarme"],
+  [0x00000002, "Frenagem brusca", "alarme"],
+  [0x00000004, "Frenagem de emergência", "alarme"],
+];
+
+function formatarNumeroBR(valor, casas) {
+  return valor.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
+}
+
+// Registra um campo do E3: tokens [inicio, inicio+qtd), unidos por vírgula.
+function e3Campo(campos, tokens, chave, inicio, qtd, calcularFinal) {
+  if (tokens.length < inicio + qtd || tokens.slice(inicio, inicio + qtd).some((t) => t === "")) return;
+  const bruto = tokens.slice(inicio, inicio + qtd).join(",");
+  campos[chave] = { bruto, final: calcularFinal(bruto), inicioByte: inicio, fimByte: inicio + qtd };
+}
+
+// Latitude/longitude: hex ÷ 600000; primeiro dígito 8 (bit mais alto) = sul/oeste.
+function e3Coordenada(hex) {
+  const valor = parseInt(hex, 16);
+  const negativo = valor >= 0x80000000;
+  return formatarCoordenada((negativo ? -1 : 1) * ((valor % 0x80000000) / 600000));
+}
+
+// YYMMDD e HHMMSS: cada par de dígitos é um byte em hex (ex.: 050915 = 21/09/2005).
+function e3Data(hex) {
+  const [aa, mm, dd] = (hex.match(/../g) || []).map(hexParaInt);
+  return `${String(dd).padStart(2, "0")}/${String(mm).padStart(2, "0")}/${2000 + aa}`;
+}
+
+function e3Hora(hex) {
+  return (hex.match(/../g) || []).map((h) => String(hexParaInt(h)).padStart(2, "0")).join(":");
+}
+
+// Uni_Str: texto em UTF-16 (4 dígitos hex por caractere).
+function e3TextoUnicode(hex) {
+  return (hex.match(/.{4}/g) || []).map((h) => String.fromCharCode(parseInt(h, 16))).join("");
+}
+
+// Bloco de posição de HB/AM/DW/CC, a partir do campo A/V em "base":
+// A/V, YYMMDD, HHMMSS, Lat, Lon, Velocidade, Curso, Status, Sinal, Bateria, Combustível, Odômetro, Altitude.
+function e3PreencherPosicao(campos, tokens, base, sufixoHora) {
+  e3Campo(campos, tokens, "gpsFixo", base, 1, (b) => (b.toUpperCase() === "A" ? "Válida (A)" : "Inválida (V)"));
+  e3Campo(campos, tokens, "data", base + 1, 1, e3Data);
+  e3Campo(campos, tokens, "hora", base + 2, 1, (b) => `${e3Hora(b)} ${sufixoHora}`);
+  e3Campo(campos, tokens, "latitude", base + 3, 1, e3Coordenada);
+  e3Campo(campos, tokens, "longitude", base + 4, 1, e3Coordenada);
+  e3Campo(campos, tokens, "velocidade", base + 5, 1, (b) => `${formatarNumeroBR(hexParaInt(b) / 100, 2)} km/h`);
+  e3Campo(campos, tokens, "curso", base + 6, 1, (b) => `${formatarNumeroBR(hexParaInt(b) / 100, 2)}°`);
+  e3PreencherStatus(campos, tokens, base + 7);
+  e3Campo(campos, tokens, "sinalGsm", base + 8, 1, (b) => `${b}/32`);
+  e3Campo(campos, tokens, "bateria", base + 9, 1, (b) => `${b}%`);
+  e3Campo(campos, tokens, "odometro", base + 11, 1, (b) => `${formatarNumeroBR(hexParaInt(b) / 10, 1)} km`);
+  e3Campo(campos, tokens, "altitude", base + 12, 1, (b) => `${b} m`);
+}
+
+function e3PreencherStatus(campos, tokens, idx) {
+  const bit = (mascara) => (b) => (parseInt(b, 16) & mascara ? "Ligada" : "Desligada");
+  e3Campo(campos, tokens, "ignicao", idx, 1, (b) => (parseInt(b, 16) & 0x00800000 ? "Ligada" : "Desligada"));
+  e3Campo(campos, tokens, "entrada1", idx, 1, (b) => (parseInt(b, 16) & 0x00800000 ? "Ligada (ACC)" : "Desligada (ACC)"));
+  e3Campo(campos, tokens, "entrada2", idx, 1, (b) => (parseInt(b, 16) & 0x00200000 ? "Ligada (antifurto externo)" : "Desligada"));
+  e3Campo(campos, tokens, "corteOleo", idx, 1, (b) => (parseInt(b, 16) & 0x00080000 ? "Cortado" : "Conectado"));
+  e3Campo(campos, tokens, "saida1", idx, 1, bit(0x00080000));
+  e3Campo(campos, tokens, "saida2", idx, 1, bit(0x00100000));
+  const ativos = (b, tipo) =>
+    E3_STATUS.filter(([mascara, , t]) => t === tipo && parseInt(b, 16) & mascara).map(([, nome]) => nome);
+  e3Campo(campos, tokens, "alarme", idx, 1, (b) => ativos(b, "alarme").join("; ") || "Nenhum");
+  e3Campo(campos, tokens, "statusExtra", idx, 1, (b) => ativos(b, "status").join("; ") || "Nenhum");
+}
+
+// Campos opcionais no fim de HB/AM/DW/CC. Tensão e satélites são sempre os dois últimos;
+// no HB, quando sobram 4 campos após o GPSdata, os dois primeiros são RFID e temperatura.
+function e3PreencherFinais(campos, tokens, inicio, comRfid) {
+  const sobra = tokens.length - inicio;
+  if (sobra >= 2) {
+    e3Campo(campos, tokens, "tensao", tokens.length - 2, 1, (b) => `${b.replace(".", ",")} V`);
+    e3Campo(campos, tokens, "satelites", tokens.length - 1, 1, (b) => b);
+  }
+  if (comRfid && sobra === 4) {
+    e3Campo(campos, tokens, "motorista", inicio, 1, (b) => `RFID ${b}`);
+    e3Campo(campos, tokens, "temperatura", inicio + 1, 1, (b) => `${formatarNumeroBR(hexParaInt(b) / 100, 2)} °C`);
+  }
+}
+
+function parseE3(texto) {
+  const corpo = texto.replace(/^\*/, "").replace(/#\s*$/, "");
+  const tokens = corpo.split(",").map((t) => t.trim());
+  const cmd = (tokens[2] || "").toUpperCase();
+  const campos = {
+    possivelRastreador: { bruto: tokens[0], final: "E3 (BWS IoT)", inicioByte: 0, fimByte: 1 },
+  };
+  e3Campo(campos, tokens, "idImei", 1, 1, (b) => b);
+  e3Campo(campos, tokens, "tipoPacote", 2, 1, (b) => E3_TIPO_PACOTE[cmd] || `Desconhecido (${b})`);
+
+  const problemas = [];
+  if (!/#\s*$/.test(texto)) problemas.push("fim # ausente");
+  if (tokens[1] && !/^\d{15}$/.test(tokens[1])) problemas.push("IMEI não tem 15 dígitos");
+
+  const semFuso = "(horário do rastreador, sem conversão)";
+  // Quantidade mínima de campos para o bloco de posição: ET, SN, CMD + 13.
+  const exigirPosicao = (base) => {
+    if (tokens.length < base + 13) problemas.push(`faltam campos: esperado ao menos ${base + 13}, recebidos ${tokens.length}`);
+  };
+
+  switch (cmd) {
+    case "HB":
+      exigirPosicao(3);
+      e3PreencherPosicao(campos, tokens, 3, semFuso);
+      // Campo 16 = GPSdata (sinal de 5 satélites); os opcionais começam no 17.
+      e3PreencherFinais(campos, tokens, 17, true);
+      break;
+    case "AM":
+    case "DW":
+      // DW enviado pelo servidor traz só a mensagem de endereço.
+      if (tokens.length === 4) {
+        e3Campo(campos, tokens, "comando", 3, 1, (b) => (/^([0-9A-F]{4})+$/i.test(b) ? e3TextoUnicode(b) : b));
+        break;
+      }
+      exigirPosicao(3);
+      e3PreencherPosicao(campos, tokens, 3, semFuso);
+      e3PreencherFinais(campos, tokens, 16, false);
+      break;
+    case "CC":
+      // Campo 3 = fuso horário configurado no rastreador.
+      exigirPosicao(4);
+      e3PreencherPosicao(campos, tokens, 4, `(fuso do rastreador: ${tokens[3] || "?"})`);
+      e3PreencherFinais(campos, tokens, 17, false);
+      break;
+    case "TX":
+      e3Campo(campos, tokens, "gpsFixo", 3, 1, (b) => (b.toUpperCase() === "A" ? "Válida (A)" : "Inválida (V)"));
+      e3Campo(campos, tokens, "data", 4, 1, e3Data);
+      e3Campo(campos, tokens, "hora", 5, 1, (b) => `${e3Hora(b)} ${semFuso}`);
+      break;
+    case "JZ":
+      if (tokens.length >= 8) {
+        e3Campo(campos, tokens, "lbs", 4, 4, () =>
+          `MCC ${tokens[6]}, MNC ${tokens[7]}, LAC ${tokens[5]}, Cell ID ${tokens[4]}`
+        );
+        break;
+      }
+    // eslint-disable-next-line no-fallthrough
+    default:
+      if (cmd === "RG" && /^\d+$/.test(tokens[3] || "")) {
+        e3Campo(campos, tokens, "telefone", 3, 1, (b) => b);
+      } else if (tokens.length > 3) {
+        const unicode =
+          E3_COMANDOS_UNICODE.has(cmd) && tokens.length === 4 && /^([0-9A-F]{4})+$/i.test(tokens[3]) && /[A-F]/i.test(tokens[3]);
+        e3Campo(campos, tokens, "comando", 3, tokens.length - 3, (b) => (unicode ? e3TextoUnicode(b) : b));
+      }
+  }
+
+  return {
+    campos,
+    bytes: tokens,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    separador: ",",
+    perfil: "E3",
+  };
+}
+
+// Protocolo J-R12 (Jmak) v1.1.0: três formatos de envio com os mesmos IDs de parâmetro.
+//   String: ~MÁSCARA;campo;campo...|MÁSCARA_CAN;campo...$   (valores legíveis, separados por ";")
+//   Zip:    5E + máscara (8 bytes) + campos binários de tamanho fixo + [máscara CAN + campos CAN] + 24
+//   JSON:   objeto com chaves curtas (imei, ts, gps...), sem máscara.
+// Cada decodificador monta { ID: { v, i, f } } com o valor já convertido (v) e a posição na faixa de
+// cima (i..f); jr12Preencher transforma isso nas linhas da tabela, igual para os três formatos.
+
+// Máscara: inteiro de 64 bits; o bit (ID - 1) ligado indica que o parâmetro ID foi enviado.
+function jr12IdsDaMascara(hex) {
+  const mascara = BigInt("0x" + hex);
+  const ids = [];
+  for (let id = 1; id <= 64; id++) if ((mascara >> BigInt(id - 1)) & 1n) ids.push(id);
+  return ids;
+}
+
+const JR12_EVENTOS = {
+  111: ["Limite de velocidade", { 1: "limite atingido", 0: "normal" }],
+  112: ["Limite de RPM", { 2: "limite intermediário", 3: "limite alto", 0: "normal" }],
+  113: ["Ignição (entrada digital 1)", { 1: "ativada", 0: "desativada" }],
+  114: ["Envio por ângulo (azimute)", { 1: "ocorrência" }],
+  115: ["Frenagem brusca", { 1: "ocorrência" }],
+  116: ["Aceleração brusca", { 1: "ocorrência" }],
+  117: ["Curva acentuada", { 1: "ocorrência" }],
+  118: ["Entrada digital 2", { 1: "ativada", 0: "desativada" }],
+  119: ["Limite da entrada analógica", { 1: "limite atingido", 0: "normalizado" }],
+  120: ["Cerca", { 1: "entrada", 0: "saída" }],
+  121: ["Envio por distância", { 1: "ocorrência" }],
+  124: ["Modo bateria interna", { 1: "ativação", 0: "desativação" }],
+  125: ["Bateria interna baixa", { 1: "ocorrência" }],
+  126: ["Identificador RS232", { 1: "motorista", 4: "passageiro", 2: "desligar veículo" }],
+  127: ["Detecção de movimento", { 1: "ocorrência" }],
+  131: ["Mensagem transparente", { 1: "ocorrência" }],
+};
+
+// ON/OFF CAN: bit0 = freio de estacionamento ... bit5 = limpador de para-brisa.
+const JR12_CAN_ONOFF = ["Freio de estacionamento", "Freio", "Embreagem", "Ar condicionado", "Cinto de segurança", "Limpador de para-brisa"];
+
+function jr12DescreverEvento(id, st, nome) {
+  const [descricao, estados] = JR12_EVENTOS[Number(id)] || [`Evento desconhecido (${id})`, {}];
+  const partes = [descricao];
+  if (st !== undefined) partes.push(estados[Number(st)] || `status ${st}`);
+  if (nome !== undefined && nome !== "") {
+    partes.push(Number(id) === 120 ? `cerca ${nome}` : Number(id) === 126 ? `identificador ${nome}` : String(nome));
+  }
+  return partes.join(" — ");
+}
+
+// Timestamp GMT em ms (o Zip pode mandar o de envio em segundos) → data/hora de Brasília.
+function jr12DataHora(valor) {
+  const n = Number(valor);
+  const brasilia = new Date((n < 1e11 ? n * 1000 : n) - 3 * 60 * 60 * 1000);
+  return { data: formatarDataBR(brasilia), hora: formatarHoraBR(brasilia) };
+}
+
+// Helper campo(chave, [entradas], calcular) dos protocolos com máscara (J-R12, Suntech): cada entrada
+// é { v, i, f } (valor já convertido + posição na faixa de cima). A primeira entrada é obrigatória;
+// o destaque vai da menor à maior posição entre as presentes. bruto(i, f) devolve o trecho original.
+function criarCampoPorEntradas(campos, bruto) {
+  return (chave, entradas, calcular) => {
+    if (!entradas[0]) return;
+    const presentes = entradas.filter(Boolean);
+    const i = Math.min(...presentes.map((e) => e.i));
+    const f = Math.max(...presentes.map((e) => e.f));
+    campos[chave] = { bruto: bruto(i, f), final: calcular(...entradas.map((e) => e && e.v)), inicioByte: i, fimByte: f };
+  };
+}
+
+function jr12Preencher(c, d, extras, bruto) {
+  const campos = {};
+  const campo = criarCampoPorEntradas(campos, bruto);
+  const num = (v, casas) => formatarNumeroBR(Number(v), casas);
+  const bit = (mascara, sim, nao) => (v) => (Number(v) & mascara ? sim : nao);
+  // ID 9, bit3: 1 = timestamp real, 0 = último valor salvo na memória.
+  const horaMemoria = c[9] && !(Number(c[9].v) & 8) ? " — hora da memória, não sincronizada" : "";
+
+  campo("numeroSerial", [c[1]], String);
+  campo("idImei", [c[2]], String);
+  campo("apelido", [c[4]], (v) => (!v || v === "NULL" ? "Sem apelido" : v));
+  campo("contador", [c[3]], String);
+  campo("data", [c[5]], (v) => jr12DataHora(v).data);
+  campo("hora", [c[5]], (v) => `${jr12DataHora(v).hora} (Brasília)${horaMemoria}`);
+  campo("envio", [c[26]], (v) => `${jr12DataHora(v).data} ${jr12DataHora(v).hora} (Brasília)`);
+  campo("backup", [c[16]], (v) => (Number(v) ? "Sim (reenvio da memória)" : "Não (enviado na hora)"));
+  campo("gpsFixo", [c[27]], (v) => ({ 0: "Sem fix", 1: "GPS fixado", 2: "GPS diferencial" }[Number(v)] || `Desconhecido (${v})`));
+  campo("satelites", [c[11]], String);
+  campo("hdop", [c[13]], (v) => num(v, 2));
+  campo("latitude", [c[6]], (v) => formatarCoordenada(Number(v)));
+  campo("longitude", [c[7]], (v) => formatarCoordenada(Number(v)));
+  campo("altitude", [c[8]], (v) => `${num(v, 2)} m`);
+  campo("velocidade", [c[10]], (v) => `${num(v, 2)} km/h`);
+  campo("curso", [c[14]], (v) => `${num(v, 2)}°`);
+  campo("ignicao", [c[15]], (v) => (Number(v) ? "Ligada" : "Desligada"));
+  // Estado I/O: bit0 pós-chave, bit1 entrada 2, bit2 saída corta corrente, bit3 saída 2.
+  campo("entrada1", [c[28]], bit(1, "Ativa (pós-chave)", "Inativa (pós-chave)"));
+  campo("entrada2", [c[28]], bit(2, "Ativa", "Inativa"));
+  campo("saida1", [c[28]], bit(4, "Ativa (corta corrente)", "Inativa (corta corrente)"));
+  campo("saida2", [c[28]], bit(8, "Ativa", "Inativa"));
+  campo("corteOleo", [c[28]], bit(4, "Cortado", "Conectado"));
+  campo("evento", [c[19], c[20], c[21]], jr12DescreverEvento);
+  campo("bateria", [c[23]], (v) => `${num(v / 1000, 2)} V (bateria interna)`);
+  campo("tensao", [c[22]], (v) => `${num(v / 1000, 2)} V (alimentação)`);
+  campo("sinalGsm", [c[12]], (v) => (Number(v) === 99 ? "Sem sinal (99)" : `${v}/31`));
+  campo("operadora", [c[24]], (v) => v || "Não informada");
+  campo("tecnologia", [c[25]], (v) => ({ 0: "Sem conexão", 2: "2G", 4: "4G" }[Number(v)] || `Desconhecida (${v})`));
+  campo("odometro", [c[18]], (v) => `${num(v, 2)} km`);
+  campo("horimetro", [c[17]], (v) => `${num(v, 2)} h`);
+  campo("motorista", [c[29]], (v) => (Number(v) ? `Tag RFID ${v}` : "Nenhuma tag"));
+  campo("entradaAnalogica", [extras.anin], (v) => `${num(v, 2)} mA`);
+  campo("mensagemTransparente", [c[31], c[30]], (hex) => {
+    const texto = hexParaTexto(String(hex));
+    return /^[\x20-\x7E]+$/.test(texto) ? `${hex} (texto: "${texto}")` : String(hex);
+  });
+
+  campo("canOdometro", [d[1]], (v) => `${num(v, 2)} km`);
+  campo("canHorimetro", [d[2]], (v) => `${num(v, 2)} h`);
+  campo("canVelocidade", [d[3]], (v) => `${num(v, 2)} km/h`);
+  campo("canRpm", [d[4]], (v) => `${num(v, 2)} rpm`);
+  campo("canOnOff", [d[5]], (v) => JR12_CAN_ONOFF.filter((_, n) => Number(v) & (1 << n)).join("; ") || "Nenhum acionado");
+  campo("canPedal", [d[7]], (v) => `${v}%`);
+  campo("canCombustivel", [d[9], d[8]], (nivel, unidade) => `${nivel} ${unidade === "%" ? "%" : unidade || ""}`.trim());
+  campo("canAutonomia", [d[11]], (v) => `${num(v, 2)} km`);
+  campo("canConsumo", [d[13], d[12]], (v, unidade) =>
+    `${num(v, 2)}${unidade === "H" ? " L/h" : unidade === "K" ? " km/L" : ""}`
+  );
+  campo("canCombustivelUsado", [d[14]], (v) => `${num(v, 2)} L`);
+  campo("canTempOleo", [d[15]], (v) => `${v} °C`);
+  return campos;
+}
+
+function jr12Resultado(formato, marcador, c, d, extras, tokens, separador, problemas) {
+  const juntar = separador === undefined ? "" : separador;
+  const campos = jr12Preencher(c, d, extras, (i, f) => tokens.slice(i, f).join(juntar));
+  campos.possivelRastreador = { bruto: marcador.bruto, final: "J-R12 (Jmak)", inicioByte: marcador.i, fimByte: marcador.f };
+  const temCan = Object.keys(d).length > 0;
+  campos.tipoPacote = {
+    bruto: c[0] ? String(c[0].v) : "",
+    final: `Posição — formato ${formato}${temCan ? ", com dados CAN" : ""}`,
+    inicioByte: c[0] && c[0].i,
+    fimByte: c[0] && c[0].f,
+  };
+  return {
+    campos,
+    bytes: tokens,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    separador,
+    perfil: "JR12",
+  };
+}
+
+// --- J-R12 String ---
+// Lê "MÁSCARA;v1;v2..." de uma das partes (comum ou CAN) e registra cada valor no ID da máscara.
+function jr12LerString(parte, tokens, destino, problemas, rotulo) {
+  const valores = parte.split(";").map((t) => t.trim());
+  if (valores.length > 1 && valores[valores.length - 1] === "") valores.pop();
+  const mascara = valores.shift();
+  if (!/^[0-9A-F]+$/i.test(mascara || "")) {
+    problemas.push(`${rotulo}: máscara inválida`);
+    return;
+  }
+  const ids = jr12IdsDaMascara(mascara);
+  destino[0] = { v: mascara, i: tokens.length, f: tokens.length + 1 };
+  tokens.push(mascara);
+  if (ids.length !== valores.length) {
+    problemas.push(`${rotulo}: a máscara indica ${ids.length} campos, mas vieram ${valores.length}`);
+  }
+  ids.forEach((id, n) => {
+    if (n >= valores.length) return;
+    destino[id] = { v: valores[n], i: tokens.length, f: tokens.length + 1 };
+    tokens.push(valores[n]);
+  });
+}
+
+function parseJR12String(texto) {
+  const problemas = [];
+  if (!/\$\s*$/.test(texto)) problemas.push("fim $ ausente");
+  const [parteComum, parteCan] = texto.replace(/^~/, "").replace(/\$\s*$/, "").split("|");
+  const tokens = [];
+  const c = {};
+  const d = {};
+  jr12LerString(parteComum, tokens, c, problemas, "Dados comuns");
+  if (parteCan !== undefined) jr12LerString(parteCan, tokens, d, problemas, "CAN");
+  // Na String latitude, longitude e altitude já vêm com sinal.
+  return jr12Resultado("String", { bruto: "~" }, c, d, {}, tokens, ";", problemas);
+}
+
+// --- J-R12 Zip ---
+// [tamanho em bytes, conversão]: número = dividir por ele; "big" = inteiro de 64 bits exato.
+const JR12_ZIP_COMUM = {
+  1: [11, "serial"], 2: [8, "big"], 3: [4, "int"], 4: [10, "ascii"], 5: [8, "int"],
+  6: [4, 1e5], 7: [4, 1e5], 8: [3, 100], 9: [1, "int"], 10: [3, 100], 11: [1, "int"], 12: [1, "int"],
+  13: [2, 100], 14: [3, 100], 15: [1, "int"], 16: [1, "int"], 17: [5, 100], 18: [5, 100],
+  19: [1, "int"], 20: [1, "int"], 21: [8, "big"], 22: [2, "int"], 23: [2, "int"], 24: [4, "ascii"],
+  25: [1, "int"], 26: [8, "int"], 27: [1, "int"], 28: [1, "int"], 29: [8, "big"], 30: [1, "int"],
+  31: [null, "hex"], // tamanho variável: valor do ID 30
+};
+const JR12_ZIP_CAN = {
+  1: [5, 100], 2: [5, 100], 3: [3, 100], 4: [3, 100], 5: [2, "int"], 7: [1, "int"], 8: [1, "ascii"],
+  9: [1, "int"], 11: [3, 100], 12: [1, "ascii"], 13: [2, 100], 14: [5, 100], 15: [1, "temp"],
+};
+
+function jr12ZipConverter(hex, tipo) {
+  if (tipo === "hex") return hex;
+  if (tipo === "ascii") return hexParaTexto(hex).replace(/\0/g, "");
+  if (tipo === "serial") {
+    // 3 bytes + "-" + 3 bytes + "-" + 3 bytes → XXXXXX-XXXXX-XXXXXXX
+    const seg = (h, digitos) => String(parseInt(h, 16)).padStart(digitos, "0");
+    return `${seg(hex.slice(0, 6), 6)}-${seg(hex.slice(8, 14), 5)}-${seg(hex.slice(16, 22), 7)}`;
+  }
+  if (tipo === "big") return BigInt("0x" + hex).toString();
+  const inteiro = Number(BigInt("0x" + hex));
+  if (tipo === "temp") return inteiro - 40;
+  return typeof tipo === "number" ? inteiro / tipo : inteiro;
+}
+
+// Lê os IDs da máscara a partir de "pos"; devolve a posição seguinte, ou -1 se não deu para continuar.
+function jr12LerZip(bytes, pos, ids, tabela, destino, problemas, rotulo) {
+  for (const id of ids) {
+    const def = tabela[id];
+    if (!def) {
+      problemas.push(`${rotulo}: ID ${id} não tem tamanho definido no protocolo, leitura interrompida`);
+      return -1;
+    }
+    const tamanho = def[0] === null ? Number(destino[30] ? destino[30].v : 0) : def[0];
+    if (pos + tamanho > bytes.length) {
+      problemas.push(`${rotulo}: o pacote termina antes do ID ${id}`);
+      return -1;
+    }
+    destino[id] = { v: jr12ZipConverter(bytes.slice(pos, pos + tamanho).join(""), def[1]), i: pos, f: pos + tamanho };
+    pos += tamanho;
+  }
+  return pos;
+}
+
+function parseJR12Zip(bytes) {
+  const problemas = [];
+  const c = {};
+  const d = {};
+  const fimDados = bytes[bytes.length - 1] === "24" ? bytes.length - 1 : bytes.length;
+  if (fimDados === bytes.length) problemas.push("fim 24 ($) ausente");
+  const dados = bytes.slice(0, fimDados);
+
+  if (dados.length < 9) {
+    problemas.push("pacote menor que a máscara (8 bytes)");
+  } else {
+    const mascara = dados.slice(1, 9).join("");
+    c[0] = { v: mascara, i: 1, f: 9 };
+    let pos = jr12LerZip(dados, 9, jr12IdsDaMascara(mascara), JR12_ZIP_COMUM, c, problemas, "Dados comuns");
+    // Não há separador: se sobraram 8+ bytes depois dos dados comuns, é a máscara CAN.
+    if (pos >= 0 && dados.length - pos >= 8) {
+      const mascaraCan = dados.slice(pos, pos + 8).join("");
+      d[0] = { v: mascaraCan, i: pos, f: pos + 8 };
+      pos = jr12LerZip(dados, pos + 8, jr12IdsDaMascara(mascaraCan), JR12_ZIP_CAN, d, problemas, "CAN");
+    }
+    if (pos >= 0 && pos < dados.length) problemas.push(`${dados.length - pos} byte(s) sobrando no fim`);
+  }
+
+  // No Zip latitude/longitude/altitude vêm sem sinal; ID 9: bit0 lat, bit1 lon, bit2 alt negativas.
+  const gnss = c[9] ? Number(c[9].v) : 0;
+  [[6, 1], [7, 2], [8, 4]].forEach(([id, mascara]) => {
+    if (c[id] && gnss & mascara) c[id].v = -c[id].v;
+  });
+  return jr12Resultado("Zip", { bruto: "5E", i: 0, f: 1 }, c, d, {}, bytes, "", problemas);
+}
+
+// --- J-R12 JSON ---
+const JR12_JSON_COMUNS = {
+  s_num: 1, imei: 2, cnt: 3, name: 4, ts: 5, alt: 8, speed: 10, nsat: 11, rssi: 12, hdop: 13, azi: 14,
+  ive: 15, bckup: 16, hourmt: 17, odomt: 18, vin: 22, bat: 23, ope: 24, tec: 25, ts_n: 26, fix: 27,
+  ios: 28, tag: 29, trp: 31,
+};
+// Chaves CAN do JSON → IDs CAN do String/Zip ("4" e "10" trazem valor + unidade juntos).
+const JR12_JSON_CAN = { 1: 3, 2: 4, 3: 1, 5: 15, 6: 7, 7: 5, 9: 11, 11: 2, 14: 14 };
+
+function parseJR12Json(texto) {
+  let obj;
+  try {
+    // Os exemplos do manual trazem comentários "//"; o rastreador não manda, mas aceitamos colados.
+    obj = JSON.parse(texto.replace(/\/\/[^\n]*/g, ""));
+  } catch (e) {
+    return { campos: {}, bytes: [], aviso: `JSON inválido: ${e.message}` };
+  }
+  const tokens = [];
+  const c = {};
+  const d = {};
+  const extras = {};
+  const registrar = (rotulo, valor) => {
+    tokens.push(`${rotulo}: ${JSON.stringify(valor)}`);
+    const i = tokens.length - 1;
+    return (v) => ({ v, i, f: i + 1 });
+  };
+
+  Object.entries(obj).forEach(([chave, valor]) => {
+    if (chave === "evt" || chave === "can") return;
+    const entrada = registrar(chave, valor);
+    if (chave === "gps" && Array.isArray(valor)) {
+      c[6] = entrada(valor[0]);
+      c[7] = entrada(valor[1]);
+    } else if (chave === "tup") {
+      c[9] = entrada(valor ? 8 : 0); // mesmo bit3 do byte de informações GNSS
+    } else if (chave === "anin") {
+      extras.anin = entrada(valor);
+    } else if (JR12_JSON_COMUNS[chave]) {
+      c[JR12_JSON_COMUNS[chave]] = entrada(valor);
+    }
+  });
+  [["id", 19], ["st", 20], ["name", 21]].forEach(([chave, id]) => {
+    if (obj.evt && obj.evt[chave] !== undefined) c[id] = registrar(`evt.${chave}`, obj.evt[chave])(obj.evt[chave]);
+  });
+  Object.entries(obj.can || {}).forEach(([chave, valor]) => {
+    const entrada = registrar(`can.${chave}`, valor);
+    const unidade = String(valor).replace(/[\d.,\s-]/g, "");
+    const numero = parseFloat(String(valor).replace(/[^\d.-]/g, ""));
+    if (chave === "4") {
+      d[9] = entrada(numero);
+      d[8] = entrada(unidade);
+    } else if (chave === "10") {
+      d[13] = entrada(numero);
+      d[12] = entrada(unidade);
+    } else if (JR12_JSON_CAN[chave]) {
+      d[JR12_JSON_CAN[chave]] = entrada(valor);
+    }
+  });
+
+  return jr12Resultado("JSON", { bruto: "{ }" }, c, d, extras, tokens, " · ", []);
+}
+
+// Protocolo Suntech Universal (ST4300/ST4340/ST4500...), Device Communication Guide rev 1.96.
+//   Normal: HDR;DEV_ID;REPORT_MAP;campo;campo...   (texto separado por ";")
+//   Zip:    HDR (1) + PKT_LEN (2) + DEV_ID (5, BCD) + REPORT_MAP (3) + campos binários de tamanho fixo
+// O REPORT_MAP diz quais campos vieram (bit N = campo N); os campos 19-23 mudam por tipo de relatório.
+// Os dois formatos viram { CHAVE: { v, i, f } } com o mesmo valor normalizado; stPreencher monta a tabela.
+
+const ST_RELATORIOS = {
+  STT: "Status (posição periódica)",
+  ALT: "Alerta",
+  ALV: "Keep-alive",
+  UEX: "Dados de dispositivo serial (RS232)",
+  TRV: "Resumo de viagem",
+  CAM: "Câmera",
+  FTR: "Rastreamento fino",
+  CID: "ICCID do chip",
+  MNT: "Manutenção",
+  RFA: "Evento RF",
+  GED: "Dados do motor (GED)",
+  PRM: "Parâmetros (IP)",
+  ACK: "Confirmação (ACK)",
+  CRR: "Reconstrução de colisão",
+};
+// Byte de cabeçalho do Zip → relatório. 9x / EA = mesmo relatório pedindo ACK do servidor.
+const ST_ZIP_HDR = {
+  "81": "STT", "91": "STT", "82": "ALT", "92": "ALT", "83": "ALV", "84": "UEX", "94": "UEX",
+  "85": "TRV", "95": "TRV", "86": "CAM", "87": "CAM", "97": "CAM", "89": "FTR", "8C": "CID", "9C": "CID",
+  "90": "ACK", FA: "RFA", EA: "RFA",
+};
+const ST_MODELOS = { 36: "ST4300", 46: "ST4500", 47: "ST4340", 49: "ST4340R", 52: "ST4340LC" };
+
+// [bit do REPORT_MAP, campo, bytes no Zip]. "alertData"/"len" = tamanho vem de um campo anterior.
+const ST_CAMPOS_BASE = [
+  [1, "MODEL", 1], [2, "SW_VER", 3], [3, "MSG_TYPE", 1], [4, "DATE", 3], [5, "TIME", 3], [6, "CELL_ID", 4],
+  [7, "MCC", 2], [8, "MNC", 2], [9, "LAC", 2], [10, "RX_LVL", 1], [11, "LAT", 4], [12, "LON", 4],
+  [13, "SPD", 2], [14, "CRS", 2], [15, "SATT", 1], [16, "FIX", 1], [17, "IN_STATE", 1], [18, "OUT_STATE", 1],
+];
+const ST_CAMPOS_POR_TIPO = {
+  STT: [[19, "MODE", 1], [20, "STT_RPT_TYPE", 1], [21, "MSG_NUM", 2], [22, "RESERVED", 1], [23, "ASSIGN_MAP", 4]],
+  ALT: [[19, "ALERT_ID", 1], [20, "ALERT_MOD", 2], [21, "ALERT_DATA", "alertData"], [22, "RESERVED", 1], [23, "ASSIGN_MAP", 4]],
+  UEX: [[19, "LEN", 2], [20, "DATA", "len"], [21, "CHK_SUM", 1], [22, "ST25T_PORT", 1]],
+};
+
+const ST_MODOS = ["Estacionado", "Dirigindo", "Ocioso (parado ligado)", "Excesso de velocidade", "Reboque", "Zona de desativação", "Emergência"];
+const ST_TIPO_ENVIO = ["Resposta a comando", "Por tempo", "Por distância", "Por ângulo/curva"];
+const ST_ALERTAS = {
+  1: "Excesso de velocidade", 2: "Velocidade normalizada", 3: "Antena GPS desconectada", 4: "Antena GPS conectada",
+  5: "Saída de cerca", 6: "Entrada em cerca", 8: "Antena GPS em curto", 9: "Entrou em modo sleep", 10: "Saiu do modo sleep",
+  11: "Entrada em nível alto", 12: "Entrada aterrada (nível baixo)", 13: "Erro na bateria de backup",
+  14: "Bateria do veículo baixa", 15: "Impacto (choque)", 16: "Colisão detectada", 17: "Movimento detectado",
+  29: "Entrou em modo direção", 31: "Entrou em modo estacionado", 33: "Ignição ligada", 34: "Ignição desligada",
+  35: "Ociosidade excessiva", 36: "Entrou em modo excesso de velocidade", 40: "Alimentação principal conectada",
+  41: "Alimentação principal desconectada", 42: "Botão de pânico", 43: "Bateria de backup baixa",
+  44: "Bateria de backup conectada", 45: "Bateria de backup desconectada", 46: "Aceleração brusca",
+  47: "Frenagem brusca", 48: "Curva brusca à esquerda", 49: "Curva brusca à direita", 50: "Jammer detectado",
+  55: "Botão liga/desliga pressionado", 56: "Ímã detectado", 57: "Ímã removido", 58: "Reboque detectado",
+  59: "Leitura de iButton", 61: "Motor: excesso de rotação", 62: "Motor: violação de velocidade",
+  63: "Motor: temperatura do arrefecimento", 64: "Motor: pressão do óleo", 65: "Motor: violação de RPM",
+  66: "Motor: código de falha (DTC)", 67: "Chamada de voz", 68: "Entrou em modo ocioso", 69: "RS232 conectado/desconectado",
+  70: "ST20U conectado", 71: "ST20U desconectado", 72: "Chip (SIM) removido", 73: "Antifurto",
+  74: "Saída de cerca poligonal", 75: "Temperatura alta", 76: "Temperatura baixa", 77: "Temperatura normalizada",
+  79: "Entrada em cerca poligonal", 82: "Parâmetros OBD configurados", 85: "ST25T conectado",
+  86: "ST25T desconectado / calibração DPA concluída", 87: "Combustível RS232: falha na varredura",
+  88: "Combustível RS232: nível máximo excedido", 89: "Sensor de combustível conectado",
+  90: "Sensor de combustível desconectado", 91: "Nível de combustível baixo", 92: "Nível de combustível alto",
+  93: "Leitura de RFID", 97: "Mudança no fix do GPS", 99: "Equipamento ligado",
+  100: "Excesso de velocidade em cerca poligonal", 101: "Velocidade normalizada em cerca poligonal",
+  103: "Evento MDSM-7 (fadiga do motorista)", 104: "Evento MDAS-9 (assistência ao motorista)",
+  129: "Excesso de velocidade em cerca circular", 130: "Velocidade normalizada em cerca circular",
+  131: "Carreta desengatada", 133: "Modo emergência", 141: "Perda de conexão de rede",
+  142: "Bank truck ativado (cerca poligonal)", 143: "Bank truck ativado (cerca circular)",
+};
+
+// Zip: inteiro de 32 bits com sinal. O manual fala em "bit 31 = negativo" (sinal e magnitude), mas há
+// firmware que manda em complemento de 2; as faixas não se sobrepõem, então dá para detectar.
+function stCoordenadaZip(hex) {
+  const n = parseInt(hex, 16);
+  if (n < 0x80000000) return n / 1e6;
+  if (n <= 0x8ABA9500) return -(n - 0x80000000) / 1e6;
+  return (n - 0x100000000) / 1e6;
+}
+
+// Normaliza um campo para o mesmo valor nos dois formatos.
+const ST_CONVERTER = {
+  zip: {
+    MODEL: (h) => hexParaInt(h),
+    SW_VER: (h) => (h.match(/../g) || []).map(hexParaInt).join("."),
+    // 10 0B 11 → "20161117" (mesmo formato do Normal)
+    DATE: (h) => "20" + (h.match(/../g) || []).map((b) => String(hexParaInt(b)).padStart(2, "0")).join(""),
+    TIME: (h) => (h.match(/../g) || []).map((b) => String(hexParaInt(b)).padStart(2, "0")).join(":"),
+    CELL_ID: (h) => h,
+    LAC: (h) => h,
+    LAT: stCoordenadaZip,
+    LON: stCoordenadaZip,
+    SPD: (h) => hexParaInt(h) / 100,
+    CRS: (h) => hexParaInt(h) / 100,
+    ALERT_MOD: (h) => ({ mod: hexParaInt(h.slice(0, 2)), tamanho: hexParaInt(h.slice(2, 4)) }),
+    ALERT_DATA: (h) => h,
+    DATA: (h) => h,
+    RESERVED: (h) => h,
+    _padrao: (h) => hexParaInt(h),
+  },
+  normal: {
+    SW_VER: (t) => t,
+    DATE: (t) => t,
+    TIME: (t) => t,
+    CELL_ID: (t) => t,
+    LAC: (t) => t,
+    LAT: (t) => parseFloat(t),
+    LON: (t) => parseFloat(t),
+    SPD: (t) => parseFloat(t),
+    CRS: (t) => parseFloat(t),
+    IN_STATE: (t) => parseInt(t, 2),
+    OUT_STATE: (t) => parseInt(t, 2),
+    ALERT_MOD: (t) => ({ mod: t === "" ? undefined : parseInt(t, 10) }),
+    ALERT_DATA: (t) => t,
+    DATA: (t) => t,
+    CHK_SUM: (t) => parseInt(t, 16),
+    ASSIGN_MAP: (t) => parseInt(t, 16),
+    RESERVED: (t) => t,
+    _padrao: (t) => parseInt(t, 10),
+  },
+};
+
+function stConverter(formato, chave, bruto) {
+  const tabela = ST_CONVERTER[formato];
+  return (tabela[chave] || tabela._padrao)(bruto);
+}
+
+function stBitsAtivos(valor, nomes) {
+  return nomes.filter((_, n) => valor & (1 << n));
+}
+
+function stDescreverAlerta(id, mod, dados, formato) {
+  const partes = [ST_ALERTAS[id] || `Alerta desconhecido (${id})`];
+  const m = mod && mod.mod;
+  if ([5, 6, 74, 79, 100, 101].includes(id) && m !== undefined) partes.push(`cerca ${m}`);
+  if ([11, 12, 42].includes(id) && m !== undefined) partes.push(`entrada ${m}`);
+  if ([75, 76, 77].includes(id)) {
+    if (m !== undefined) partes.push(`sensor ${m}`);
+    if (dados) {
+      // Zip: 2 bytes, bit 15 = negativo, valor / 10. Normal: já vem "+22.3".
+      let temp = formato === "zip" ? (hexParaInt(dados) & 0x7fff) / 10 : parseFloat(dados);
+      if (formato === "zip" && hexParaInt(dados) & 0x8000) temp = -temp;
+      partes.push(`${formatarNumeroBR(temp, 1)} °C`);
+    }
+  } else if (id === 93 && dados) {
+    partes.push(`tag ${dados}`);
+  } else if (id === 59 && dados) {
+    partes.push(`iButton ${dados}${m === 1 ? " (cadastrado)" : m === 0 ? " (não cadastrado)" : ""}`);
+  } else if (dados) {
+    partes.push(`dados ${dados}`);
+  }
+  return partes.join(" — ");
+}
+
+// Data/hora GPS (UTC) → Brasília.
+function stDataHora(data, hora) {
+  const [a, m, d] = [data.slice(0, 4), data.slice(4, 6), data.slice(6, 8)].map(Number);
+  const [hh, mi, ss] = hora.split(":").map(Number);
+  const brasilia = new Date(Date.UTC(a, m - 1, d, hh, mi, ss) - 3 * 60 * 60 * 1000);
+  return { data: formatarDataBR(brasilia), hora: formatarHoraBR(brasilia) };
+}
+
+function stPreencher(v, tipo, formato, bruto) {
+  const campos = {};
+  const campo = criarCampoPorEntradas(campos, bruto);
+  const num = (x, casas) => formatarNumeroBR(Number(x), casas);
+
+  campo("idImei", [v.DEV_ID], String);
+  campo("firmware", [v.SW_VER], String);
+  campo("backup", [v.MSG_TYPE], (x) => (Number(x) === 0 ? "Sim (armazenado na memória)" : "Não (tempo real)"));
+  if (v.DATE && v.TIME) {
+    campo("data", [v.DATE, v.TIME], (d, h) => stDataHora(d, h).data);
+    campo("hora", [v.TIME, v.DATE], (h, d) => `${stDataHora(d, h).hora} (Brasília, convertido do UTC do GPS)`);
+  } else {
+    campo("data", [v.DATE], (d) => `${d.slice(6, 8)}/${d.slice(4, 6)}/${d.slice(0, 4)} (UTC)`);
+    campo("hora", [v.TIME], (h) => `${h} (UTC)`);
+  }
+  campo("lbs", [v.CELL_ID, v.MCC, v.MNC, v.LAC], (cell, mcc, mnc, lac) =>
+    [mcc !== undefined && `MCC ${mcc}`, mnc !== undefined && `MNC ${mnc}`, lac && `LAC ${lac}`, `Cell ID ${cell}`]
+      .filter(Boolean)
+      .join(", ")
+  );
+  campo("sinalGsm", [v.RX_LVL], (x) => `${x} (escala 0–63 no 2G, 0–65 no 4G)`);
+  campo("latitude", [v.LAT], (x) => formatarCoordenada(x));
+  campo("longitude", [v.LON], (x) => formatarCoordenada(x));
+  campo("velocidade", [v.SPD], (x) => `${num(x, 2)} km/h`);
+  campo("curso", [v.CRS], (x) => `${num(x, 2)}°`);
+  campo("satelites", [v.SATT], String);
+  campo("gpsFixo", [v.FIX], (x) => (Number(x) ? "GPS fixado" : "GPS não fixado"));
+  // IN_STATE: bit0 = ignição, bits 1-7 = entradas In1-In7 (1 = aterrada). OUT_STATE: bits 0-4 = Out1-Out5.
+  campo("ignicao", [v.IN_STATE], (x) => (x & 1 ? "Ligada" : "Desligada"));
+  campo("entradas", [v.IN_STATE], (x) => {
+    const ativas = stBitsAtivos(x >> 1, ["In1", "In2", "In3", "In4", "In5", "In6", "In7"]);
+    return ativas.length ? `Aterradas: ${ativas.join(", ")}` : "Todas abertas";
+  });
+  campo("saidas", [v.OUT_STATE], (x) => {
+    const ativas = stBitsAtivos(x, ["Out1", "Out2", "Out3", "Out4", "Out5"]);
+    return `${ativas.length ? `Bit 1: ${ativas.join(", ")}` : "Todas em 0"} (ativa/inativa depende da configuração da saída)`;
+  });
+  campo("modo", [v.MODE], (x) => ST_MODOS[x] || `Desconhecido (${x})`);
+  campo("motivoEnvio", [v.STT_RPT_TYPE], (x) => ST_TIPO_ENVIO[x] || `Desconhecido (${x})`);
+  campo("contador", [v.MSG_NUM], (x) => String(x).padStart(4, "0"));
+  campo("alarme", [v.ALERT_ID, v.ALERT_MOD, v.ALERT_DATA], (id, mod, dados) => stDescreverAlerta(id, mod, dados, formato));
+  campo("mensagemTransparente", [v.DATA, v.LEN], (dados) => {
+    if (formato !== "zip") return dados;
+    const texto = hexParaTexto(dados);
+    return /^[\x20-\x7E]+$/.test(texto) ? `${dados} (texto: "${texto}")` : dados;
+  });
+  campo("iccid", [v.ICCID], String);
+  campo("telefone", [v.PHONE], String);
+  campo("statusExtra", [v.ANT, v.BAT], (ant, bat) => {
+    const ANT = { C: "conectada", NC: "desconectada", SH: "em curto", NA: "não disponível" };
+    const BAT = { C: "conectada", NC: "desconectada", ER: "com erro" };
+    return [ant !== undefined && `Antena GPS ${ANT[ant] || ant}`, bat !== undefined && `bateria ${BAT[bat] || bat}`]
+      .filter(Boolean)
+      .join("; ");
+  });
+  if (v.ASSIGNS && v.ASSIGNS.length) {
+    const i = Math.min(...v.ASSIGNS.map((a) => a.i));
+    const f = Math.max(...v.ASSIGNS.map((a) => a.f));
+    campos.assigns = {
+      bruto: bruto(i, f),
+      final: `${v.ASSIGNS.map((a) => `${a.nome} = ${a.v}`).join("; ")} (o que cada posição significa depende da configuração do rastreador)`,
+      inicioByte: i,
+      fimByte: f,
+    };
+  }
+  return campos;
+}
+
+// Nome de cada posição do ASSIGN_MAP: bits 0-14 S_ASSIGN (2 bytes), 15-22 M_ASSIGN (4), 23-30 L_ASSIGN (8).
+function stAssignSlot(bit) {
+  if (bit < 15) return { nome: `S_ASSIGN${bit + 1}`, tamanho: 2 };
+  if (bit < 23) return { nome: `M_ASSIGN${bit - 14}`, tamanho: 4 };
+  return { nome: `L_ASSIGN${bit - 22}`, tamanho: 8 };
+}
+
+function stResultado(tipo, comAck, formato, v, bytes, separador, problemas, marcador) {
+  const campos = stPreencher(v, tipo, formato, (i, f) => bytes.slice(i, f).join(separador));
+  const modelo = v.MODEL ? Number(v.MODEL.v) : undefined;
+  campos.possivelRastreador = {
+    bruto: marcador.bruto,
+    final: `Suntech${modelo !== undefined ? ` ${ST_MODELOS[modelo] || `(modelo ${modelo})`}` : ""} — protocolo Universal, formato ${formato === "zip" ? "Zip" : "Normal"}`,
+    inicioByte: marcador.i,
+    fimByte: marcador.f,
+  };
+  campos.tipoPacote = {
+    bruto: marcador.bruto,
+    final: `${ST_RELATORIOS[tipo] || `Desconhecido (${tipo})`}${comAck ? " — pede confirmação (ACK) do servidor" : ""}`,
+    inicioByte: marcador.i,
+    fimByte: marcador.f,
+  };
+  if (!ST_CAMPOS_POR_TIPO[tipo] && !["ALV", "CID", "MNT"].includes(tipo)) {
+    problemas.push(`o relatório ${tipo} ainda não é decodificado campo a campo; só o cabeçalho foi lido`);
+  }
+  return {
+    campos,
+    bytes,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    separador,
+    perfil: "SUNTECH",
+  };
+}
+
+// --- Suntech Normal (texto) ---
+function parseSuntechNormal(texto) {
+  const tokens = texto.replace(/[\r\n]+$/, "").split(";").map((t) => t.trim());
+  const cabecalho = tokens[0].toUpperCase();
+  const comAck = /^A(STT|ALT|UEX|TRV|CAM|CID|RFA)$/.test(cabecalho);
+  const tipo = comAck ? cabecalho.slice(1) : cabecalho === "GED" ? "GED" : cabecalho;
+  const problemas = [];
+  const v = {};
+  const entrada = (pos, valor) => ({ v: valor, i: pos, f: pos + 1 });
+  if (tokens[1] !== undefined) v.DEV_ID = entrada(1, tokens[1]);
+
+  if (tipo === "CID") {
+    // CID não tem máscara: DEV_ID;MODEL;SW_VER;DATE;TIME;LAT;LON;ICCID
+    ["MODEL", "SW_VER", "DATE", "TIME", "LAT", "LON", "ICCID"].forEach((chave, n) => {
+      if (tokens[n + 2] !== undefined) v[chave] = entrada(n + 2, chave === "ICCID" ? tokens[n + 2] : stConverter("normal", chave, tokens[n + 2]));
+    });
+  } else if (tipo === "MNT") {
+    ["SW_VER", "DATE", "TIME", "PROF_VER", "PHONE", "ANT", "BAT"].forEach((chave, n) => {
+      if (tokens[n + 2] !== undefined) v[chave] = entrada(n + 2, tokens[n + 2]);
+    });
+  } else if (ST_CAMPOS_POR_TIPO[tipo]) {
+    let pos = 2;
+    // REPORT_MAP pode ser omitido pela configuração: aí não dá para saber quais campos vieram.
+    if (!/^[0-9A-F]{6}$/i.test(tokens[2] || "") || !(parseInt(tokens[2], 16) & 1)) {
+      problemas.push("REPORT_MAP não veio na string (opção \"map removido\"); sem ele não dá para saber quais campos foram enviados");
+    } else {
+      const mapa = parseInt(tokens[2], 16);
+      pos = 3;
+      const defs = [...ST_CAMPOS_BASE, ...ST_CAMPOS_POR_TIPO[tipo]];
+      defs.forEach(([bit, chave]) => {
+        if (!(mapa & (1 << bit)) || pos >= tokens.length) return;
+        v[chave] = entrada(pos, stConverter("normal", chave, tokens[pos]));
+        pos++;
+      });
+      const bitsEsperados = defs.filter(([bit]) => mapa & (1 << bit)).length;
+      if (pos - 3 < bitsEsperados) problemas.push(`faltam campos: o REPORT_MAP indica ${bitsEsperados}, vieram ${pos - 3}`);
+      // ASSIGN_MAP (bit 23): cada bit ligado = mais um valor no fim.
+      if (v.ASSIGN_MAP) {
+        v.ASSIGNS = [];
+        for (let bit = 0; bit < 31; bit++) {
+          if (!(v.ASSIGN_MAP.v & (1 << bit)) || pos >= tokens.length) continue;
+          v.ASSIGNS.push({ nome: stAssignSlot(bit).nome, v: tokens[pos], i: pos, f: pos + 1 });
+          pos++;
+        }
+      }
+      if (pos < tokens.length) {
+        const sobra = tokens.slice(pos);
+        v.ASSIGNS = (v.ASSIGNS || []).concat(sobra.map((t, n) => ({ nome: `extra ${n + 1}`, v: t, i: pos + n, f: pos + n + 1 })));
+        if (!v.ASSIGN_MAP) problemas.push("há campos depois do fim do relatório (ASSIGNs com ASSIGN_MAP omitido?)");
+      }
+    }
+  }
+  return stResultado(tipo, comAck, "normal", v, tokens, ";", problemas, { bruto: tokens[0], i: 0, f: 1 });
+}
+
+// --- Suntech Zip (hex) ---
+function parseSuntechZip(bytes) {
+  const tipo = ST_ZIP_HDR[bytes[0]];
+  const comAck = /^9|^EA$/.test(bytes[0]) && tipo !== "ACK";
+  const problemas = [];
+  const v = {};
+  const ler = (pos, qtd) => bytes.slice(pos, pos + qtd).join("");
+
+  if (bytes.length >= 3) {
+    const declarado = hexParaInt(ler(1, 2));
+    if (bytes.length - 3 !== declarado) problemas.push(`PKT_LEN declara ${declarado} bytes após o cabeçalho, vieram ${bytes.length - 3}`);
+  }
+  if (bytes.length >= 8) v.DEV_ID = { v: ler(3, 5), i: 3, f: 8 };
+
+  let pos = 8;
+  const pegar = (chave, qtd) => {
+    if (pos + qtd > bytes.length) {
+      problemas.push(`o pacote termina antes do campo ${chave}`);
+      return false;
+    }
+    v[chave] = { v: stConverter("zip", chave, ler(pos, qtd)), i: pos, f: pos + qtd };
+    pos += qtd;
+    return true;
+  };
+
+  if (tipo === "CID") {
+    [["MODEL", 1], ["SW_VER", 3], ["DATE", 3], ["TIME", 3], ["LAT", 4], ["LON", 4]].every(([c, q]) => pegar(c, q));
+    if (pos + 10 <= bytes.length) {
+      v.ICCID = { v: ler(pos, 10), i: pos, f: pos + 10 };
+      pos += 10;
+    }
+  } else if (ST_CAMPOS_POR_TIPO[tipo] && bytes.length >= 11) {
+    const mapa = hexParaInt(ler(8, 3));
+    v.REPORT_MAP = { v: ler(8, 3), i: 8, f: 11 };
+    pos = 11;
+    for (const [bit, chave, tamanho] of [...ST_CAMPOS_BASE, ...ST_CAMPOS_POR_TIPO[tipo]]) {
+      if (!(mapa & (1 << bit))) continue;
+      let qtd = tamanho;
+      if (tamanho === "alertData") qtd = v.ALERT_MOD ? v.ALERT_MOD.v.tamanho : 0;
+      if (tamanho === "len") qtd = v.LEN ? v.LEN.v : 0;
+      if (qtd === 0) continue;
+      if (!pegar(chave, qtd)) break;
+    }
+    if (v.ASSIGN_MAP) {
+      v.ASSIGNS = [];
+      for (let bit = 0; bit < 31; bit++) {
+        if (!(v.ASSIGN_MAP.v & (1 << bit))) continue;
+        const { nome, tamanho } = stAssignSlot(bit);
+        if (pos + tamanho > bytes.length) {
+          problemas.push(`o pacote termina antes de ${nome}`);
+          break;
+        }
+        v.ASSIGNS.push({ nome, v: ler(pos, tamanho), i: pos, f: pos + tamanho });
+        pos += tamanho;
+      }
+    }
+    if (v.DATA && v.CHK_SUM) {
+      const soma = (v.DATA.v.match(/../g) || []).reduce((s, h) => s + hexParaInt(h), 0) & 0xff;
+      if (soma !== v.CHK_SUM.v) problemas.push(`checksum dos dados não confere (calculado ${soma.toString(16).toUpperCase()})`);
+    }
+    if (pos < bytes.length) {
+      problemas.push(
+        `${bytes.length - pos} byte(s) sobrando no fim (REPORT_MAP/ASSIGN_MAP omitidos pela configuração ou campo fora do manual)`
+      );
+    }
+  } else {
+    pos = bytes.length;
+  }
+  return stResultado(tipo || bytes[0], comAck, "zip", v, bytes, "", problemas, { bruto: bytes[0], i: 0, f: 1 });
+}
+
+// Protocolo MT2000 (Mobilogix) "T Message" v1.3.8: texto ASCII [TIMESTAMP,TIPO,campo,...,campo]
+// Tx = rastreador → servidor, Sx = servidor → rastreador. Os campos de cada tipo vêm em ordem fixa.
+// [nome, grupo]: o grupo define a lista de campos (MT_CAMPOS) e em qual linha o tipo aparece.
+const MT_TIPOS = {
+  T1: ["Login", "login"],
+  T14: ["Heartbeat (ignição desligada)", "heartbeat"],
+  T3: ["Posição periódica", "relatorio"],
+  T4: ["Posição pedida pelo servidor (resposta ao S4)", "relatorio"],
+  T17: ["Mudança de direção (curva)", "relatorio"],
+  T20: ["Posição por distância percorrida", "relatorio"],
+  T21: ["Ignição ligada (início de viagem)", "relatorio"],
+  T22: ["Ignição desligada (fim de viagem)", "relatorio"],
+  T23: ["Posição com ignição desligada", "relatorio"],
+  T31: ["Posição antes de dormir (sleep)", "relatorio"],
+  T8: ["Bateria interna baixa", "alerta"],
+  T9: ["Vibração com ignição desligada", "alerta"],
+  T10: ["Alimentação principal removida", "alerta"],
+  T11: ["Bateria do veículo baixa", "alerta"],
+  T12: ["Saída da cerca", "alerta"],
+  T13: ["Excesso de velocidade", "alerta"],
+  T15: ["Reboque (movimento com ignição desligada)", "alerta"],
+  T18: ["Entrada de uso geral ativada", "alerta"],
+  T19: ["Entrada de uso geral desativada", "alerta"],
+  T24: ["Alimentação principal reconectada", "alerta"],
+  T25: ["Bateria do veículo normalizada", "alerta"],
+  T26: ["Jammer detectado", "alerta"],
+  T27: ["Tombamento (90°)", "alerta"],
+  T28: ["Capotamento (180°)", "alerta"],
+  T29: ["Tensão alta na bateria do veículo", "alerta"],
+  T30: ["Tensão da bateria do veículo normalizada", "alerta"],
+  T32: ["Bateria interna normalizada", "alerta"],
+  T33: ["Tensão alta na bateria interna", "alerta"],
+  T34: ["Tensão da bateria interna normalizada", "alerta"],
+  T5: ["Resposta de leitura de configuração", "t5"],
+  T6: ["Confirmação de configuração / início de FOTA", "t6"],
+  T7: ["Confirmação de reinício", "t7"],
+  T16: ["Atualização de firmware (FOTA) concluída", "t16"],
+  S1: ["Servidor: resposta ao login", "s1"],
+  S4: ["Servidor: pedido de posição", "s4"],
+  S5: ["Servidor: leitura de configuração", "s5"],
+  S6: ["Servidor: gravação de configuração", "s6"],
+  S7: ["Servidor: reiniciar rastreador", "sx"],
+};
+const MT_CAMPOS = {
+  login: ["REPT_TYPE", "PRT_VER", "SN", "MSISDN", "ICCID", "PASS", "IMSI", "IMEI"],
+  heartbeat: ["REPT_TYPE", "PRT_VER", "SN", "TERM_STATUS", "BAT_VOLT"],
+  relatorio: [
+    "REPT_TYPE", "PRT_VER", "SN", "TERM_STATUS", "BAT_VOLT", "LOC_STATUS", "LAT", "LON", "SPEED", "DIR",
+    "INT_BATT", "ODO_TRIP", "ODO_TOTAL", "HORIMETER", "HDOP", "MCC", "MNC", "LAC", "CELL_ID", "RX_LEVEL", "SERIAL_COUNTER",
+  ],
+  t5: ["PARAM_VAL", "SN", "SERIAL_COUNTER"],
+  t6: ["PARAM_VAL", "ACCEPT", "SN", "SERIAL_COUNTER"],
+  t7: ["ACCEPT", "SERIAL_COUNTER"],
+  t16: ["REPT_TYPE", "PRT_VER", "SN", "STATUS", "SERIAL_COUNTER"],
+  s1: ["STATUS"],
+  s4: ["PERIOD", "COUNT"],
+  s5: ["PARAM"],
+  s6: ["PARAM_VAL"],
+  sx: [],
+};
+MT_CAMPOS.alerta = MT_CAMPOS.relatorio;
+
+function parseMT2000(textoOriginal) {
+  // PDFs e e-mails trocam "-" por hífens Unicode; o buffer manda várias mensagens coladas com \r\n.
+  const texto = textoOriginal.replace(/[‐-–−]/g, "-").replace(/\\r\\n/g, "\n");
+  const problemas = [];
+  const mensagens = texto.match(/\[[^\]]*\]?/g) || [];
+  if (mensagens.length > 1) {
+    problemas.push(`vieram ${mensagens.length} mensagens coladas (descarga do buffer); mostrando só a primeira`);
+  }
+  const msg = mensagens[0] || texto;
+  if (!/\]\s*$/.test(msg)) problemas.push("fim ] ausente");
+  const tokens = msg.replace(/^\s*\[/, "").replace(/\]\s*$/, "").split(",").map((t) => t.trim());
+
+  const tipo = (tokens[1] || "").toUpperCase();
+  const [nomeTipo, grupo] = MT_TIPOS[tipo] || [
+    /^S\d+$/.test(tipo) ? "Servidor: confirmação (ACK) de mensagem do rastreador" : `Desconhecido (${tipo})`,
+    /^S\d+$/.test(tipo) ? "sx" : null,
+  ];
+  if (!grupo) problemas.push(`tipo ${tipo} não está no manual v1.3.8`);
+
+  const v = {};
+  const entrada = (pos) => (tokens[pos] !== undefined && tokens[pos] !== "" ? { v: tokens[pos], i: pos, f: pos + 1 } : undefined);
+  v.TS = entrada(0);
+  (MT_CAMPOS[grupo] || []).forEach((nome, n) => {
+    const e = entrada(n + 2);
+    if (e) v[nome] = e;
+  });
+  const qtdPayload = tokens.length - 2;
+  if (["relatorio", "alerta"].includes(grupo) && ![10, 12, 21].includes(qtdPayload)) {
+    problemas.push(`esperado 10, 12 ou 21 campos depois do tipo (conforme a versão do firmware), vieram ${qtdPayload}`);
+  }
+
+  const campos = {};
+  const campo = criarCampoPorEntradas(campos, (i, f) => tokens.slice(i, f).join(","));
+  const num = (x, casas) => formatarNumeroBR(Number(x), casas);
+  const volts = (x) => `${String(x).replace(".", ",")} V`;
+
+  campos.possivelRastreador = { bruto: "[ ]", final: "MT2000 (Mobilogix) — protocolo T Message" };
+  campos.tipoPacote = { bruto: tokens[1], final: nomeTipo, inicioByte: 1, fimByte: 2 };
+
+  // Timestamp do GPS "AAAA-MM-DD HH:MM:SS" (alguns firmwares usam ":" entre data e hora), em UTC.
+  const ts = v.TS && v.TS.v.match(/(\d{4})-(\d{2})-(\d{2})[ :T](\d{2}):(\d{2}):(\d{2})/);
+  if (ts) {
+    const [, a, m, d, hh, mi, ss] = ts.map(Number);
+    const brasilia = new Date(Date.UTC(a, m - 1, d, hh, mi, ss) - 3 * 60 * 60 * 1000);
+    campo("data", [v.TS], () => formatarDataBR(brasilia));
+    campo("hora", [v.TS], () => `${formatarHoraBR(brasilia)} (Brasília, convertido do UTC do GPS)`);
+  }
+
+  campo("numeroSerial", [v.SN], String);
+  campo("idImei", [v.IMEI], String);
+  campo("iccid", [v.ICCID], String);
+  campo("telefone", [v.MSISDN], String);
+  campo("firmware", [v.PRT_VER], (x) => `Protocolo ${x}`);
+  campo("contador", [v.SERIAL_COUNTER], String);
+  campo("backup", [v.REPT_TYPE], (x) => (x === "0" ? "Sim (reenvio do buffer)" : "Não (tempo real)"));
+  // O próprio tipo diz o motivo do envio (relatórios) ou o alarme (alertas).
+  if (grupo === "relatorio") campos.motivoEnvio = { ...campos.tipoPacote };
+  if (grupo === "alerta") campos.alarme = { ...campos.tipoPacote };
+
+  // LOC_STATUS (3 dígitos): satélites + sinal GSM (0-9) + fix (0 sem fix, 1 atual, 2 última posição válida).
+  campo("satelites", [v.LOC_STATUS], (s) => s[0]);
+  campo("gpsFixo", [v.LOC_STATUS], (s) =>
+    ({ 0: "Sem fix (sem posição)", 1: "GPS fixado (posição atual)", 2: "Sem fix agora — última posição válida" }[s[2]] ||
+      `Desconhecido (${s[2]})`)
+  );
+  campo("sinalGsm", [v.LOC_STATUS, v.RX_LEVEL], (s, rx) => `${s[1]}/9${rx !== undefined ? ` (RX level ${rx})` : ""}`);
+  campo("latitude", [v.LAT], (x) => formatarCoordenada(parseFloat(x)));
+  campo("longitude", [v.LON], (x) => formatarCoordenada(parseFloat(x)));
+  campo("velocidade", [v.SPEED], (x) => `${x} km/h`);
+  campo("curso", [v.DIR], (x) => `${x}°`);
+  campo("hdop", [v.HDOP], (x) => num(x, 2));
+  campo("lbs", [v.CELL_ID, v.MCC, v.MNC, v.LAC], (cell, mcc, mnc, lac) =>
+    [mcc && `MCC ${Number(mcc)}`, mnc && `MNC ${Number(mnc)}`, lac && `LAC ${lac}`, `Cell ID ${cell}`].filter(Boolean).join(", ")
+  );
+  campo("tensao", [v.BAT_VOLT], volts);
+  campo("bateria", [v.INT_BATT], volts);
+  campo("odometro", [v.ODO_TOTAL, v.ODO_TRIP], (total, trip) =>
+    [`${num(Number(total) / 1000, 2)} km total`, trip !== undefined && `${num(Number(trip) / 1000, 2)} km na viagem`]
+      .filter(Boolean)
+      .join("; ")
+  );
+  campo("horimetro", [v.HORIMETER], (x) => `${num(Number(x) / 60, 1)} h (${x} min)`);
+
+  // TERM_STATUS: 2 dígitos hex. bit0 1=saída desativada; bit1 alimentação externa; bit2 ignição (física ou
+  // virtual); bit3 em movimento; bit4 dentro da cerca; bit5 fio ACC; bit6 0=movimento indevido; bit7 standby.
+  const status = (x) => parseInt(x, 16);
+  campo("ignicao", [v.TERM_STATUS], (x) => (status(x) & 0x04 ? "Ligada" : "Desligada"));
+  campo("entrada1", [v.TERM_STATUS], (x) => (status(x) & 0x20 ? "Ativa (fio ACC/pós-chave)" : "Inativa (fio ACC/pós-chave)"));
+  campo("saida1", [v.TERM_STATUS], (x) => (status(x) & 0x01 ? "Desativada" : "Ativada (normalmente usada para bloqueio)"));
+  campo("statusExtra", [v.TERM_STATUS], (x) => {
+    const s = status(x);
+    return [
+      s & 0x02 ? "Alimentação externa conectada" : "Alimentação externa desconectada",
+      s & 0x08 ? "em movimento" : "parado",
+      s & 0x10 ? "dentro da cerca" : "fora da cerca",
+      s & 0x40 ? "movimento permitido" : "movimento indevido",
+      s & 0x80 ? "modo standby" : "modo operação",
+    ].join("; ");
+  });
+
+  // Mensagens de configuração / servidor.
+  const aceito = (x) => (x === "1" ? "aceito" : x === "0" ? "recusado" : `status ${x}`);
+  if (grupo === "t5") campo("comando", [v.PARAM_VAL], (x) => `Configuração lida: ${x}`);
+  if (grupo === "t6") campo("comando", [v.PARAM_VAL, v.ACCEPT], (p, a) => `${p} — ${aceito(a)}`);
+  if (grupo === "t7") campo("comando", [v.ACCEPT], (a) => `Reinício ${aceito(a)}`);
+  if (grupo === "t16") campo("comando", [v.STATUS], (s) => (s === "1" ? "FOTA concluída com sucesso" : "FOTA com erro"));
+  if (grupo === "s1") campo("comando", [v.STATUS], (s) => (s === "1" ? "Login aceito" : "Login recusado (o rastreador vai dormir)"));
+  if (grupo === "s4") campo("comando", [v.COUNT, v.PERIOD], (c, p) => `Enviar ${c} posição(ões), a cada ${p || 0} s`);
+  if (grupo === "s5") campo("comando", [v.PARAM], (x) => `Ler ${x}`);
+  if (grupo === "s6") campo("comando", [v.PARAM_VAL], (x) => `Gravar ${x}`);
+
+  return {
+    campos,
+    bytes: tokens,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    separador: ",",
+    perfil: "MT2000",
+  };
+}
+
+// Devolve { campos, bytes, aviso, separador, perfil }: campos[chave] = { bruto, final, inicioByte, fimByte }
+// (campo ausente = não encontrado nessa string → exibe "-").
+// aviso = erro de entrada ou problema de tamanho/CRC; "" quando está tudo certo.
+// Roteamento: *ET → E3; ~ → J-R12 String; { → J-R12 JSON; [ → MT2000; STT;/ALT;... → Suntech Normal;
+// hex 5E... → J-R12 Zip; hex 81/82/83... → Suntech Zip; hex 78 78 → GT06.
 function quebrarString(strBruta) {
-  const hexLimpo = (strBruta || "").replace(/\s+/g, "").toUpperCase();
-  if (!hexLimpo || hexLimpo.length % 2 !== 0 || !/^[0-9A-F]+$/.test(hexLimpo)) {
-    return { campos: {}, bytes: [] };
+  const texto = (strBruta || "").trim().replace(/^(\\r\\n)+/, "").trim();
+  if (/^\*?ET\s*,/i.test(texto)) return parseE3(texto);
+  if (texto.startsWith("[")) return parseMT2000(texto);
+  if (/^A?(STT|ALT|ALV|UEX|TRV|CAM|FTR|CID|MNT|RFA|GED|PRM|ACK|CRR);/i.test(texto)) return parseSuntechNormal(texto);
+  if (texto.startsWith("~")) return parseJR12String(texto);
+  if (texto.startsWith("{")) return parseJR12Json(texto);
+
+  // Aceita "0x78 0x78", "78:78", "78-78", "78,78" além de hex corrido.
+  const hexLimpo = texto.replace(/0x/gi, "").replace(/[\s:,\-]+/g, "").toUpperCase();
+  if (!hexLimpo) return { campos: {}, bytes: [], aviso: "" };
+  if (hexLimpo.length % 2 !== 0 || !/^[0-9A-F]+$/.test(hexLimpo)) {
+    return {
+      campos: {},
+      bytes: [],
+      aviso:
+        "Entrada inválida: use hex em número par de dígitos (GT06, J-R12 Zip, Suntech Zip), texto *ET (E3), ~...$ ou JSON (J-R12), STT;... (Suntech), [...] (MT2000).",
+    };
   }
 
   const bytes = hexParaBytes(hexLimpo);
-  let campos = {};
-
-  if (bytes[0] === "78" && bytes[1] === "78" && bytes[3] === "22") {
-    campos = parseGT06Pacote22(bytes);
+  if (bytes[0] === "5E") return parseJR12Zip(bytes);
+  if (ST_ZIP_HDR[bytes[0]]) return parseSuntechZip(bytes);
+  if (bytes[0] !== "78" || bytes[1] !== "78") {
+    return {
+      campos: {},
+      bytes,
+      aviso: "Equipamento não reconhecido: o hex precisa começar com 78 78 (GT06), 5E (J-R12 Zip) ou 81/82/83... (Suntech Zip).",
+    };
   }
 
-  return { campos, bytes };
+  return { campos: parseGT06(bytes), bytes, aviso: gt06Validar(bytes), perfil: "GT06" };
 }
 
-function renderQuebraStringBytes(bytes) {
+// "separador" é exibido entre as posições (vírgula nos protocolos de texto, nada no hex).
+function renderQuebraStringBytes(bytes, separador) {
   quebraStringBytesView.innerHTML = "";
+  if (bytes.length) {
+    const titulo = document.createElement("div");
+    titulo.className = "quebra-string-bytes-titulo";
+    titulo.textContent = "Tokens Extraídos";
+    quebraStringBytesView.appendChild(titulo);
+  }
   bytes.forEach((byte, i) => {
+    if (separador && i > 0) quebraStringBytesView.appendChild(document.createTextNode(separador));
     const span = document.createElement("span");
     span.className = "quebra-string-byte";
     span.dataset.byteIndex = String(i);
@@ -5214,21 +7427,107 @@ function destacarBytes(inicioByte, fimByte, ligar) {
   }
 }
 
-function renderQuebraStringResultado(campos) {
+// Linhas da tabela por posição da faixa de bytes (preenchido a cada render), pra o clique num
+// byte/token achar a linha que o usa.
+let quebraStringLinhasPorByte = new Map();
+
+// Clique num byte/token: destaca as linhas que usam essa posição e rola até a primeira.
+quebraStringBytesView.addEventListener("click", (e) => {
+  const span = e.target.closest("[data-byte-index]");
+  if (!span) return;
+  const linhas = quebraStringLinhasPorByte.get(Number(span.dataset.byteIndex)) || [];
+  quebraStringResultado.querySelectorAll("tr.qs-linha-selecionada").forEach((tr) => tr.classList.remove("qs-linha-selecionada"));
+  quebraStringBytesView.querySelectorAll(".quebra-string-byte.sel").forEach((s) => s.classList.remove("sel"));
+  if (!linhas.length) return;
+  linhas.forEach((tr) => tr.classList.add("qs-linha-selecionada"));
+  const { inicioByte, fimByte } = linhas[0].dataset;
+  for (let i = Number(inicioByte); i < Number(fimByte); i++) {
+    const s = quebraStringBytesView.querySelector(`[data-byte-index="${i}"]`);
+    if (s) s.classList.add("sel");
+  }
+  linhas[0].scrollIntoView({ block: "center", behavior: "smooth" });
+});
+
+// Cor do valor final: ok (verde), neutro (cinza), alerta (amarelo), perigo (vermelho).
+function quebraStringTom(chave, final) {
+  const t = String(final);
+  switch (chave) {
+    case "ignicao":
+      return /^Ligada/.test(t) ? "ok" : "neutro";
+    case "gpsFixo":
+      return /^(Inválida|Não|Sem fix|GPS não)/.test(t) ? "alerta" : "ok";
+    case "corteOleo":
+      return /^Cortado/.test(t) ? "perigo" : "ok";
+    case "alarme":
+      return /^(Normal|Nenhum)/.test(t) ? "neutro" : "perigo";
+    case "backup":
+      return /^Sim/.test(t) ? "alerta" : "neutro";
+    default:
+      return null;
+  }
+}
+
+// Nível de bateria em % (0-100) quando dá pra inferir do texto; null quando não.
+function quebraStringNivelBateria(final) {
+  const t = String(final);
+  const pct = t.match(/^(\d+(?:[.,]\d+)?)\s*%/);
+  if (pct) return Math.min(100, parseFloat(pct[1].replace(",", ".")));
+  const nivel = GT06_NIVEL_BATERIA.indexOf(t);
+  return nivel >= 0 ? Math.round((nivel / (GT06_NIVEL_BATERIA.length - 1)) * 100) : null;
+}
+
+// perfil = chave de QUEBRA_STRING_PERFIS; sem perfil (nada colado ou equipamento não reconhecido) não há tabela.
+function renderQuebraStringResultado(campos, aviso, perfil) {
   quebraStringResultado.innerHTML = "";
+
+  if (aviso) {
+    const p = document.createElement("p");
+    p.className = "quebra-string-aviso";
+    p.textContent = aviso;
+    quebraStringResultado.appendChild(p);
+  }
+
+  const chavesPerfil = QUEBRA_STRING_PERFIS[perfil];
+  if (!chavesPerfil) return;
+
+  // "Ver posição no mapa": barra fina colada no topo da tabela, como ação do resultado. Só aparece
+  // quando a string trouxe latitude e longitude (e não é o 0,0 de GPS sem posição).
+  const coord = (campo) => {
+    const n = campo && campo.final ? parseFloat(String(campo.final).replace(",", ".")) : NaN;
+    return Number.isFinite(n) ? n : null;
+  };
+  const lat = coord(campos.latitude);
+  const lon = coord(campos.longitude);
+  if (lat !== null && lon !== null && !(lat === 0 && lon === 0)) {
+    const barra = document.createElement("div");
+    barra.className = "quebra-string-tabela-barra";
+    const link = document.createElement("a");
+    link.className = "quebra-string-mapa";
+    link.href = `https://www.google.com/maps?q=${lat},${lon}`;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.title = `Abre no Google Maps a posição decodificada (${campos.latitude.final}; ${campos.longitude.final})`;
+    link.textContent = "📍 Ver posição no mapa ↗";
+    barra.appendChild(link);
+    quebraStringResultado.appendChild(barra);
+  }
 
   const tabela = document.createElement("table");
   tabela.className = "tabela-saida quebra-string-tabela";
 
   const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th></th><th>Info no Pacote</th><th>Info final</th></tr>";
+  thead.innerHTML = "<tr><th>#</th><th>Dado Bruto</th><th>Informação Decodificada</th></tr>";
   tabela.appendChild(thead);
 
   const tbody = document.createElement("tbody");
+  quebraStringLinhasPorByte = new Map();
 
-  QUEBRA_STRING_CAMPOS.forEach(({ chave, label }) => {
+  QUEBRA_STRING_CAMPOS.filter(({ chave }) => chavesPerfil.includes(chave)).forEach(({ chave, label }) => {
     const campo = campos[chave] || {};
     const tr = document.createElement("tr");
+    const temValor = !!campo.final;
+    // Linha sem informação nessa string fica apagada, pra o olho ir direto no que veio.
+    if (!temValor) tr.classList.add("qs-linha-vazia");
 
     const tdLabel = document.createElement("td");
     tdLabel.textContent = label;
@@ -5237,12 +7536,39 @@ function renderQuebraStringResultado(campos) {
     tdBruto.textContent = campo.bruto ? campo.bruto : "-";
 
     const tdFinal = document.createElement("td");
-    tdFinal.textContent = campo.final ? String(campo.final) : "-";
+    if (!temValor) {
+      tdFinal.textContent = "-";
+    } else {
+      const valor = String(campo.final);
+      const tom = quebraStringTom(chave, valor);
+      const nivel = chave === "bateria" ? quebraStringNivelBateria(valor) : null;
+      const span = document.createElement("span");
+      span.textContent = valor;
+      if (tom) span.className = `qs-badge qs-${tom}`;
+      tdFinal.appendChild(span);
+
+      if (nivel !== null) {
+        const barra = document.createElement("span");
+        barra.className = "qs-bateria";
+        barra.title = `${nivel}%`;
+        const preenchido = document.createElement("span");
+        preenchido.style.width = `${nivel}%`;
+        preenchido.className = nivel <= 20 ? "qs-perigo" : nivel <= 50 ? "qs-alerta" : "qs-ok";
+        barra.appendChild(preenchido);
+        tdFinal.appendChild(barra);
+      }
+    }
 
     if (campo.inicioByte !== undefined) {
       tdBruto.classList.add("quebra-string-bruto-ativo");
       tdBruto.addEventListener("mouseenter", () => destacarBytes(campo.inicioByte, campo.fimByte, true));
       tdBruto.addEventListener("mouseleave", () => destacarBytes(campo.inicioByte, campo.fimByte, false));
+      tr.dataset.inicioByte = String(campo.inicioByte);
+      tr.dataset.fimByte = String(campo.fimByte);
+      for (let i = campo.inicioByte; i < campo.fimByte; i++) {
+        if (!quebraStringLinhasPorByte.has(i)) quebraStringLinhasPorByte.set(i, []);
+        quebraStringLinhasPorByte.get(i).push(tr);
+      }
     }
 
     tr.appendChild(tdLabel);
@@ -5255,193 +7581,48 @@ function renderQuebraStringResultado(campos) {
   quebraStringResultado.appendChild(tabela);
 }
 
-function abrirModalQuebraString() {
+// Estado inicial da tela (orientação no lugar da tabela). O que a pessoa colou fica
+// guardado ao sair e voltar pra sub-tela.
+renderQuebraStringResultado({});
+
+// A faixa de bytes trava no topo e o cabeçalho da tabela trava logo abaixo dela;
+// como a altura da faixa varia com a string, ela é medida e passada pro CSS.
+new ResizeObserver(() => {
+  quebraStringBytesView.parentElement.style.setProperty("--qs-topo", `${quebraStringBytesView.offsetHeight}px`);
+}).observe(quebraStringBytesView);
+
+const btnQuebraStringLimpar = el("btn-quebra-string-limpar");
+
+function atualizarBotoesQuebraString() {
+  const vazio = !quebraStringInput.value.trim();
+  btnQuebraString.disabled = vazio;
+  btnQuebraStringLimpar.disabled = vazio && !quebraStringBytesView.childElementCount;
+}
+
+quebraStringInput.addEventListener("input", atualizarBotoesQuebraString);
+
+
+btnQuebraStringLimpar.addEventListener("click", () => {
   quebraStringInput.value = "";
-  btnQuebraString.disabled = true;
   quebraStringBytesView.innerHTML = "";
   renderQuebraStringResultado({});
-  overlayQuebraString.classList.remove("hidden");
-}
-
-el("card-ferramentas-quebra-string").addEventListener("click", () => {
-  abrirModalQuebraString();
+  atualizarBotoesQuebraString();
+  quebraStringInput.focus();
 });
 
-el("quebra-string-modal-fechar").addEventListener("click", () => overlayQuebraString.classList.add("hidden"));
-quebraStringInput.addEventListener("input", () => {
-  btnQuebraString.disabled = !quebraStringInput.value.trim();
-});
-
-btnQuebraString.addEventListener("click", () => {
-  const { campos, bytes } = quebrarString(quebraStringInput.value);
-  renderQuebraStringBytes(bytes);
-  renderQuebraStringResultado(campos);
-});
-
-function mostrarErroConversor(msg) {
-  conversorResultado.innerHTML = "";
-  const p = document.createElement("p");
-  p.className = "placeholder";
-  p.style.color = "#b91c1c";
-  p.textContent = "Erro: " + msg;
-  conversorResultado.appendChild(p);
+function executarQuebraString() {
+  const { campos, bytes, aviso, separador, perfil } = quebrarString(quebraStringInput.value);
+  renderQuebraStringBytes(bytes, separador);
+  renderQuebraStringResultado(campos, aviso, perfil);
+  atualizarBotoesQuebraString();
 }
 
-function renderConversorResultado(convId, data) {
-  conversorResultado.innerHTML = "";
-
-  const tiles = document.createElement("div");
-  tiles.className = "dashboard-tiles";
-  [
-    { valor: data.n_ok, label: "Prontos" },
-    { valor: data.n_erro, label: "Com erro" },
-  ].forEach(({ valor, label }) => {
-    const tile = document.createElement("div");
-    tile.className = "stat-tile";
-    const l = document.createElement("div");
-    l.className = "stat-tile-label";
-    l.textContent = label;
-    const v = document.createElement("div");
-    v.className = "stat-tile-valor";
-    v.textContent = valor;
-    tile.appendChild(l);
-    tile.appendChild(v);
-    tiles.appendChild(tile);
-  });
-  conversorResultado.appendChild(tiles);
-
-  const legenda = document.createElement("p");
-  legenda.className = "placeholder";
-  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) prontos para importar.`;
-  conversorResultado.appendChild(legenda);
-
-  if (data.n_ok > data.tamanho_parte) {
-    const aviso = document.createElement("p");
-    aviso.className = "placeholder";
-    aviso.style.color = "#a16207";
-    aviso.textContent = `O SSX importa no máximo ${data.max_linhas_importacao} linhas por arquivo. Os ${data.n_ok} registros prontos foram divididos em ${data.n_partes} arquivo(s) de até ${data.tamanho_parte} cada — importe um de cada vez.`;
-    conversorResultado.appendChild(aviso);
-  }
-
-  if (data.n_ok > 0) {
-    const downloads = document.createElement("div");
-    downloads.className = "conversor-downloads";
-    for (let parte = 1; parte <= data.n_partes; parte++) {
-      const sufixoParte = data.n_partes > 1 ? ` (parte ${parte}/${data.n_partes})` : "";
-
-      const btnKml = document.createElement("button");
-      btnKml.className = "btn-secondary";
-      btnKml.textContent = `Baixar KML${sufixoParte}`;
-      btnKml.addEventListener("click", () => {
-        window.location.href = `/api/conversor/download/${convId}/kml/${parte}`;
-      });
-
-      const btnCsv = document.createElement("button");
-      btnCsv.className = "btn-secondary";
-      btnCsv.textContent = `Baixar CSV${sufixoParte}`;
-      btnCsv.addEventListener("click", () => {
-        window.location.href = `/api/conversor/download/${convId}/csv/${parte}`;
-      });
-
-      downloads.appendChild(btnKml);
-      downloads.appendChild(btnCsv);
-    }
-    conversorResultado.appendChild(downloads);
-  }
-
-  const ac = data.avisos_compactados || {};
-  const compactadosTextos = [
-    ac.anel_fechado ? `${ac.anel_fechado} anel(éis) de área fechados automaticamente` : null,
-    ac.geo_truncado ? `${ac.geo_truncado} GeoIntegrationCode(s) truncados` : null,
-    ac.coordenadas_longas ? `${ac.coordenadas_longas} registro(s) com coordenadas longas` : null,
-  ].filter(Boolean);
-  if (compactadosTextos.length > 0) {
-    const infoAvisos = document.createElement("p");
-    infoAvisos.className = "placeholder";
-    infoAvisos.textContent = `Informativos: ${compactadosTextos.join(" · ")}.`;
-    conversorResultado.appendChild(infoAvisos);
-  }
-
-  if (data.problematicos.length > 0) {
-    const titulo = document.createElement("h4");
-    titulo.textContent = `Registros com erro/aviso (${data.problematicos.length})`;
-    conversorResultado.appendChild(titulo);
-
-    const table = document.createElement("table");
-    table.className = "tabela-saida";
-    const thead = document.createElement("thead");
-    thead.innerHTML = "<tr><th></th><th>Registro</th><th>Código</th><th>Mensagens</th></tr>";
-    table.appendChild(thead);
-
-    const tbody = document.createElement("tbody");
-    data.problematicos.forEach((r) => {
-      const tr = document.createElement("tr");
-
-      const tdStatus = document.createElement("td");
-      tdStatus.textContent = r.erros.length ? "🔴" : "🟢";
-      tr.appendChild(tdStatus);
-
-      const tdInfo = document.createElement("td");
-      const nomeLinha = document.createElement("div");
-      nomeLinha.textContent = `#${r.indice} · ${r.nome}`;
-      const tipoLinha = document.createElement("div");
-      tipoLinha.className = "conversor-tipo-registro";
-      tipoLinha.textContent = (r.tipo_original || "sem geometria") + (r.convertido ? " → Área" : "");
-      tdInfo.appendChild(nomeLinha);
-      tdInfo.appendChild(tipoLinha);
-      tr.appendChild(tdInfo);
-
-      const tdCodigo = document.createElement("td");
-      tdCodigo.textContent = r.codigo;
-      tr.appendChild(tdCodigo);
-
-      const tdMsg = document.createElement("td");
-      tdMsg.className = "conversor-mensagens";
-      const msgs = [...r.erros.map((m) => `⛔ ${m}`), ...r.avisos.map((m) => `⚠️ ${m}`)];
-      tdMsg.textContent = msgs.join("\n");
-      tr.appendChild(tdMsg);
-
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    conversorResultado.appendChild(table);
-
-    if (data.problematicos_ocultos > 0) {
-      const oculto = document.createElement("p");
-      oculto.className = "placeholder";
-      oculto.textContent = `... e mais ${data.problematicos_ocultos} registro(s) com erro/aviso não exibido(s) aqui (os arquivos gerados já refletem todos).`;
-      conversorResultado.appendChild(oculto);
-    }
-  }
-}
-
-btnConversorConverter.addEventListener("click", async () => {
-  if (!estado.conversorArquivo) return;
-  btnConversorConverter.disabled = true;
-  btnConversorConverter.textContent = "Convertendo...";
-  conversorResultado.innerHTML = "";
-
-  try {
-    const formData = new FormData();
-    formData.append("arquivo", estado.conversorArquivo);
-    formData.append("tipo", conversorTipo.value);
-    formData.append("categoria", conversorCategoria.value.trim());
-    formData.append("grupo", conversorGrupo.value.trim());
-    formData.append("tolerancia", conversorTolerancia.value.trim());
-    formData.append("cor", estado.conversorCor === null ? "" : String(estado.conversorCor));
-
-    const r = await fetch("/api/conversor/converter", { method: "POST", body: formData });
-    const data = await parseJsonResponse(r);
-    if (!data.ok) {
-      mostrarErroConversor(data.error || "Falha ao converter arquivo.");
-      return;
-    }
-    renderConversorResultado(data.conv_id, data);
-  } catch (err) {
-    mostrarErroConversor(String(err));
-  } finally {
-    btnConversorConverter.disabled = false;
-    btnConversorConverter.textContent = "Converter arquivo";
+btnQuebraString.addEventListener("click", executarQuebraString);
+// Ctrl+Enter no campo também quebra a string.
+quebraStringInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.ctrlKey && quebraStringInput.value.trim()) {
+    e.preventDefault();
+    executarQuebraString();
   }
 });
 
@@ -6646,9 +8827,11 @@ const TELAS_NAV = {
   ferramentas: el("tela-ferramentas"),
   ficha: el("tela-ficha-cliente"),
   "minha-conta": el("tela-minha-conta"),
+  feed: el("tela-feed"),
 };
 const NAV_BOTOES = {
   dashboard: el("nav-dashboard"),
+  feed: el("nav-feed"),
   implantacao: el("nav-implantacao"),
   migracao: el("nav-migracao"),
   ferramentas: el("nav-ferramentas"),
@@ -6663,6 +8846,7 @@ const sidebarCliente = el("sidebar-cliente");
 // navegador funcionar entre as telas em vez de cair direto na tela de login.
 const CAMINHO_POR_TELA = {
   dashboard: "/",
+  feed: "/feed",
   implantacao: "/implantacao",
   migracao: "/migracao",
   ferramentas: "/ferramentas",
@@ -6670,6 +8854,7 @@ const CAMINHO_POR_TELA = {
 };
 const TELA_POR_CAMINHO_RAIZ = {
   "/": "dashboard",
+  "/feed": "feed",
   "/implantacao": "implantacao",
   "/migracao": "migracao",
   "/ferramentas": "ferramentas",
@@ -6683,6 +8868,8 @@ const FERRAMENTAS_SUBTELAS = {
   "importacao-consulta": el("ferramentas-sub-importacao"),
   "comandos": el("ferramentas-sub-comandos"),
   "sync-planilha": el("ferramentas-sub-sync-planilha"),
+  "quebra-string": el("ferramentas-sub-quebra-string"),
+  "conversor-kml": el("ferramentas-sub-conversor-kml"),
 };
 const ferramentasCardsHeader = el("ferramentas-cards-header");
 const ferramentasCards = el("ferramentas-cards");
@@ -6896,6 +9083,7 @@ document.addEventListener("keydown", (e) => {
 const topbarTitulo = el("topbar-titulo");
 const TITULO_TOPBAR_POR_TELA = {
   dashboard: "Dashboard",
+  feed: "Feed",
   implantacao: "Controle de Implantação",
   migracao: "Controle de Migração",
   ferramentas: "Ferramentas Auxiliares",
@@ -6906,26 +9094,15 @@ const TITULO_TOPBAR_POR_SUB = {
   "importacao-consulta": "Área de Importação e Consulta",
   comandos: "Envio de Comandos",
   "sync-planilha": "Sincronizar Planilha",
+  "quebra-string": "Quebra-String",
+  "conversor-kml": "Conversor KML → SSX",
 };
 
+// Sub-telas de Ferramentas mostram só o próprio nome — a volta pra Ferramentas
+// Auxiliares fica no "Voltar" do sidebar.
 function atualizarTituloTopbar(tela, sub) {
-  topbarTitulo.innerHTML = "";
-  const principal = TITULO_TOPBAR_POR_TELA[tela] || "";
-  if (tela === "ferramentas" && TITULO_TOPBAR_POR_SUB[sub]) {
-    const pai = document.createElement("button");
-    pai.type = "button";
-    pai.className = "topbar-titulo-pai";
-    pai.textContent = principal;
-    pai.addEventListener("click", () => irParaTela("ferramentas"));
-    const sep = document.createElement("span");
-    sep.className = "topbar-titulo-sep";
-    sep.textContent = "›";
-    topbarTitulo.appendChild(pai);
-    topbarTitulo.appendChild(sep);
-    topbarTitulo.appendChild(document.createTextNode(TITULO_TOPBAR_POR_SUB[sub]));
-  } else {
-    topbarTitulo.textContent = principal;
-  }
+  const titulo = (tela === "ferramentas" && TITULO_TOPBAR_POR_SUB[sub]) || TITULO_TOPBAR_POR_TELA[tela] || "";
+  topbarTitulo.textContent = titulo;
 }
 
 function irParaTela(tela, opcoes) {
@@ -6990,9 +9167,11 @@ function irParaTela(tela, opcoes) {
   }
   marcarTelaListaCompacta(tela === "implantacao" || tela === "migracao");
   atualizarTituloTopbar(tela, novoSub);
+  atualizarSidebarVoltar();
   if (tela === "implantacao") { atualizarSaidaHeader("Controle de Implantação", false); carregarImplantacaoClientes(); }
   if (tela === "migracao") { atualizarSaidaHeader("Controle de Migração", false); carregarClientesMigracao(); }
   if (tela === "dashboard") carregarDashboardNovo();
+  if (tela === "feed") carregarFeed();
   if (tela === "ficha") carregarFichaCliente(opcoes.idcentral);
   if (tela === "minha-conta") { carregarMinhaConta(); carregarMinhasTarefas(); }
   if (entrandoNaImportacaoConsulta) { atualizarSaidaHeader("Saída", true); mostrarPlaceholder("Autentique-se e escolha uma consulta ou importação."); }
@@ -7003,6 +9182,341 @@ function irParaFicha(idcentral) {
   const origem = ["implantacao", "migracao", "minha-conta"].includes(telaNavAtual) ? telaNavAtual : "dashboard";
   irParaTela("ficha", { idcentral, origem });
 }
+
+// --- FEED (publicações da equipe, estilo comunidade) ---
+// Tudo é montado com createElement/textContent (nunca innerHTML com texto de
+// usuário). Sem atualização automática: cada leitura do feed custa leituras no
+// Firestore, então a lista só é recarregada ao abrir a tela ou no botão
+// "Atualizar".
+// Espelham FEED_TEXTO_MAX e FEED_PAGINA do app.py.
+const FEED_TEXTO_MAX_CLIENTE = 2000;
+const FEED_PAGINA_CLIENTE = 20;
+const feedComposer = el("feed-composer");
+const feedTexto = el("feed-texto");
+const feedCliente = el("feed-cliente");
+const feedPublicar = el("feed-publicar");
+const feedErro = el("feed-erro");
+const feedLista = el("feed-lista");
+const feedMais = el("feed-mais");
+let feedCursor = null;
+let feedCarregando = false;
+const feedComentariosAbertos = new Set();
+
+function feedMostrarErro(msg) {
+  feedErro.textContent = msg || "";
+  feedErro.classList.toggle("hidden", !msg);
+}
+
+async function feedRequisicao(url, opcoes) {
+  const r = await fetch(url, opcoes);
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "Erro ao comunicar com o servidor.");
+  return data;
+}
+
+function feedJsonHeaders() {
+  return { "Content-Type": "application/json" };
+}
+
+function feedFormatarData(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function feedIniciais(nome) {
+  const partes = String(nome || "?").trim().split(/\s+/).filter(Boolean);
+  if (!partes.length) return "?";
+  return (partes[0][0] + (partes.length > 1 ? partes[partes.length - 1][0] : "")).toUpperCase();
+}
+
+function feedPostsNaTela() {
+  return feedLista.querySelectorAll(".feed-post").length;
+}
+
+function feedMostrarVazio() {
+  if (feedLista.querySelector(".feed-post")) return;
+  const vazio = document.createElement("p");
+  vazio.className = "feed-vazio placeholder";
+  vazio.textContent = "Nenhuma publicação ainda. Seja o primeiro a escrever.";
+  feedLista.appendChild(vazio);
+}
+
+function feedCriarCard(post) {
+  const card = document.createElement("article");
+  card.className = "feed-post";
+  card.dataset.id = post.id;
+
+  const cabecalho = document.createElement("header");
+  cabecalho.className = "feed-post-cabecalho";
+  const avatar = document.createElement("div");
+  avatar.className = "feed-avatar";
+  avatar.textContent = feedIniciais(post.autor_nome);
+  const meta = document.createElement("div");
+  meta.className = "feed-post-meta";
+  const autor = document.createElement("strong");
+  autor.textContent = post.autor_nome || "Usuário";
+  const detalhe = document.createElement("span");
+  detalhe.textContent = [feedFormatarData(post.criado_em), post.cliente_nome ? `· ${post.cliente_nome}` : "· Geral"].join(" ");
+  meta.append(autor, detalhe);
+  cabecalho.append(avatar, meta);
+  if (post.pode_excluir) {
+    const excluir = document.createElement("button");
+    excluir.type = "button";
+    excluir.className = "feed-acao-excluir";
+    excluir.title = "Excluir publicação";
+    excluir.textContent = "×";
+    excluir.addEventListener("click", () => feedExcluirPost(post.id, card));
+    cabecalho.appendChild(excluir);
+  }
+
+  const texto = document.createElement("p");
+  texto.className = "feed-post-texto";
+  texto.textContent = post.texto;
+
+  const acoes = document.createElement("footer");
+  acoes.className = "feed-post-acoes";
+  const btnCurtir = document.createElement("button");
+  btnCurtir.type = "button";
+  btnCurtir.className = "feed-acao";
+  const btnComentar = document.createElement("button");
+  btnComentar.type = "button";
+  btnComentar.className = "feed-acao";
+  acoes.append(btnCurtir, btnComentar);
+
+  const areaComentarios = document.createElement("div");
+  areaComentarios.className = "feed-comentarios hidden";
+
+  function pintarAcoes() {
+    btnCurtir.classList.toggle("ativo", !!post.curtido_por_mim);
+    btnCurtir.textContent = `♥ ${post.curtidas_total}`;
+    btnComentar.textContent = `💬 ${post.comentarios_total}`;
+  }
+  pintarAcoes();
+
+  btnCurtir.addEventListener("click", async () => {
+    try {
+      const data = await feedRequisicao(`/api/feed/${encodeURIComponent(post.id)}/curtir`, { method: "POST" });
+      post.curtido_por_mim = data.curtido_por_mim;
+      post.curtidas_total = data.curtidas_total;
+      pintarAcoes();
+    } catch (e) {
+      feedMostrarErro(e.message);
+    }
+  });
+  btnComentar.addEventListener("click", () => feedAlternarComentarios(post, areaComentarios, pintarAcoes));
+
+  card.append(cabecalho, texto, acoes, areaComentarios);
+  if (feedComentariosAbertos.has(post.id)) feedAbrirComentarios(post, areaComentarios, pintarAcoes);
+  return card;
+}
+
+async function feedExcluirPost(postId, card) {
+  if (!confirm("Excluir esta publicação e todos os comentários dela?")) return;
+  try {
+    await feedRequisicao(`/api/feed/${encodeURIComponent(postId)}`, { method: "DELETE" });
+    feedComentariosAbertos.delete(postId);
+    card.remove();
+    feedMostrarVazio();
+  } catch (e) {
+    feedMostrarErro(e.message);
+  }
+}
+
+function feedAlternarComentarios(post, area, pintarAcoes) {
+  if (area.classList.contains("hidden")) {
+    feedAbrirComentarios(post, area, pintarAcoes);
+  } else {
+    area.classList.add("hidden");
+    feedComentariosAbertos.delete(post.id);
+  }
+}
+
+function feedAbrirComentarios(post, area, pintarAcoes) {
+  feedComentariosAbertos.add(post.id);
+  area.classList.remove("hidden");
+  if (!area.dataset.montado) {
+    area.dataset.montado = "1";
+    const lista = document.createElement("div");
+    lista.className = "feed-comentarios-lista";
+    const form = document.createElement("form");
+    form.className = "feed-comentario-form";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = FEED_TEXTO_MAX_CLIENTE;
+    input.placeholder = "Escreva um comentário…";
+    input.className = "feed-comentario-input";
+    const enviar = document.createElement("button");
+    enviar.type = "submit";
+    enviar.className = "btn-primary feed-comentario-enviar";
+    enviar.textContent = "Enviar";
+    form.append(input, enviar);
+    area.append(lista, form);
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const texto = input.value.trim();
+      if (!texto) return;
+      enviar.disabled = true;
+      try {
+        await feedRequisicao(`/api/feed/${encodeURIComponent(post.id)}/comentarios`, {
+          method: "POST", headers: feedJsonHeaders(), body: JSON.stringify({ texto }),
+        });
+        input.value = "";
+        post.comentarios_total += 1;
+        pintarAcoes();
+        await feedCarregarComentarios(post, area, pintarAcoes);
+      } catch (e) {
+        feedMostrarErro(e.message);
+      } finally {
+        enviar.disabled = false;
+      }
+    });
+  }
+  feedCarregarComentarios(post, area, pintarAcoes);
+}
+
+async function feedCarregarComentarios(post, area, pintarAcoes) {
+  const lista = area.querySelector(".feed-comentarios-lista");
+  try {
+    const data = await feedRequisicao(`/api/feed/${encodeURIComponent(post.id)}/comentarios`);
+    lista.innerHTML = "";
+    if (!data.comentarios.length) {
+      const vazio = document.createElement("p");
+      vazio.className = "feed-comentarios-vazio";
+      vazio.textContent = "Sem comentários ainda.";
+      lista.appendChild(vazio);
+    }
+    data.comentarios.forEach((c) => {
+      const linha = document.createElement("div");
+      linha.className = "feed-comentario";
+      const autor = document.createElement("strong");
+      autor.textContent = c.autor_nome || "Usuário";
+      const texto = document.createElement("span");
+      texto.className = "feed-comentario-texto";
+      texto.textContent = c.texto;
+      const quando = document.createElement("small");
+      quando.textContent = feedFormatarData(c.criado_em);
+      linha.append(autor, texto, quando);
+      if (c.pode_excluir) {
+        const excluir = document.createElement("button");
+        excluir.type = "button";
+        excluir.className = "feed-acao-excluir";
+        excluir.title = "Excluir comentário";
+        excluir.textContent = "×";
+        excluir.addEventListener("click", async () => {
+          if (!confirm("Excluir este comentário?")) return;
+          try {
+            await feedRequisicao(`/api/feed/comentarios/${encodeURIComponent(c.id)}`, { method: "DELETE" });
+            post.comentarios_total = Math.max(0, post.comentarios_total - 1);
+            pintarAcoes();
+            feedCarregarComentarios(post, area, pintarAcoes);
+          } catch (e) {
+            feedMostrarErro(e.message);
+          }
+        });
+        linha.appendChild(excluir);
+      }
+      lista.appendChild(linha);
+    });
+  } catch (e) {
+    feedMostrarErro(e.message);
+  }
+}
+
+// `reiniciar` refaz a lista do começo com a mesma quantidade já exibida, pra
+// atualização automática não jogar fora as páginas que a pessoa já carregou.
+async function feedCarregar({ reiniciar = false } = {}) {
+  if (feedCarregando) return;
+  feedCarregando = true;
+  feedMais.disabled = true;
+  const params = new URLSearchParams();
+  if (reiniciar) {
+    params.set("limite", String(Math.max(FEED_PAGINA_CLIENTE, feedPostsNaTela())));
+  } else if (feedCursor) {
+    params.set("antes_de", feedCursor);
+  }
+  try {
+    const data = await feedRequisicao(`/api/feed?${params.toString()}`);
+    if (reiniciar) feedLista.innerHTML = "";
+    const vazioAntes = feedLista.querySelector(".feed-vazio");
+    if (vazioAntes) vazioAntes.remove();
+    data.posts.forEach((post) => feedLista.appendChild(feedCriarCard(post)));
+    if (data.posts.length) feedCursor = data.posts[data.posts.length - 1].criado_em;
+    feedMais.classList.toggle("hidden", data.posts.length < Number(params.get("limite") || FEED_PAGINA_CLIENTE));
+    feedMostrarVazio();
+    feedMostrarErro("");
+  } catch (e) {
+    feedMostrarErro(e.message);
+  } finally {
+    feedCarregando = false;
+    feedMais.disabled = false;
+  }
+}
+
+async function feedCarregarClientes() {
+  try {
+    const r = await fetch("/api/clientes");
+    const data = await parseJsonResponse(r);
+    const atual = feedCliente.value;
+    feedCliente.innerHTML = "";
+    const geral = document.createElement("option");
+    geral.value = "";
+    geral.textContent = "Geral (sem cliente)";
+    feedCliente.appendChild(geral);
+    (data.clientes || [])
+      .slice()
+      .sort((a, b) => String(a.cliente || "").localeCompare(String(b.cliente || ""), "pt-BR"))
+      .forEach((c) => {
+        const opcao = document.createElement("option");
+        opcao.value = c.id;
+        opcao.textContent = c.cliente || c.id;
+        feedCliente.appendChild(opcao);
+      });
+    feedCliente.value = atual;
+  } catch (e) {
+    feedMostrarErro("Não foi possível carregar a lista de clientes.");
+  }
+}
+
+async function carregarFeed() {
+  const podePublicar = document.body.dataset.usuarioPerfil !== "visualizacao";
+  feedComposer.classList.toggle("hidden", !podePublicar);
+  feedCarregarClientes();
+  feedCursor = null;
+  await feedCarregar({ reiniciar: true });
+}
+
+feedComposer.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const texto = feedTexto.value.trim();
+  if (!texto) {
+    feedMostrarErro("Escreva algo antes de publicar.");
+    return;
+  }
+  feedPublicar.disabled = true;
+  try {
+    const data = await feedRequisicao("/api/feed", {
+      method: "POST", headers: feedJsonHeaders(),
+      body: JSON.stringify({ texto, cliente_id: feedCliente.value }),
+    });
+    feedTexto.value = "";
+    feedMostrarErro("");
+    const vazio = feedLista.querySelector(".feed-vazio");
+    if (vazio) vazio.remove();
+    feedLista.prepend(feedCriarCard(data.post));
+  } catch (e) {
+    feedMostrarErro(e.message);
+  } finally {
+    feedPublicar.disabled = false;
+  }
+});
+feedMais.addEventListener("click", () => feedCarregar());
+el("feed-atualizar").addEventListener("click", () => {
+  feedCursor = null;
+  feedCarregar({ reiniciar: true });
+});
+
+NAV_BOTOES.feed.addEventListener("click", () => irParaTela("feed"));
 
 // Na Ficha, o logo é a saída (não há mais botão "Voltar") — então também
 // protege o checklist de marcos não salvo.
@@ -7023,8 +9537,36 @@ if (el("card-ferramentas-comandos")) {
 if (el("card-ferramentas-sync-planilha")) {
   el("card-ferramentas-sync-planilha").addEventListener("click", () => irParaTela("ferramentas", { sub: "sync-planilha" }));
 }
-document.querySelectorAll("[data-ferramentas-voltar]").forEach((btn) => {
-  btn.addEventListener("click", () => irParaTela("ferramentas"));
+el("card-ferramentas-quebra-string").addEventListener("click", () => irParaTela("ferramentas", { sub: "quebra-string" }));
+// Pelo card o formulário do conversor começa limpo; Voltar/Avançar do navegador mantém o que estava.
+el("card-ferramentas-conversor-kml").addEventListener("click", () => {
+  limparConversor();
+  irParaTela("ferramentas", { sub: "conversor-kml" });
+});
+// "Voltar" discreto do sidebar: só aparece em telas "filhas" — sub-tela de
+// Ferramentas → Ferramentas; Ficha → de onde foi aberta; Minha conta (aberta pelo
+// menu do usuário) → Dashboard. Nas telas iniciais do sidebar (Dashboard, Feed,
+// Implantação, Migração, Ferramentas) o próprio menu já é a navegação, então some.
+const sidebarVoltar = el("sidebar-voltar");
+
+function destinoVoltar() {
+  if (telaNavAtual === "ferramentas" && ferramentasSubAtual) return { tela: "ferramentas" };
+  if (telaNavAtual === "ficha") return { tela: fichaOrigem || "dashboard" };
+  if (telaNavAtual === "minha-conta") return { tela: "dashboard" };
+  return null;
+}
+
+function atualizarSidebarVoltar() {
+  const destino = destinoVoltar();
+  sidebarVoltar.classList.toggle("hidden", !destino);
+  if (destino) sidebarVoltar.title = `Voltar para ${TITULO_TOPBAR_POR_TELA[destino.tela] || "Dashboard"}`;
+}
+
+sidebarVoltar.addEventListener("click", () => {
+  const destino = destinoVoltar();
+  if (!destino) return;
+  if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
+  irParaTela(destino.tela);
 });
 
 // --- SINCRONIZAR PLANILHA (planilha de CS -> cadastro de cliente do app) ---
@@ -7939,9 +10481,9 @@ function construirFichaHeader(implantacao, migracao, comEngrenagem) {
 function construirFichaEngrenagem(implantacao, migracao) {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "btn-engrenagem-usuario ficha-engrenagem";
+  btn.className = "btn-engrenagem-pagina ficha-engrenagem";
   btn.title = "Editar dados do cliente";
-  btn.textContent = "⚙️";
+  aplicarIconeEngrenagem(btn);
   btn.addEventListener("click", () => abrirConfigFicha(implantacao, migracao));
   return btn;
 }
@@ -8197,83 +10739,98 @@ function nomeCurtoEtapaImplantacao(etapa) {
 // precisa de atenção (trava operacional, risco de perda etc).
 const FICHA_MOMENTOS_CRITICOS = ["Travado por Infraestrutura", "Possível Cancelamento", "Protestado", "Sumido"];
 
-function criarBlocoContato(label, valor) {
-  const bloco = document.createElement("div");
-  bloco.className = "ficha-header-contato-bloco";
-  const l = document.createElement("div");
-  l.className = "info-item-label";
-  l.textContent = label;
-  const v = document.createElement("div");
-  v.className = "info-item-valor";
-  v.textContent = valor;
-  bloco.appendChild(l);
-  bloco.appendChild(v);
-  return bloco;
-}
+const ICONE_WHATSAPP_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91A9.85 9.85 0 0 0 12.04 2zm0 18.15h-.01a8.23 8.23 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.25-8.23a8.2 8.2 0 0 1 8.24 8.24c0 4.54-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.46-.72-1.69-.8-.23-.08-.39-.12-.56.12-.16.25-.64.8-.78.97-.14.16-.29.18-.54.06-.25-.12-1.04-.38-1.99-1.23-.73-.66-1.23-1.47-1.37-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.16.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43h-.48c-.16 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.16 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.46-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.22-.16-.47-.28z"/></svg>';
 
-// Linha do cabeçalho com dois blocos claramente rotulados — são DUAS pessoas
-// diferentes e é fácil confundir uma com a outra: "Responsável (CS)" é quem
-// da SystemSAT toca o cliente (implantacao.csm); "Decisor" é o contato do
-// lado do cliente (gestor), e o WhatsApp da linha é sempre o dele, nunca do
-// responsável. Substitui o antigo card de decisor isolado.
-function construirFichaLinhaContato(implantacao) {
-  const temDecisor = implantacao.decisor_nome || implantacao.decisor_whatsapp || implantacao.decisor_cidade || implantacao.decisor_estado;
-  if (!implantacao.csm && !temDecisor) return null;
+// Ícones dos cards de contato (traço, 16px), mesmo estilo dos ícones da Ficha.
+const ICONES_CONTATO = {
+  pessoa: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"></path></svg>',
+  maleta: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>',
+  pin: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
+};
 
-  const linha = document.createElement("div");
-  linha.className = "ficha-header-contato";
-
-  const blocos = document.createElement("div");
-  blocos.className = "ficha-header-contato-blocos";
-  blocos.appendChild(criarBlocoContato("Responsável (CS)", implantacao.csm || "não definido"));
-
-  if (temDecisor) blocos.appendChild(construirCardDecisor(implantacao));
-  linha.appendChild(blocos);
-  return linha;
-}
-
-// Cardzinho do decisor (contato do lado do cliente): nome, telefone e cidade
-// empilhados, com o botão do WhatsApp dentro do próprio card — antes era uma
-// linha só com tudo separado por "·" e o botão solto no canto.
-function construirCardDecisor(implantacao) {
+// Card de contato no padrão dos tiles da Ficha: ícone + rótulo, nome em
+// destaque, detalhe opcional e o botão de WhatsApp da própria pessoa do card
+// (nunca o número de outra).
+function construirCardContato({ icone, rotulo, valor, vazio, detalhes, whatsapp }) {
   const card = document.createElement("div");
-  card.className = "card-decisor";
+  card.className = "ficha-contato-card";
 
-  const info = document.createElement("div");
-  info.className = "card-decisor-info";
-  const rotulo = document.createElement("div");
-  rotulo.className = "info-item-label";
-  rotulo.textContent = "Decisor";
-  const nome = document.createElement("div");
-  nome.className = "card-decisor-nome";
-  nome.textContent = implantacao.decisor_nome || "sem nome cadastrado";
-  info.appendChild(rotulo);
-  info.appendChild(nome);
-  const local = [implantacao.decisor_cidade, implantacao.decisor_estado].filter(Boolean).join(" - ");
-  [implantacao.decisor_whatsapp, local].filter(Boolean).forEach((texto) => {
-    const linha = document.createElement("div");
-    linha.className = "card-decisor-detalhe";
-    linha.textContent = texto;
-    info.appendChild(linha);
+  const topo = document.createElement("div");
+  topo.className = "ficha-contato-topo";
+  topo.innerHTML = ICONES_CONTATO[icone] || "";
+  const r = document.createElement("span");
+  r.textContent = rotulo;
+  topo.appendChild(r);
+  card.appendChild(topo);
+
+  const n = document.createElement("div");
+  n.className = "ficha-contato-nome";
+  n.textContent = valor || vazio;
+  n.title = valor || "";
+  card.appendChild(n);
+
+  detalhes.filter(Boolean).forEach((texto) => {
+    const d = document.createElement("div");
+    d.className = "ficha-contato-detalhe";
+    d.textContent = texto;
+    card.appendChild(d);
   });
-  card.appendChild(info);
 
-  const linkWpp = linkWhatsapp(implantacao.decisor_whatsapp);
-  if (linkWpp) {
-    const btnWpp = document.createElement("a");
-    btnWpp.className = "card-decisor-wpp";
-    btnWpp.href = linkWpp;
-    btnWpp.target = "_blank";
-    btnWpp.rel = "noopener";
-    btnWpp.title = "Abrir conversa no WhatsApp";
-    btnWpp.setAttribute("aria-label", "WhatsApp do decisor");
-    btnWpp.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91A9.85 9.85 0 0 0 12.04 2zm0 18.15h-.01a8.23 8.23 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.25-8.23a8.2 8.2 0 0 1 8.24 8.24c0 4.54-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.46-.72-1.69-.8-.23-.08-.39-.12-.56.12-.16.25-.64.8-.78.97-.14.16-.29.18-.54.06-.25-.12-1.04-.38-1.99-1.23-.73-.66-1.23-1.47-1.37-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.16.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43h-.48c-.16 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.16 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.46-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.22-.16-.47-.28z"/></svg>';
-    const texto = document.createElement("span");
-    texto.textContent = "WhatsApp";
-    btnWpp.appendChild(texto);
-    card.appendChild(btnWpp);
+  const link = linkWhatsapp(whatsapp);
+  if (link) {
+    const btn = document.createElement("a");
+    btn.className = "ficha-contato-wpp";
+    btn.href = link;
+    btn.target = "_blank";
+    btn.rel = "noopener";
+    btn.title = "Abrir conversa no WhatsApp";
+    btn.setAttribute("aria-label", `WhatsApp: ${rotulo}`);
+    btn.innerHTML = ICONE_WHATSAPP_SVG;
+    card.appendChild(btn);
   }
   return card;
+}
+
+// Linha de cards da Visão Geral, lado a lado: CSM (quem da SystemSAT toca o
+// cliente), Comercial (vendedor), Decisor (contato do cliente) e Região
+// (cidade/estado do cliente, em card separado).
+function construirFichaLinhaContato(implantacao) {
+  const linha = document.createElement("div");
+  linha.className = "ficha-contatos";
+
+  linha.appendChild(construirCardContato({
+    icone: "pessoa",
+    rotulo: "CSM",
+    valor: implantacao.csm,
+    vazio: "não definido",
+    detalhes: [],
+    whatsapp: implantacao.csm_whatsapp,
+  }));
+  linha.appendChild(construirCardContato({
+    icone: "maleta",
+    rotulo: "Comercial",
+    valor: implantacao.vendedor,
+    vazio: "não definido",
+    detalhes: [],
+    whatsapp: implantacao.vendedor_whatsapp,
+  }));
+  linha.appendChild(construirCardContato({
+    icone: "pessoa",
+    rotulo: "Decisor",
+    valor: implantacao.decisor_nome,
+    vazio: "sem nome cadastrado",
+    detalhes: [implantacao.decisor_whatsapp],
+    whatsapp: implantacao.decisor_whatsapp,
+  }));
+  linha.appendChild(construirCardContato({
+    icone: "pin",
+    rotulo: "Região",
+    valor: implantacao.decisor_cidade,
+    vazio: "não definida",
+    detalhes: [implantacao.decisor_estado],
+    whatsapp: null,
+  }));
+  return linha;
 }
 
 // Junta num só lugar tudo que precisa da atenção do usuário — sem isso, cada
@@ -8288,16 +10845,22 @@ function coletarFichaAlertas(implantacao, migracao) {
     if (implantacaoAtrasada(implantacao)) {
       const label = nomeCurtoEtapaImplantacao(implantacao.etapa);
       const diasAtraso = diasAtrasoImplantacao(implantacao);
-      alertas.push(diasAtraso !== null
-        ? `${label} atrasado há ${diasAtraso} dia${diasAtraso === 1 ? "" : "s"}.`
-        : `${label} está atrasado.`);
+      alertas.push({
+        rotulo: "Marco atrasado",
+        texto: diasAtraso !== null
+          ? `${label} atrasado há ${diasAtraso} dia${diasAtraso === 1 ? "" : "s"}`
+          : `${label} está atrasado`,
+      });
     }
     // Mesma regra do selo "Parado" do Kanban (clienteParado).
     if (clienteParado(implantacao)) {
-      alertas.push(`Implantação parada: sem atividade há ${diasSemAtividade(implantacao)} dias.`);
+      alertas.push({
+        rotulo: "Implantação parada",
+        texto: `Sem atividade há ${diasSemAtividade(implantacao)} dias`,
+      });
     }
     if (FICHA_MOMENTOS_CRITICOS.includes(implantacao.momento)) {
-      alertas.push(`Momento do cliente: ${implantacao.momento}.`);
+      alertas.push({ rotulo: "Momento do cliente", texto: implantacao.momento });
     }
   }
   return alertas;
@@ -8318,12 +10881,23 @@ function construirFichaAlertasCard(implantacao, migracao) {
     card.appendChild(p);
     return card;
   }
-  alertas.forEach((texto) => {
+  // Cada alerta vira um card no mesmo padrão dos contatos da Visão Geral.
+  const grade = document.createElement("div");
+  grade.className = "ficha-alertas-grade";
+  alertas.forEach(({ rotulo, texto }) => {
     const item = document.createElement("div");
-    item.className = "alerta-item";
-    item.textContent = `⚠️ ${texto}`;
-    card.appendChild(item);
+    item.className = "ficha-contato-card ficha-alerta-card";
+    const r = document.createElement("div");
+    r.className = "ficha-contato-rotulo";
+    r.textContent = rotulo;
+    const t = document.createElement("div");
+    t.className = "ficha-alerta-texto";
+    t.textContent = texto;
+    item.appendChild(r);
+    item.appendChild(t);
+    grade.appendChild(item);
   });
+  card.appendChild(grade);
   if (implantacaoAtrasada(implantacao)) card.appendChild(construirBlocoMotivoAtraso(implantacao));
   return card;
 }
@@ -8777,9 +11351,104 @@ function construirFichaOperacionalCard(idcentral, implantacao, credencialConfigu
   return det;
 }
 
-function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin) {
+// Sub-abas acima do nome do cliente, dentro da Visão Geral. Cada uma mostra um
+// recorte: "Geral" é o painel completo; as outras separam o que é cadastro,
+// andamento e histórico.
+const FICHA_SUB_ABAS = [
+  ["geral", "Geral"],
+  ["informacoes", "Informações do Cliente"],
+  ["progresso", "Progresso"],
+  ["historico", "Histórico"],
+];
+let fichaSubAbaAtual = "geral";
+
+function construirFichaSubAbas(ativa) {
+  const nav = document.createElement("div");
+  nav.className = "ficha-subabas";
+  nav.setAttribute("role", "tablist");
+  FICHA_SUB_ABAS.forEach(([chave, rotulo]) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ficha-subaba" + (chave === ativa ? " ativo" : "");
+    btn.textContent = rotulo;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", String(chave === ativa));
+    btn.addEventListener("click", () => {
+      if (chave === fichaSubAbaAtual) return;
+      fichaSubAbaAtual = chave;
+      mostrarFichaAba("geral");
+    });
+    nav.appendChild(btn);
+  });
+  return nav;
+}
+
+// Histórico do cliente: tentativas de migração (todas, da mais recente pra
+// mais antiga) e, quando existe Implantação, atalho pra linha do tempo completa.
+function construirFichaHistoricoCard(implantacao) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel";
+  const h = document.createElement("h3");
+  h.textContent = "Histórico";
+  card.appendChild(h);
+
+  const migracoes = (fichaClienteAtual && fichaClienteAtual.migracoes) || [];
+  migracoes.forEach((m) => {
+    const linha = document.createElement("div");
+    linha.className = "ficha-historico-item";
+    const periodo = m.data_fim ? `${m.data_inicio} — ${m.data_fim}` : `desde ${m.data_inicio}`;
+    const motivo = m.motivo ? ` — ${m.motivo}` : "";
+    linha.textContent = `Migração · ${MIGRACAO_STATUS_LABELS[m.status] || m.status} (${periodo})${motivo}`;
+    card.appendChild(linha);
+  });
+
+  if (implantacao) {
+    const acoes = document.createElement("div");
+    acoes.className = "ficha-acoes";
+    const btn = document.createElement("button");
+    btn.className = "btn-secondary";
+    btn.textContent = "Ver linha do tempo completa";
+    btn.addEventListener("click", () => abrirTimelineImplantacao(implantacao));
+    acoes.appendChild(btn);
+    card.appendChild(acoes);
+  }
+
+  if (!migracoes.length && !implantacao) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhum histórico registrado.";
+    card.appendChild(p);
+  }
+  return card;
+}
+
+function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin, subAba = "geral") {
   const wrap = document.createElement("div");
+  wrap.appendChild(construirFichaSubAbas(subAba));
   wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
+
+  if (subAba === "informacoes") {
+    if (implantacao) wrap.appendChild(construirFichaLinhaContato(implantacao));
+    wrap.appendChild(construirFichaResumoCard(implantacao, migracao));
+    wrap.appendChild(construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin));
+    return wrap;
+  }
+  if (subAba === "progresso") {
+    const progresso = construirFichaProgressoCard(implantacao, migracao);
+    if (progresso) {
+      wrap.appendChild(progresso);
+    } else {
+      const p = document.createElement("p");
+      p.className = "placeholder";
+      p.textContent = "Sem progresso para mostrar.";
+      wrap.appendChild(p);
+    }
+    return wrap;
+  }
+  if (subAba === "historico") {
+    wrap.appendChild(construirFichaHistoricoCard(implantacao));
+    return wrap;
+  }
 
   // Tags hierárquicas + linha de contato — pra bater o olho na Visão Geral e
   // já entender a situação do cliente, sem precisar abrir Configuração/Editar
@@ -8794,13 +11463,16 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
       if (implantacao.implantado) tags.appendChild(criarTagResumo("Implantado", "tag-implantado"));
       if (implantacao.momento) tags.appendChild(criarTagResumo(implantacao.momento, "tag-momento"));
       if (implantacao.persona) tags.appendChild(criarTagResumo(implantacao.persona, "tag-persona"));
-      if (implantacao.flag) tags.appendChild(criarTagResumo(implantacao.flag, classeFlagTag(implantacao.flag)));
+      if (implantacao.flag) {
+        const tagFlag = criarTagResumo(implantacao.flag, classeFlagTag(implantacao.flag));
+        tagFlag.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>');
+        tags.appendChild(tagFlag);
+      }
       if (implantacaoAtrasada(implantacao)) tags.appendChild(criarTagResumo("Atrasado", "tag-flag-red"));
       if (tags.children.length) wrap.appendChild(tags);
     }
 
-    const contato = construirFichaLinhaContato(implantacao);
-    if (contato) wrap.appendChild(contato);
+    wrap.appendChild(construirFichaLinhaContato(implantacao));
   }
 
   // Atenção/Pendências — concentra tudo que precisa de ação num só lugar, em
@@ -8859,11 +11531,100 @@ function construirFichaImplantacao(implantacao, migracao) {
   btn.textContent = "Ver linha do tempo completa";
   btn.addEventListener("click", () => abrirTimelineImplantacao(implantacao));
   acoes.appendChild(btn);
+
+  const btnEmail = document.createElement("button");
+  btnEmail.className = "btn-secondary";
+  btnEmail.textContent = "Gerar e-mail de boas-vindas";
+  btnEmail.addEventListener("click", () => abrirEmailBoasVindas());
+  acoes.appendChild(btnEmail);
   sec.appendChild(acoes);
 
   wrap.appendChild(sec);
   return wrap;
 }
+
+// E-mail de boas-vindas. Texto padrão da Systemsat com os dados de acesso do
+// cliente preenchidos. Enquanto o e-mail do cliente não é informado no modal,
+// aparece o marcador EMAIL DO CLIENTE pra não sair em branco por engano.
+const EMAIL_BOAS_VINDAS_MARCADOR_EMAIL = "EMAIL DO CLIENTE";
+
+function montarEmailBoasVindas(emailCliente, nomeUsuario) {
+  const email = emailCliente || EMAIL_BOAS_VINDAS_MARCADOR_EMAIL;
+  const assinante = nomeUsuario || "NOME DO USUARIO";
+
+  const paragrafos = [
+    "Sejam bem-vindos à Systemsat.",
+    "Em nome de toda a nossa equipe, queremos expressar a satisfação em tê-los como parceiros. Estamos animados para embarcar nessa jornada conjunta e confiantes de que essa parceria será um passo importante para alcançarmos excelentes resultados.",
+    [
+      "Informações de acesso ao SSX:",
+      "Acesse a plataforma:",
+      `LOGIN: ${email}`,
+      "SENHA: admin",
+    ].join("\n"),
+    [
+      "Material de apoio ao uso:",
+      "Pensando em proporcionar uma experiência fluida desde o início, disponibilizamos a nossa universidade online — um ambiente completo de aprendizado, desenvolvido para apoiar cada etapa da sua operação dentro da plataforma SSX.",
+      "Lá, vocês terão acesso a trilhas de treinamento estruturadas, conteúdos práticos, vídeos explicativos e boas práticas de mercado, tudo organizado para acelerar a adoção da plataforma e potencializar os resultados da operação.",
+    ].join("\n\n"),
+    [
+      "Informações de acesso à universidade:",
+      "Link: https://universidadesystemsat.com.br/login",
+      `E-mail: ${email}`,
+      "Senha provisória: 123456",
+    ].join("\n"),
+    "Recomendamos que a equipe explore os conteúdos desde o início — isso fará toda a diferença na autonomia e performance ao longo da jornada.",
+    "Conte conosco ao longo desse caminho. Estamos à disposição para apoiar no que for necessário para o sucesso da operação.",
+    [
+      "Atenciosamente,",
+      assinante,
+      "Sucesso do Cliente",
+    ].join("\n"),
+  ];
+  return {
+    assunto: "Sejam bem-vindos à Systemsat!",
+    corpo: paragrafos.join("\n\n"),
+  };
+}
+
+const overlayEmailBoasVindas = el("overlay-email-boas-vindas");
+const inputEmailBoasVindasEmailCliente = el("email-boas-vindas-email-cliente");
+const inputEmailBoasVindasAssunto = el("email-boas-vindas-assunto");
+const inputEmailBoasVindasCorpo = el("email-boas-vindas-corpo");
+const btnEmailBoasVindasCopiar = el("btn-email-boas-vindas-copiar");
+
+function abrirEmailBoasVindas() {
+  // O nome de quem está logado é o Responsável (CS) ligado ao login — o mesmo
+  // que o servidor já guarda na sessão e expõe no body da página.
+  const { assunto, corpo } = montarEmailBoasVindas("", document.body.dataset.usuarioResponsavel || "");
+  inputEmailBoasVindasEmailCliente.value = "";
+  inputEmailBoasVindasAssunto.value = assunto;
+  inputEmailBoasVindasCorpo.value = corpo;
+  btnEmailBoasVindasCopiar.textContent = "Copiar";
+  overlayEmailBoasVindas.classList.remove("hidden");
+  inputEmailBoasVindasEmailCliente.focus();
+}
+
+// Troca só as linhas "LOGIN:" e "E-mail:" (com âncora de linha), em vez de gerar
+// o texto de novo — assim o resto do que a pessoa já editou na mensagem não se perde.
+inputEmailBoasVindasEmailCliente.addEventListener("input", () => {
+  const novo = inputEmailBoasVindasEmailCliente.value.trim() || EMAIL_BOAS_VINDAS_MARCADOR_EMAIL;
+  inputEmailBoasVindasCorpo.value = inputEmailBoasVindasCorpo.value
+    .replace(/^LOGIN: .*$/m, `LOGIN: ${novo}`)
+    .replace(/^E-mail: .*$/m, `E-mail: ${novo}`);
+});
+
+el("email-boas-vindas-modal-fechar").addEventListener("click", () => overlayEmailBoasVindas.classList.add("hidden"));
+
+btnEmailBoasVindasCopiar.addEventListener("click", async () => {
+  const texto = `Assunto: ${inputEmailBoasVindasAssunto.value}\n\n${inputEmailBoasVindasCorpo.value}`;
+  try {
+    await navigator.clipboard.writeText(texto);
+    btnEmailBoasVindasCopiar.textContent = "Copiado ✓";
+    setTimeout(() => { btnEmailBoasVindasCopiar.textContent = "Copiar"; }, 1500);
+  } catch (err) {
+    alert(`Não foi possível copiar: ${String(err)}`);
+  }
+});
 
 // Linha de acesso rápido (login/senha da plataforma de origem) com botão de
 // copiar e, pra senha, um "olhinho" (👁) pra revelar antes de copiar — ela
@@ -9432,7 +12193,7 @@ function mostrarFichaAba(aba) {
   corpo.innerHTML = "";
   if (!fichaClienteAtual) return;
   const { idcentral, implantacao, migracao, migracoes, credencial_configurada, credencial_login } = fichaClienteAtual;
-  if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login));
+  if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login, fichaSubAbaAtual));
   if (aba === "implantacao") corpo.appendChild(construirFichaImplantacao(implantacao, migracao));
   if (aba === "marcos") corpo.appendChild(construirFichaMarcos(implantacao, migracao));
   if (aba === "migracao") corpo.appendChild(construirFichaMigracao(implantacao, migracao, migracoes));

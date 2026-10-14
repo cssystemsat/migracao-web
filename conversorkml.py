@@ -27,11 +27,13 @@ Com valores padrão para campos obrigatórios ausentes:
         --tolerancia 100 \
         --cor 6
 
-O GeoIntegrationCode nunca é lido do KML de origem nem é editável: ele é
-sempre calculado pela fórmula fixa "Grupo_Nome_número" (ver gerar_geo_code).
+O GeoIntegrationCode informado no KML (ExtendedData ou bloco {{...}}) é mantido;
+quando ausente, é gerado pela fórmula "Grupo_Nome_número" (ver gerar_geo_code).
+Mesmas regras do conversor da página (static/script.js), que é o usado pela ferramenta web.
 """
 
 import argparse
+import html
 import re
 import sys
 import unicodedata
@@ -189,36 +191,68 @@ def gerar_geo_code(grupo, nome, indice):
     return base[:MAX_GEO_CODE]
 
 
+def limpar_descricao_html(bruta):
+    """
+    Google Earth/My Maps salvam a <description> como HTML ("<div>texto<br></div>").
+    Dentro de CDATA isso chega como texto, então as tags iriam literalmente pro SSX.
+    """
+    texto = (bruta or "").strip()
+    if not texto or not re.search(r"<[a-z][\s\S]*>", texto, re.IGNORECASE):
+        return texto
+    texto = re.sub(r"<\s*br\s*/?\s*>", "\n", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"</\s*(p|div|li|tr)\s*>", "\n", texto, flags=re.IGNORECASE)
+    texto = html.unescape(re.sub(r"<[^>]+>", "", texto))
+    texto = re.sub(r"[ \t]+", " ", texto)
+    texto = re.sub(r"\n{2,}", "\n", texto)
+    return "\n".join(linha.strip() for linha in texto.split("\n")).strip()
+
+
 def montar_placemark(placemark, config, indice):
     """
     Processa um <Placemark> e devolve um dict `registro` com os dados já
     validados (ou os erros encontrados). Nunca levanta exceção por erro de
     validação: os problemas são acumulados em registro['erros'] para que o
     chamador (CLI ou UI) decida o que fazer com cada registro.
+
+    Mesmas regras do conversor da página (static/script.js) e do Universidade Systemsat.
     """
     erros = []
     avisos = []
 
     nome = _texto(_find(placemark, "name"))
-    descricao_bruta = _texto(_find(placemark, "description"))
+    descricao_bruta = limpar_descricao_html(_texto(_find(placemark, "description")))
 
-    tipo_original, coords_texto = extrair_geometria(placemark)
-    if tipo_original is None:
+    # A tag do KML só serve pra achar as coordenadas: o tipo (Ponto/Rota/Área) vem das
+    # próprias coordenadas, porque clientes exportam áreas como LineString quando o anel
+    # não fica fechado no arquivo.
+    geometria, coords_texto = extrair_geometria(placemark)
+    if geometria is None:
         erros.append("Placemark sem geometria (Polygon, LineString ou Point)")
 
-    # 1) Dados do ExtendedData existente
-    dados = extrair_extended_data(placemark)
+    pontos = []
+    coordenadas_invalidas = False
+    if geometria is not None:
+        try:
+            pontos = normalizar_coordenadas(coords_texto, geometria)
+        except ValueError as e:
+            erros.append(str(e))
+            coordenadas_invalidas = True
 
-    # 2) Bloco {{...}} na descrição tem prioridade sobre o ExtendedData (regra do manual)
+    # Ponto: 1 coordenada. Área: 2+ com anel fechado (1ª = última). Rota: 2+ sem fechamento.
+    tipo_original = None
+    if len(pontos) == 1:
+        tipo_original = "Point"
+    elif len(pontos) >= 2:
+        tipo_original = "Polygon" if pontos[0] == pontos[-1] else "LineString"
+    elif geometria is not None and not coordenadas_invalidas:
+        erros.append("Nenhuma coordenada encontrada na geometria")
+
+    # Dados do ExtendedData; o bloco {{...}} da descrição tem prioridade (regra do manual)
+    dados = extrair_extended_data(placemark)
     bloco, descricao = extrair_bloco_descricao(descricao_bruta)
     dados.update(bloco)
     if bloco.get("Name"):
         nome = bloco["Name"]
-
-    # 3) Preencher campos obrigatórios ausentes com os padrões informados
-    if not nome:
-        nome = f"Placemark #{indice}"
-        erros.append("Campo obrigatório 'Name' não informado")
 
     if not dados.get("CategoryIntegrationCode"):
         if config.categoria:
@@ -234,27 +268,33 @@ def montar_placemark(placemark, config, indice):
             erros.append("Campo obrigatório 'GroupIntegrationCode' não informado "
                           "(defina um valor padrão)")
 
-    # GeoIntegrationCode nunca vem do KML/edição manual: é sempre a fórmula
-    # fixa Grupo_Nome_número, recalculada aqui e não alterável depois.
-    codigo_gerado = gerar_geo_code(dados.get("GroupIntegrationCode"), nome, indice)
-    if len(f"{dados.get('GroupIntegrationCode', '')}_{slug(nome)}_{indice:03d}") > MAX_GEO_CODE:
-        avisos.append(f"GeoIntegrationCode truncado para {MAX_GEO_CODE} caracteres: {codigo_gerado}")
-    dados["GeoIntegrationCode"] = codigo_gerado
+    # GeoIntegrationCode informado no KML (ExtendedData ou {{...}}) é mantido;
+    # só gera pela fórmula Grupo_Nome_número quando o arquivo não trouxe nenhum.
+    codigo_informado = (dados.get("GeoIntegrationCode") or "").strip()
+    if codigo_informado:
+        if len(codigo_informado) > MAX_GEO_CODE:
+            erros.append(f"'GeoIntegrationCode' excede {MAX_GEO_CODE} caracteres")
+        dados["GeoIntegrationCode"] = codigo_informado
+    else:
+        codigo_gerado = gerar_geo_code(dados.get("GroupIntegrationCode"), nome, indice)
+        if len(f"{dados.get('GroupIntegrationCode', '')}_{slug(nome)}_{indice:03d}") > MAX_GEO_CODE:
+            avisos.append(f"GeoIntegrationCode truncado para {MAX_GEO_CODE} caracteres: {codigo_gerado}")
+        dados["GeoIntegrationCode"] = codigo_gerado
 
-    # Nomes repetidos no KML de origem (ex.: várias áreas de uma mesma
-    # fazenda usando o nome da fazenda) fazem o "Name" parecer duplicado no
-    # SSX mesmo sendo áreas distintas. Como o GeoIntegrationCode já é
-    # garantidamente único, ele também vira o "Name" exibido, e o nome
-    # original fica preservado na descrição.
-    nome_original = nome
-    nome = codigo_gerado
+    # Sem Name no Placemark: usa o código de integração como nome.
+    if not nome:
+        nome = dados["GeoIntegrationCode"]
 
-    # 4) Conversão de geometria (Rotas -> Áreas), se solicitado
+    # "Forçar áreas": Rota -> Área, fechando o anel com a primeira coordenada.
     tipo_final = tipo_original
     convertido = False
     if config.forcar_poligono and tipo_original == "LineString":
         tipo_final = "Polygon"
         convertido = True
+        if pontos and pontos[0] != pontos[-1]:
+            pontos.append(pontos[0])
+            avisos.append("Rota convertida em área: polígono fechado automaticamente "
+                          "(ponto inicial repetido no final)")
 
     if tipo_final == "Point" and not dados.get("Tolerance"):
         if config.tolerancia is not None:
@@ -266,24 +306,20 @@ def montar_placemark(placemark, config, indice):
     if not dados.get("ColorCode") and config.cor:
         dados["ColorCode"] = str(config.cor)
 
-    # 5) Validações de formato e tamanho
     if len(nome) > MAX_NAME:
         erros.append(f"'Name' excede {MAX_NAME} caracteres ({len(nome)})")
     if len(descricao) > MAX_DESCRIPTION:
         avisos.append(f"Descrição excedia {MAX_DESCRIPTION} caracteres "
                        "(provável HTML bruto); substituída pelo nome da área")
-        descricao = nome_original
+        descricao = nome
     if len(dados.get("CategoryIntegrationCode", "")) > MAX_CATEGORY_CODE:
         erros.append(f"'CategoryIntegrationCode' excede {MAX_CATEGORY_CODE} caracteres")
     if len(dados.get("GroupIntegrationCode", "")) > MAX_GROUP_CODE:
         erros.append(f"'GroupIntegrationCode' excede {MAX_GROUP_CODE} caracteres")
 
-    if dados.get("Tolerance"):
-        try:
-            int(dados["Tolerance"])
-        except ValueError:
-            erros.append(f"'Tolerance' deve ser um número inteiro (metros): "
-                          f"'{dados['Tolerance']}'")
+    if dados.get("Tolerance") and not re.fullmatch(r"-?\d+", dados["Tolerance"].strip()):
+        erros.append(f"'Tolerance' deve ser um número inteiro (metros): "
+                      f"'{dados['Tolerance']}'")
 
     if dados.get("ColorCode"):
         col = dados["ColorCode"].strip()
@@ -294,31 +330,10 @@ def montar_placemark(placemark, config, indice):
             avisos.append(f"ColorCode '{dados['ColorCode']}' fora da tabela (1 a 13); campo removido")
             dados.pop("ColorCode")
 
-    # 6) Coordenadas
-    pontos = []
-    if tipo_original is not None:
-        try:
-            pontos = normalizar_coordenadas(coords_texto, tipo_final)
-        except ValueError as e:
-            erros.append(str(e))
-
-        if tipo_final == "Point" and pontos and len(pontos) != 1:
-            erros.append(f"Ponto deve ter exatamente 1 coordenada (encontradas {len(pontos)})")
-
-        if tipo_final == "Polygon" and pontos:
-            if pontos[0] != pontos[-1]:
-                pontos.append(pontos[0])
-                avisos.append("Anel de área fechado automaticamente (ponto inicial repetido no final)")
-            distintos = len(set(pontos))
-            if distintos < 3:
-                erros.append(f"Área deve ter no mínimo 3 pontos (encontrados {distintos})")
-
-        if tipo_final == "LineString" and pontos:
-            if len(pontos) < 2:
-                erros.append("Rota deve ter no mínimo 2 pontos")
-            elif pontos[0] == pontos[-1]:
-                avisos.append("Rota já forma um anel fechado (1º ponto = último); "
-                              "considere reprocessar como Área")
+    if tipo_final == "Polygon" and pontos:
+        distintos = len(set(pontos))
+        if distintos < 3:
+            erros.append(f"Área deve ter no mínimo 3 pontos (encontrados {distintos})")
 
     coords_final = "\n          ".join(pontos)
     if len(coords_final) > MAX_COORDINATES:
@@ -536,7 +551,7 @@ def exibir_relatorio(registros, saida, csv_saida=None, verbose=False):
         for av in r["avisos"]:
             if "GeoIntegrationCode truncado" in av:
                 geo_truncado_count += 1
-            elif "Anel de área fechado automaticamente" in av:
+            elif "polígono fechado automaticamente" in av:
                 anel_fechado_count += 1
             elif "Coordenadas excedem 8000 caracteres" in av:
                 coords_longas_count += 1
