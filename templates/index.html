@@ -26,10 +26,19 @@
       </button>
     </div>
 
+    <button type="button" class="sidebar-voltar hidden" id="sidebar-voltar" title="Voltar">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      <span class="sidebar-item-texto">Voltar</span>
+    </button>
+
     <div id="sidebar-raiz">
       <button type="button" class="sidebar-item" id="nav-dashboard" title="Dashboard">
         <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path><path d="M10 20v-6h4v6"></path></svg>
         <span class="sidebar-item-texto">Dashboard</span>
+      </button>
+      <button type="button" class="sidebar-item" id="nav-feed" title="Feed">
+        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        <span class="sidebar-item-texto">Feed</span>
       </button>
       <button type="button" class="sidebar-item" id="nav-implantacao" title="Controle de Implantação">
         <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.2"></rect><rect x="10" y="4" width="5" height="10" rx="1.2"></rect><rect x="17" y="4" width="4" height="13" rx="1.2"></rect></svg>
@@ -195,7 +204,6 @@
         </div>
 
         <div id="ferramentas-sub-importacao" class="ferramentas-subtela hidden">
-          <button type="button" class="btn-secondary ferramentas-voltar" data-ferramentas-voltar>← Voltar</button>
           <div class="conteudo-header">
             <div>
               <h2 class="conteudo-titulo">Área de Importação e Consulta</h2>
@@ -251,27 +259,123 @@
         </div>
 
         <div id="ferramentas-sub-comandos" class="ferramentas-subtela hidden">
-          <button type="button" class="btn-secondary ferramentas-voltar" data-ferramentas-voltar>← Voltar</button>
-          <div class="conteudo-header">
+          <div class="conteudo-header conteudo-header-com-acao">
             <div>
               <h2 class="conteudo-titulo">Envio de Comandos</h2>
-              <p class="conteudo-subtitulo">Envie comandos por SMS ou gerencie os modelos cadastrados</p>
+              <p class="conteudo-subtitulo">Gere e envie comandos SMS para rastreadores</p>
             </div>
+            <button type="button" class="btn-engrenagem-pagina" id="btn-abrir-comandos-modelos" title="Gerenciar modelos de comando" data-icone="engrenagem"></button>
           </div>
-          <div class="area-cards">
-            <button type="button" class="area-card" id="btn-abrir-envio-comando">
-              <h3 class="area-card-titulo">Envio de comando (SMS)</h3>
-              <p class="area-card-desc">Gera e envia um comando SMS pra um rastreador específico.</p>
-            </button>
-            <button type="button" class="area-card" id="btn-abrir-comandos-modelos">
-              <h3 class="area-card-titulo">Gerenciar modelos de comando</h3>
-              <p class="area-card-desc">Cadastra, edita e organiza os modelos de comando por tipo de rastreador.</p>
-            </button>
+          <div class="comando-pagina">
+            <form id="form-comando-auth" class="comando-auth-form">
+              <span class="comando-auth-titulo">Autenticação</span>
+              <label class="comando-auth-campo">Login:
+                <input type="text" id="comando-usuario">
+              </label>
+              <label class="comando-auth-campo">Senha:
+                <input type="password" id="comando-senha">
+              </label>
+              <button type="submit" class="btn-primary">Autenticar</button>
+              <span id="comando-saldo" class="status-pill status-off">Saldo: -</span>
+              <label class="comando-auth-campo comando-numero-campo">N° linha:
+                <input type="text" id="comando-numero" placeholder="DDI+DDD+número">
+              </label>
+            </form>
+
+            <div class="comando-colunas">
+              <div class="comando-coluna">
+                <div class="comando-secao">
+                  <h4>Comando gerado</h4>
+                  <div class="comando-grid">
+                    <label class="campo-migracao">
+                      <span>Modelo</span>
+                      <select id="comando-modelo"></select>
+                    </label>
+                    <label class="campo-migracao">
+                      <span>Comando</span>
+                      <select id="comando-tipo"></select>
+                    </label>
+                    <label class="campo-migracao">
+                      <span>Protocolo</span>
+                      <select id="comando-protocolo">
+                        <option value="TCP">TCP</option>
+                        <option value="UDP">UDP</option>
+                      </select>
+                    </label>
+                    <label class="campo-migracao">
+                      <span>Operadora</span>
+                      <select id="comando-operadora">
+                        <option value="Vivo">Vivo</option>
+                        <option value="Outras">Outras</option>
+                      </select>
+                    </label>
+                    <label class="campo-migracao">
+                      <span>ID/ESN</span>
+                      <input type="text" id="comando-id">
+                    </label>
+                    <label class="campo-migracao">
+                      <span>APN</span>
+                      <input type="text" id="comando-apn">
+                    </label>
+                    <label class="campo-migracao">
+                      <span>L/S APN</span>
+                      <input type="text" id="comando-loginapn">
+                    </label>
+                    <label class="campo-migracao">
+                      <span>Porta</span>
+                      <input type="text" id="comando-porta">
+                    </label>
+                  </div>
+                  <div class="comando-acoes-topo">
+                    <button type="button" id="btn-comando-gerar" class="btn-secondary">Gerar</button>
+                    <button type="button" id="btn-comando-limpar" class="btn-secondary">Limpar</button>
+                    <button type="button" id="btn-comando-copiar" class="btn-secondary">Copiar</button>
+                  </div>
+                  <div id="comando-preview" class="comando-preview">Escolha o modelo, um comando e clique em Gerar</div>
+                  <div class="comando-envio-linha">
+                    <button type="button" id="btn-comando-enviar-gerado" class="btn-primary">Enviar</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="comando-coluna">
+                <div class="comando-secao">
+                  <h4>Comando livre</h4>
+                  <div class="comando-envio-linha">
+                    <input type="text" id="comando-texto-livre" placeholder="Texto do comando">
+                    <button type="button" id="btn-comando-enviar-livre" class="btn-primary">Enviar</button>
+                  </div>
+                </div>
+
+                <div class="comando-secao">
+                  <h4>Envio em massa</h4>
+                  <p class="placeholder comando-massa-dica">Planilha: A) Comando, B) Telefone, C) Campanha.</p>
+                  <div class="comando-envio-linha comando-envio-coluna">
+                    <div class="comando-massa-arquivo-linha">
+                      <label for="comando-input-arquivo" class="file-label">Escolher Planilha</label>
+                      <input type="file" id="comando-input-arquivo" accept=".xlsx,.xls">
+                      <input type="number" id="comando-intervalo" min="0" value="5" class="comando-intervalo-input">
+                    </div>
+                    <span id="comando-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
+                    <button type="button" id="btn-comando-enviar-massa" class="btn-primary" disabled>Enviar</button>
+                  </div>
+                  <div id="comando-massa-progresso" class="progresso-container hidden">
+                    <div class="progresso-bar-bg"><div id="comando-massa-bar" class="progresso-bar"></div></div>
+                    <div class="progresso-info">
+                      <span id="comando-massa-status">Iniciando...</span>
+                      <span id="comando-massa-pct">0%</span>
+                    </div>
+                  </div>
+                  <div id="comando-massa-log" class="comando-massa-log"></div>
+                </div>
+
+                <div id="comando-resposta" class="comando-resposta"></div>
+              </div>
+            </div>
           </div>
         </div>
 
         <div id="ferramentas-sub-sync-planilha" class="ferramentas-subtela hidden">
-          <button type="button" class="btn-secondary ferramentas-voltar" data-ferramentas-voltar>← Voltar</button>
           <div class="conteudo-header">
             <div>
               <h2 class="conteudo-titulo">Sincronizar Planilha</h2>
@@ -286,6 +390,81 @@
             <p id="sync-planilha-status" class="placeholder"></p>
           </div>
           <div id="sync-planilha-resultado"></div>
+        </div>
+
+        <div id="ferramentas-sub-conversor-kml" class="ferramentas-subtela hidden">
+          <div class="conteudo-header">
+            <div>
+              <h2 class="conteudo-titulo">Conversor KML → SSX</h2>
+              <p class="conteudo-subtitulo">Converte um arquivo KML de áreas ou rotas em planilha pronta para importar na SSX</p>
+            </div>
+          </div>
+          <div class="conversor-kml-layout">
+            <div class="passo">
+              <span class="passo-num">1</span>
+              <label for="conversor-input-arquivo" class="file-label">Carregar arquivo KML</label>
+              <input type="file" id="conversor-input-arquivo" accept=".kml">
+              <span id="conversor-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
+            </div>
+
+            <div class="passo">
+              <span class="passo-num">2</span>
+              <span>Configuração da importação</span>
+            </div>
+            <div class="comando-grid">
+              <label class="campo-migracao">
+                <span>Categoria</span>
+                <input type="text" id="conversor-categoria" placeholder="Cód. de integração da categoria">
+              </label>
+              <label class="campo-migracao">
+                <span>Grupo</span>
+                <input type="text" id="conversor-grupo" placeholder="Cód. de integração do grupo">
+              </label>
+              <label class="campo-migracao">
+                <span>Tolerância (em metros, só p/ Pontos)</span>
+                <input type="number" id="conversor-tolerancia" min="0" placeholder="Ex.: 20">
+              </label>
+            </div>
+
+            <label class="conversor-toggle">
+              <input type="checkbox" id="conversor-forcar-areas" class="conversor-toggle-input">
+              <span class="conversor-toggle-trilho"><span class="conversor-toggle-bolinha"></span></span>
+              <span class="conversor-toggle-texto">
+                Forçar áreas
+                <small>Converte automaticamente as rotas em áreas, fechando o polígono com a primeira coordenada. Pontos permanecem como pontos.</small>
+              </span>
+            </label>
+
+            <div class="campo-migracao conversor-cor-campo">
+              <span>Cor da área/rota</span>
+              <div id="conversor-cores" class="conversor-cores"></div>
+            </div>
+
+            <button id="btn-conversor-converter" class="btn-primary" disabled>Converter arquivo</button>
+
+            <div id="conversor-resultado" class="conversor-resultado"></div>
+          </div>
+        </div>
+
+        <div id="ferramentas-sub-quebra-string" class="ferramentas-subtela hidden">
+          <div class="conteudo-header">
+            <div>
+              <h2 class="conteudo-titulo">Quebra-String</h2>
+              <p class="conteudo-subtitulo">Decodificador e analisador de pacotes de telemetria</p>
+            </div>
+          </div>
+          <div class="quebra-string-layout">
+            <label class="campo-migracao">
+              <span>String Bruta (RAW)</span>
+              <textarea id="quebra-string-input" rows="3" placeholder="Cole aqui o pacote enviado pelo rastreador."></textarea>
+            </label>
+            <div class="quebra-string-acoes">
+              <button id="btn-quebra-string" class="btn-primary" disabled>Quebrar string</button>
+              <button type="button" id="btn-quebra-string-limpar" class="btn-secondary" disabled>Limpar</button>
+            </div>
+            <div id="quebra-string-bytes" class="quebra-string-bytes"></div>
+            <div id="quebra-string-resultado" class="quebra-string-resultado"></div>
+          </div>
         </div>
       </section>
 
@@ -306,6 +485,30 @@
         <div id="ficha-cliente-corpo"></div>
       </section>
 
+      <section id="tela-feed" class="panel hidden">
+        <div class="conteudo-header">
+          <div>
+            <h2 class="conteudo-titulo">Feed</h2>
+            <p class="conteudo-subtitulo">Publicações da equipe sobre os clientes e a operação</p>
+          </div>
+          <button type="button" id="feed-atualizar" class="btn-secondary" title="Buscar publicações novas">Atualizar</button>
+        </div>
+        <div class="feed-coluna">
+          <form id="feed-composer" class="feed-composer">
+            <textarea id="feed-texto" rows="3" maxlength="2000" placeholder="O que está acontecendo?"></textarea>
+            <div class="feed-composer-acoes">
+              <select id="feed-cliente" title="Vincular a um cliente">
+                <option value="">Geral (sem cliente)</option>
+              </select>
+              <button type="submit" class="btn-primary" id="feed-publicar">Publicar</button>
+            </div>
+          </form>
+          <p id="feed-erro" class="feed-erro hidden"></p>
+          <div id="feed-lista" class="feed-lista"></div>
+          <button type="button" id="feed-mais" class="feed-mais hidden">Carregar mais</button>
+        </div>
+      </section>
+
       <section id="tela-minha-conta" class="panel hidden">
         <div class="minha-conta-cabecalho">
           <div class="minha-conta-identificacao">
@@ -318,7 +521,7 @@
               <p class="minha-conta-cargo" id="minha-conta-cargo"></p>
             </div>
           </div>
-          <button type="button" id="btn-minha-conta-editar" class="btn-engrenagem" title="Configurações da conta">⚙️</button>
+          <button type="button" id="btn-minha-conta-editar" class="btn-engrenagem-pagina" title="Configurações da conta" data-icone="engrenagem"></button>
         </div>
 
         <div class="minha-conta-hub">
@@ -777,6 +980,32 @@
     </div>
   </div>
 
+  <div id="overlay-email-boas-vindas" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>E-mail de boas-vindas</h3>
+        <button id="email-boas-vindas-modal-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-migracao">
+          <label class="campo-migracao">
+            <span>E-mail do cliente (login na plataforma)</span>
+            <input type="email" id="email-boas-vindas-email-cliente" placeholder="Preencha para substituir EMAIL DO CLIENTE no texto">
+          </label>
+          <label class="campo-migracao">
+            <span>Assunto</span>
+            <input type="text" id="email-boas-vindas-assunto">
+          </label>
+          <label class="campo-migracao">
+            <span>Mensagem</span>
+            <textarea id="email-boas-vindas-corpo" rows="14"></textarea>
+          </label>
+          <button type="button" id="btn-email-boas-vindas-copiar" class="btn-primary">Copiar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="overlay-implantados" class="overlay hidden">
     <div class="modal modal-implantados">
       <div class="modal-header">
@@ -1119,191 +1348,43 @@
     </div>
   </div>
 
-  <div id="overlay-comando" class="overlay hidden">
-    <div class="modal modal-grande">
+  <div id="overlay-conversor-edicao" class="overlay hidden">
+    <div class="modal conversor-edicao-modal">
       <div class="modal-header">
-        <h3>Envio de comando</h3>
-        <button id="comando-modal-fechar" class="btn-secondary">Fechar</button>
-      </div>
-      <div class="modal-body">
-
-        <form id="form-comando-auth" class="comando-auth-form">
-          <span class="comando-auth-titulo">Autenticação</span>
-          <label class="comando-auth-campo">Login:
-            <input type="text" id="comando-usuario">
-          </label>
-          <label class="comando-auth-campo">Senha:
-            <input type="password" id="comando-senha">
-          </label>
-          <button type="submit" class="btn-primary">Autenticar</button>
-          <span id="comando-saldo" class="status-pill status-off">Saldo: -</span>
-          <label class="comando-auth-campo comando-numero-campo">N° linha:
-            <input type="text" id="comando-numero" placeholder="DDI+DDD+número">
-          </label>
-        </form>
-
-        <div class="comando-colunas">
-          <div class="comando-coluna">
-            <div class="comando-secao">
-              <h4>Comando gerado</h4>
-              <div class="comando-grid">
-                <label class="campo-migracao">
-                  <span>Modelo</span>
-                  <select id="comando-modelo"></select>
-                </label>
-                <label class="campo-migracao">
-                  <span>Comando</span>
-                  <select id="comando-tipo"></select>
-                </label>
-                <label class="campo-migracao">
-                  <span>Protocolo</span>
-                  <select id="comando-protocolo">
-                    <option value="TCP">TCP</option>
-                    <option value="UDP">UDP</option>
-                  </select>
-                </label>
-                <label class="campo-migracao">
-                  <span>Operadora</span>
-                  <select id="comando-operadora">
-                    <option value="Vivo">Vivo</option>
-                    <option value="Outras">Outras</option>
-                  </select>
-                </label>
-                <label class="campo-migracao">
-                  <span>ID/ESN</span>
-                  <input type="text" id="comando-id">
-                </label>
-                <label class="campo-migracao">
-                  <span>APN</span>
-                  <input type="text" id="comando-apn">
-                </label>
-                <label class="campo-migracao">
-                  <span>L/S APN</span>
-                  <input type="text" id="comando-loginapn">
-                </label>
-                <label class="campo-migracao">
-                  <span>Porta</span>
-                  <input type="text" id="comando-porta">
-                </label>
-              </div>
-              <div class="comando-acoes-topo">
-                <button type="button" id="btn-comando-gerar" class="btn-secondary">Gerar</button>
-                <button type="button" id="btn-comando-limpar" class="btn-secondary">Limpar</button>
-                <button type="button" id="btn-comando-copiar" class="btn-secondary">Copiar</button>
-              </div>
-              <div id="comando-preview" class="comando-preview">Escolha o modelo, um comando e clique em Gerar</div>
-              <div class="comando-envio-linha">
-                <button type="button" id="btn-comando-enviar-gerado" class="btn-primary">Enviar</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="comando-coluna">
-            <div class="comando-secao">
-              <h4>Comando livre</h4>
-              <div class="comando-envio-linha">
-                <input type="text" id="comando-texto-livre" placeholder="Texto do comando">
-                <button type="button" id="btn-comando-enviar-livre" class="btn-primary">Enviar</button>
-              </div>
-            </div>
-
-            <div class="comando-secao">
-              <h4>Envio em massa</h4>
-              <p class="placeholder comando-massa-dica">Planilha: A) Comando, B) Telefone, C) Campanha.</p>
-              <div class="comando-envio-linha comando-envio-coluna">
-                <div class="comando-massa-arquivo-linha">
-                  <label for="comando-input-arquivo" class="file-label">Escolher Planilha</label>
-                  <input type="file" id="comando-input-arquivo" accept=".xlsx,.xls">
-                  <input type="number" id="comando-intervalo" min="0" value="5" class="comando-intervalo-input">
-                </div>
-                <span id="comando-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
-                <button type="button" id="btn-comando-enviar-massa" class="btn-primary" disabled>Enviar</button>
-              </div>
-              <div id="comando-massa-progresso" class="progresso-container hidden">
-                <div class="progresso-bar-bg"><div id="comando-massa-bar" class="progresso-bar"></div></div>
-                <div class="progresso-info">
-                  <span id="comando-massa-status">Iniciando...</span>
-                  <span id="comando-massa-pct">0%</span>
-                </div>
-              </div>
-              <div id="comando-massa-log" class="comando-massa-log"></div>
-            </div>
-
-            <div id="comando-resposta" class="comando-resposta"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="overlay-conversor" class="overlay hidden">
-    <div class="modal modal-grande">
-      <div class="modal-header">
-        <h3>Conversor KML → SSX</h3>
-        <button id="conversor-modal-fechar" class="btn-secondary">Fechar</button>
-      </div>
-      <div class="modal-body">
-        <div class="passo">
-          <span class="passo-num">1</span>
-          <label for="conversor-input-arquivo" class="file-label">Carregar KML</label>
-          <input type="file" id="conversor-input-arquivo" accept=".kml">
-          <span id="conversor-arquivo-nome" class="arquivo-nome">Nenhum arquivo selecionado</span>
-        </div>
-
-        <div class="passo">
-          <span class="passo-num">2</span>
-          <span>O que este KML representa? (valores padrão para campos ausentes)</span>
-        </div>
-        <div class="comando-grid">
-          <label class="campo-migracao">
-            <span>Tipo</span>
-            <select id="conversor-tipo">
-              <option value="areas">Áreas</option>
-              <option value="rotas">Rotas</option>
+        <h3 id="conversor-edicao-titulo">Edição manual</h3>
+        <div class="conversor-edicao-cabecalho-direita">
+          <label class="conversor-edicao-por-pagina">Por página:
+            <select id="conversor-edicao-tamanho">
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
             </select>
           </label>
-          <label class="campo-migracao">
-            <span>Categoria padrão</span>
-            <input type="text" id="conversor-categoria">
-          </label>
-          <label class="campo-migracao">
-            <span>Grupo padrão</span>
-            <input type="text" id="conversor-grupo">
-          </label>
-          <label class="campo-migracao">
-            <span>Tolerância padrão (m, só p/ Pontos)</span>
-            <input type="number" id="conversor-tolerancia" min="0">
-          </label>
+          <button type="button" id="conversor-edicao-fechar-x" class="btn-secondary" title="Fechar">✕</button>
         </div>
-
-        <div class="campo-migracao conversor-cor-campo">
-          <span>Cor padrão da área/rota (opcional — tabela do manual SSX)</span>
-          <div id="conversor-cores" class="conversor-cores"></div>
+      </div>
+      <div class="modal-body conversor-edicao-corpo">
+        <div class="conversor-edicao-tabela-wrap">
+          <table class="tabela-saida conversor-edicao-tabela">
+            <thead>
+              <tr>
+                <th>Nome</th><th>Descrição</th><th>Tipo</th><th>Coordenadas</th><th>Tolerância</th>
+                <th>Cod.integração</th><th>Cod.categoria</th><th>Cod.grupo</th><th>Cod.cor</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="conversor-edicao-tbody"></tbody>
+          </table>
         </div>
-
-        <button id="btn-conversor-converter" class="btn-primary" disabled>Converter arquivo</button>
-
-        <div id="conversor-resultado" class="conversor-resultado"></div>
-      </div>
-    </div>
-  </div>
-
-  <div id="overlay-quebra-string" class="overlay hidden">
-    <div class="modal modal-grande modal-quebra-string">
-      <div class="modal-header">
-        <h3>Quebra String</h3>
-        <button id="quebra-string-modal-fechar" class="btn-secondary">Fechar</button>
-      </div>
-      <div class="modal-body">
-        <label class="campo-migracao">
-          <span>String recebida</span>
-          <textarea id="quebra-string-input" rows="2" placeholder="Cole aqui a string bruta enviada pelo rastreador..."></textarea>
-        </label>
-        <div id="quebra-string-bytes" class="quebra-string-bytes"></div>
-
-        <button id="btn-quebra-string" class="btn-primary" disabled>Quebrar string</button>
-
-        <div id="quebra-string-resultado" class="conversor-resultado"></div>
+        <div id="conversor-edicao-paginacao" class="conversor-edicao-paginacao"></div>
+        <p id="conversor-edicao-feedback" class="conversor-edicao-feedback hidden"></p>
+        <div class="conversor-edicao-acoes">
+          <button type="button" id="btn-conversor-edicao-aplicar" class="btn-primary">Aplicar alterações</button>
+          <button type="button" id="btn-conversor-edicao-reverter" class="btn-secondary">Reverter para original</button>
+          <button type="button" id="btn-conversor-edicao-fechar" class="btn-secondary conversor-edicao-btn-fechar">Fechar</button>
+        </div>
       </div>
     </div>
   </div>

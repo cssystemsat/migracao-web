@@ -11,6 +11,7 @@ import re
 import time
 import unicodedata
 from functools import lru_cache
+from itertools import zip_longest
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -282,6 +283,107 @@ def ler_resumo_modelos_planilha_migracao(link_planilha: str) -> list:
             continue
         resumo.append({campo: _valor_coluna(linha, mapa, campo) for campo in _ALIASES_RESUMO_MODELOS.values()})
     return resumo
+
+
+_CAMPOS_INFOS_MIGRACAO = {
+    "plataforma de origem": "plataforma_origem",
+    "motivo da saida": "motivo_saida",
+    "link plataforma": "link_plataforma",
+    "regras trabalhadas": "regras_trabalhadas",
+}
+
+_FLAGS_INFOS_MIGRACAO = {
+    "pode ser comodato?": "pode_ser_comodato",
+    "vai migrar tudo?": "vai_migrar_tudo",
+    "inicio imediato?": "inicio_imediato",
+}
+
+
+def _proximo_valor_preenchido(linha, indice_rotulo):
+    for valor in linha[indice_rotulo + 1:]:
+        if str(valor).strip():
+            return str(valor).strip()
+    return ""
+
+
+def ler_infos_migracao(link_planilha: str) -> dict:
+    """Lê os campos da migração na aba "Infos gerais" achando cada rótulo pelo
+    texto (não por endereço de célula — o layout muda de cliente pra cliente).
+    O valor é o primeiro preenchido à direita do rótulo, na mesma linha.
+    Login e Senha da plataforma são ignorados: o rótulo não está na lista e o
+    valor ao lado nunca é devolvido. Somente leitura.
+    """
+    sheet_id = _extrair_id_planilha(link_planilha)
+    resp = _servico_sheets().spreadsheets().values().get(
+        spreadsheetId=sheet_id, range="'Infos gerais'!A1:Z60", valueRenderOption="FORMATTED_VALUE"
+    ).execute()
+    linhas = resp.get("values", [])
+
+    infos = {campo: "" for campo in _CAMPOS_INFOS_MIGRACAO.values()}
+    infos.update({campo: False for campo in _FLAGS_INFOS_MIGRACAO.values()})
+    for linha in linhas:
+        for indice, celula in enumerate(linha):
+            rotulo = _normalizar_cabecalho(celula)
+            if rotulo in _CAMPOS_INFOS_MIGRACAO:
+                infos[_CAMPOS_INFOS_MIGRACAO[rotulo]] = _proximo_valor_preenchido(linha, indice)
+            elif rotulo in _FLAGS_INFOS_MIGRACAO:
+                valor = _proximo_valor_preenchido(linha, indice)
+                infos[_FLAGS_INFOS_MIGRACAO[rotulo]] = valor.upper() == "TRUE"
+    return infos
+
+
+def _letra_coluna(indice):
+    letras = ""
+    numero = indice + 1
+    while numero:
+        numero, resto = divmod(numero - 1, 26)
+        letras = chr(65 + resto) + letras
+    return letras
+
+
+def calcular_progresso_migracao(link_planilha: str):
+    """% de linhas com status "Comunicou" na aba "Migração", sobre o total de
+    linhas que têm identificador (Veículo, ou id do equipamento se o veículo
+    ainda não tiver placa). Lê pelo nome do cabeçalho, igual ao resto deste
+    módulo. Devolve None se a aba não tiver coluna de status ou identificador.
+    """
+    sheet_id = _extrair_id_planilha(link_planilha)
+    servico = _servico_sheets()
+    cabecalho = servico.spreadsheets().values().get(
+        spreadsheetId=sheet_id, range="'Migração'!1:1"
+    ).execute().get("values", [[]])[0]
+    mapa = {}
+    for indice, titulo in enumerate(cabecalho):
+        mapa.setdefault(_normalizar_cabecalho(titulo), indice)
+    indice_status = mapa.get("status")
+    indice_identificador = next(
+        (mapa[nome] for nome in ("veiculo", "placa atual", "id do equipamento", "id") if nome in mapa),
+        None,
+    )
+    if indice_status is None or indice_identificador is None:
+        return None
+
+    letra_identificador = _letra_coluna(indice_identificador)
+    letra_status = _letra_coluna(indice_status)
+    faixas = servico.spreadsheets().values().batchGet(
+        spreadsheetId=sheet_id,
+        ranges=[
+            f"'Migração'!{letra_identificador}:{letra_identificador}",
+            f"'Migração'!{letra_status}:{letra_status}",
+        ],
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute().get("valueRanges", [])
+    identificadores = [linha[0] if linha else "" for linha in faixas[0].get("values", [])]
+    status_valores = [linha[0] if linha else "" for linha in faixas[1].get("values", [])]
+
+    total = comunicou = 0
+    for identificador, status in zip_longest(identificadores[1:], status_valores[1:], fillvalue=""):
+        if not str(identificador).strip():
+            continue
+        total += 1
+        if _normalizar_cabecalho(status) == "comunicou":
+            comunicou += 1
+    return round(100 * comunicou / total) if total else 0
 
 
 if __name__ == "__main__":

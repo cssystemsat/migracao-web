@@ -9,6 +9,7 @@ import time
 import unicodedata
 import uuid
 import zlib
+from datetime import datetime, timezone
 from functools import wraps
 
 import firebase_admin
@@ -16,6 +17,7 @@ import openpyxl
 import pandas as pd
 import requests
 from firebase_admin import credentials, firestore
+from google.cloud.firestore import ArrayRemove, ArrayUnion, Increment
 from google.cloud.firestore_v1.base_query import FieldFilter
 from googleapiclient.errors import HttpError
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
@@ -785,6 +787,11 @@ def tela_ferramentas():
 
 @app.route("/minha-conta")
 def tela_minha_conta():
+    return _renderizar_shell()
+
+
+@app.route("/feed")
+def tela_feed():
     return _renderizar_shell()
 
 
@@ -1706,8 +1713,39 @@ def _recalcular_ultima_acao_cliente(cliente_id):
         doc_ref.update({"ultima_acao": "", "ultima_acao_data": ""})
 
 
-@app.route("/api/clientes", methods=["GET"])
-def listar_clientes():
+# Cache curto de respostas de listagem. No Firestore cada documento lido é uma
+# leitura cobrada: a lista de clientes inteira era lida a cada abertura do
+# Dashboard (tela inicial), de Implantação e da busca. Com 60s de validade, as
+# aberturas seguidas saem da memória. Qualquer escrita em /api/ zera o cache do
+# processo (ver _cache_api_invalidar), então ninguém vê dado velho depois de
+# salvar. Com mais de um worker do gunicorn, cada um tem o seu — o TTL limita o
+# atraso entre eles.
+CACHE_API_TTL_SEGUNDOS = 60
+_CACHE_API = {}
+_CACHE_API_LOCK = threading.Lock()
+
+
+def _cache_api_obter(chave, carregar, ttl=CACHE_API_TTL_SEGUNDOS):
+    agora = time.time()
+    with _CACHE_API_LOCK:
+        entrada = _CACHE_API.get(chave)
+        if entrada and agora - entrada[0] < ttl:
+            return entrada[1]
+    valor = carregar()
+    with _CACHE_API_LOCK:
+        _CACHE_API[chave] = (time.time(), valor)
+    return valor
+
+
+@app.after_request
+def _cache_api_invalidar(resposta):
+    if request.method != "GET" and request.path.startswith("/api/"):
+        with _CACHE_API_LOCK:
+            _CACHE_API.clear()
+    return resposta
+
+
+def _carregar_clientes_todos():
     docs = list(db.collection(CLIENTES_COLLECTION).stream())
     lista = []
     for d in docs:
@@ -1733,7 +1771,19 @@ def listar_clientes():
         cliente.setdefault("tem_implantacao", True)
         lista.append(cliente)
     lista.sort(key=lambda c: c["ultima_acao_data"], reverse=True)
-    return jsonify(ok=True, clientes=lista)
+    return lista
+
+
+@app.route("/api/clientes", methods=["GET"])
+def listar_clientes():
+    return jsonify(ok=True, clientes=_cache_api_obter("clientes", _carregar_clientes_todos))
+
+
+# Checagem de IdCentral de UM cliente: 1 a 2 leituras. _idcentrals_existentes()
+# lê a coleção inteira, e isso rodava a cada cadastro/edição manual.
+def _idcentral_em_uso(idcentral, excluir_id=None):
+    docs = db.collection(CLIENTES_COLLECTION).where(filter=FieldFilter("idcentral", "==", idcentral)).limit(2).stream()
+    return any(d.id != excluir_id for d in docs)
 
 
 @app.route("/api/clientes", methods=["POST"])
@@ -1743,7 +1793,7 @@ def criar_cliente():
     if dados is None:
         return jsonify(ok=False, error="Informe o IdCentral do cliente."), 400
     with CLIENTES_IDCENTRAL_LOCK:
-        if dados["idcentral"] in _idcentrals_existentes():
+        if _idcentral_em_uso(dados["idcentral"]):
             return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
         doc_ref = db.collection(CLIENTES_COLLECTION).document()
         doc_ref.set(dados)
@@ -1787,7 +1837,7 @@ def editar_cliente(cliente_id):
             dados[campo] = doc_atual_dict[campo]
     mudancas = diff_campos(doc_atual_dict, dados, ROTULOS_CLIENTE)
     with CLIENTES_IDCENTRAL_LOCK:
-        if dados["idcentral"] in _idcentrals_existentes(excluir_id=cliente_id):
+        if _idcentral_em_uso(dados["idcentral"], excluir_id=cliente_id):
             return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
         doc_ref.set(dados)
     if mudancas:
@@ -3067,8 +3117,51 @@ def recalcular_contagens_migracao(cliente_migracao_id):
     return qtd_clientes, qtd_placas
 
 
+_PERCENTUAL_TTL_SEGUNDOS = 300
+_PERCENTUAL_EM_ATUALIZACAO = set()
+_PERCENTUAL_LOCK = threading.Lock()
+
+
+def _atualizar_percentual_migracao(cliente_id, migracao_id, link_planilha):
+    try:
+        valor = planilha_migracao.calcular_progresso_migracao(link_planilha)
+        if valor is not None:
+            db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id).update({
+                "percentual_migracao": valor,
+                "percentual_atualizado_em": time.time(),
+            })
+    except Exception:
+        app.logger.exception("Falha ao atualizar progresso da migração %s pela planilha", migracao_id)
+    finally:
+        with _PERCENTUAL_LOCK:
+            _PERCENTUAL_EM_ATUALIZACAO.discard(migracao_id)
+
+
+def _percentual_migracao_para_lista(cliente_id, migracao_id, link_planilha, guardado, atualizado_em):
+    """Devolve o % guardado na hora e, se estiver velho, dispara a atualização
+    pela planilha em segundo plano — o Kanban nunca espera a planilha."""
+    if not link_planilha:
+        return guardado
+    if atualizado_em and time.time() - atualizado_em < _PERCENTUAL_TTL_SEGUNDOS:
+        return guardado
+    with _PERCENTUAL_LOCK:
+        if migracao_id in _PERCENTUAL_EM_ATUALIZACAO:
+            return guardado
+        _PERCENTUAL_EM_ATUALIZACAO.add(migracao_id)
+    threading.Thread(
+        target=_atualizar_percentual_migracao,
+        args=(cliente_id, migracao_id, link_planilha),
+        daemon=True,
+    ).start()
+    return guardado
+
+
 @app.route("/api/migracao/clientes", methods=["GET"])
 def listar_clientes_migracao():
+    return jsonify(ok=True, clientes=_cache_api_obter("migracao_clientes", _carregar_clientes_migracao))
+
+
+def _carregar_clientes_migracao():
     """Junta as duas fontes de cliente de migração que coexistem hoje:
     "legado" (migracao_clientes, coleção solta, sem ligação real com um
     cliente de Implantação) e "unificado" (clientes/<id>/migracoes/<id> — a
@@ -3114,7 +3207,10 @@ def listar_clientes_migracao():
             "senha_acesso_origem": m.get("senha_acesso_origem", ""),
             "qtd_clientes": m.get("qtd_clientes", 0),
             "qtd_placas": m.get("qtd_placas", 0),
-            "percentual_migracao": m.get("percentual_migracao", 0),
+            "percentual_migracao": _percentual_migracao_para_lista(
+                cliente_id, m["id"], m.get("link_planilha", ""),
+                m.get("percentual_migracao", 0), m.get("percentual_atualizado_em"),
+            ),
             "data_inicio": m.get("data_inicio", ""),
             "data_fim": m.get("data_fim", ""),
         })
@@ -3133,7 +3229,20 @@ def listar_clientes_migracao():
         lista.append(c)
 
     lista.sort(key=lambda c: (c.get("nome") or "").lower())
-    return jsonify(ok=True, clientes=lista)
+    return lista
+
+
+def _telefones_profissionais_por_nome():
+    """Mapa nome de exibição -> telefone profissional, pra achar o WhatsApp do
+    CS e do Comercial (que na implantação são guardados só pelo nome)."""
+    mapa = {}
+    for d in db.collection(APP_USUARIOS_COLLECTION).stream():
+        dados = d.to_dict()
+        nome = dados.get("nome_responsavel") or dados.get("usuario") or ""
+        telefone = dados.get("telefone_profissional") or ""
+        if nome and telefone:
+            mapa.setdefault(nome, telefone)
+    return mapa
 
 
 @app.route("/api/ficha/<idcentral>")
@@ -3165,6 +3274,12 @@ def obter_ficha_cliente(idcentral):
     implantacao.setdefault("decisor_whatsapp", "")
     implantacao.setdefault("decisor_estado", "")
     implantacao.setdefault("decisor_cidade", "")
+
+    # WhatsApp do CS e do Comercial vem do cadastro de login de cada um (só o
+    # nome fica salvo no cliente). Calculado aqui, não gravado no documento.
+    telefones = _telefones_profissionais_por_nome()
+    implantacao["csm_whatsapp"] = telefones.get(implantacao.get("csm") or "", "")
+    implantacao["vendedor_whatsapp"] = telefones.get(implantacao.get("vendedor") or "", "")
 
     migracoes = [dict(d.to_dict(), id=d.id) for d in doc_cliente.reference.collection("migracoes").stream()]
     migracoes.sort(key=lambda m: m.get("data_inicio") or "", reverse=True)
@@ -3743,6 +3858,12 @@ def _contar_por_valor(query, campo, valores, padrao):
 
 @app.route("/api/dashboard")
 def dashboard_indicadores():
+    # Dashboard é a tela inicial: o resultado fica 5 min em cache (ver
+    # _cache_api_obter). Sem isso, cada abertura refazia as contagens.
+    return jsonify(**_cache_api_obter("dashboard", _carregar_dashboard, ttl=300))
+
+
+def _carregar_dashboard():
     # Tudo com contagem agregada: antes lia documento por documento (inclusive
     # TODOS os veículos de todas as migrações) a cada abertura do Dashboard,
     # que é a tela inicial — era a maior fonte de leitura do app.
@@ -3765,7 +3886,7 @@ def dashboard_indicadores():
         db.collection_group("migracoes"), "status", STATUS_MIGRACAO_VALIDOS, STATUS_MIGRACAO_PADRAO)
     migracoes_em_andamento = migracoes_por_status["em_andamento"]
 
-    return jsonify(
+    return dict(
         ok=True,
         total_clientes=total_clientes,
         total_veiculos=total_veiculos,
@@ -4654,7 +4775,7 @@ CONVERSOR_TAMANHO_PARTE = 1000  # abaixo do limite de importação do SSX, pra m
 # pro navegador renderizar (mesmo travamento que a tela de migração já evita).
 CONVERSOR_AVISOS_COMPACTAVEIS = (
     "GeoIntegrationCode truncado",
-    "Anel de área fechado automaticamente",
+    "polígono fechado automaticamente",
     "Coordenadas excedem",
 )
 
@@ -4725,7 +4846,7 @@ def conversor_converter():
             for av in r["avisos"]:
                 if "GeoIntegrationCode truncado" in av:
                     avisos_compactados["geo_truncado"] += 1
-                elif "Anel de área fechado automaticamente" in av:
+                elif "polígono fechado automaticamente" in av:
                     avisos_compactados["anel_fechado"] += 1
                 elif "Coordenadas excedem" in av:
                     avisos_compactados["coordenadas_longas"] += 1
@@ -4795,6 +4916,214 @@ def conversor_download(conv_id, formato, parte):
         mimetype=mimetype,
         headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
     )
+
+
+# --- FEED (publicações da equipe, estilo comunidade: curtidas e comentários) ---
+# Publicação pode ser geral ou vinculada a um cliente. Comentários ficam numa
+# coleção própria (filtrada por post_id), não num array dentro do post, pra um
+# post muito comentado não crescer o documento sem limite. Mesmo racional de
+# TAREFAS_COLLECTION: coleções top-level.
+FEED_POSTS_COLLECTION = "feed_posts"
+FEED_COMENTARIOS_COLLECTION = "feed_comentarios"
+FEED_PAGINA = 20
+FEED_PAGINA_MAX = 100
+FEED_TEXTO_MAX = 2000
+
+
+def _feed_agora():
+    return datetime.now(timezone.utc)
+
+
+def _feed_iso(valor):
+    # Firestore devolve datetime; o simulador offline devolve texto ISO.
+    if not valor:
+        return ""
+    return valor if isinstance(valor, str) else valor.isoformat()
+
+
+def _feed_pode_excluir(autor_id):
+    return session.get("app_usuario_id", "") == autor_id or session.get("app_usuario_perfil") == "adm"
+
+
+def _feed_serializar_post(doc):
+    dados = doc.to_dict() or {}
+    curtidas = dados.get("curtidas", [])
+    criado_em = dados.get("criado_em")
+    return {
+        "id": doc.id,
+        "texto": dados.get("texto", ""),
+        "autor_id": dados.get("autor_id", ""),
+        "autor_nome": dados.get("autor_nome", ""),
+        "cliente_id": dados.get("cliente_id", ""),
+        "cliente_nome": dados.get("cliente_nome", ""),
+        "criado_em": _feed_iso(criado_em),
+        "curtidas_total": len(curtidas),
+        "curtido_por_mim": session.get("app_usuario_id", "") in curtidas,
+        "comentarios_total": dados.get("comentarios_total", 0),
+        "pode_excluir": _feed_pode_excluir(dados.get("autor_id", "")),
+    }
+
+
+def _feed_serializar_comentario(doc):
+    dados = doc.to_dict() or {}
+    criado_em = dados.get("criado_em")
+    return {
+        "id": doc.id,
+        "post_id": dados.get("post_id", ""),
+        "texto": dados.get("texto", ""),
+        "autor_id": dados.get("autor_id", ""),
+        "autor_nome": dados.get("autor_nome", ""),
+        "criado_em": _feed_iso(criado_em),
+        "pode_excluir": _feed_pode_excluir(dados.get("autor_id", "")),
+    }
+
+
+def _feed_texto_valido(data):
+    texto = str(data.get("texto", "")).strip()
+    return texto if texto and len(texto) <= FEED_TEXTO_MAX else None
+
+
+@app.route("/api/feed", methods=["GET"])
+def listar_feed():
+    """Publicações mais recentes primeiro, paginadas pelo `criado_em` da última
+    (cursor `antes_de`). `limite` deixa o front recarregar tudo que já está na
+    tela de uma vez, sem perder as páginas já carregadas."""
+    try:
+        limite = min(max(int(request.args.get("limite", FEED_PAGINA)), 1), FEED_PAGINA_MAX)
+    except ValueError:
+        limite = FEED_PAGINA
+    consulta = db.collection(FEED_POSTS_COLLECTION)
+    antes_de = request.args.get("antes_de", "").strip()
+    if antes_de:
+        try:
+            cursor = datetime.fromisoformat(antes_de)
+        except ValueError:
+            return jsonify(ok=False, error="Cursor inválido."), 400
+        consulta = consulta.where(filter=FieldFilter("criado_em", "<", cursor))
+    docs = list(consulta.order_by("criado_em", direction="DESCENDING").limit(limite).stream())
+    return jsonify(ok=True, posts=[_feed_serializar_post(d) for d in docs])
+
+
+@app.route("/api/feed", methods=["POST"])
+@requer_operador
+def criar_post_feed():
+    data = request.get_json(force=True) or {}
+    texto = _feed_texto_valido(data)
+    if texto is None:
+        return jsonify(ok=False, error=f"Escreva a publicação (até {FEED_TEXTO_MAX} caracteres)."), 400
+
+    cliente_id = str(data.get("cliente_id", "")).strip()
+    cliente_nome = ""
+    if cliente_id:
+        cliente_doc = db.collection(CLIENTES_COLLECTION).document(cliente_id).get()
+        if not cliente_doc.exists:
+            return jsonify(ok=False, error="Cliente não encontrado."), 404
+        cliente_nome = (cliente_doc.to_dict() or {}).get("cliente", "")
+
+    doc_ref = db.collection(FEED_POSTS_COLLECTION).document()
+    doc_ref.set({
+        "texto": texto,
+        "autor_id": session.get("app_usuario_id", ""),
+        "autor_nome": session.get("app_usuario_nome", ""),
+        "cliente_id": cliente_id,
+        "cliente_nome": cliente_nome,
+        "criado_em": _feed_agora(),
+        "curtidas": [],
+        "comentarios_total": 0,
+    })
+    registrar_acao(
+        acao="criar", entidade_tipo="post", entidade_id=doc_ref.id,
+        entidade_nome=texto[:80], titulo="Publicação no feed",
+        cliente_id=cliente_id or None, cliente_nome=cliente_nome,
+    )
+    return jsonify(ok=True, post=_feed_serializar_post(doc_ref.get()))
+
+
+@app.route("/api/feed/<post_id>", methods=["DELETE"])
+@requer_operador
+def excluir_post_feed(post_id):
+    ref = db.collection(FEED_POSTS_COLLECTION).document(post_id)
+    doc = ref.get()
+    if not doc.exists:
+        return jsonify(ok=False, error="Publicação não encontrada."), 404
+    dados = doc.to_dict() or {}
+    if not _feed_pode_excluir(dados.get("autor_id", "")):
+        return jsonify(ok=False, error="Só quem publicou (ou um admin) pode excluir."), 403
+
+    # Comentários não têm como sobreviver sem o post — apagados junto.
+    for comentario in db.collection(FEED_COMENTARIOS_COLLECTION).where(filter=FieldFilter("post_id", "==", post_id)).stream():
+        comentario.reference.delete()
+    ref.delete()
+    registrar_acao(
+        acao="excluir", entidade_tipo="post", entidade_id=post_id,
+        entidade_nome=str(dados.get("texto", ""))[:80], titulo="Publicação excluída do feed",
+        cliente_id=dados.get("cliente_id") or None, cliente_nome=dados.get("cliente_nome", ""),
+    )
+    return jsonify(ok=True)
+
+
+@app.route("/api/feed/<post_id>/curtir", methods=["POST"])
+@requer_operador
+def curtir_post_feed(post_id):
+    ref = db.collection(FEED_POSTS_COLLECTION).document(post_id)
+    doc = ref.get()
+    if not doc.exists:
+        return jsonify(ok=False, error="Publicação não encontrada."), 404
+    usuario_id = session.get("app_usuario_id", "")
+    curtidas = (doc.to_dict() or {}).get("curtidas", [])
+    # ArrayUnion/ArrayRemove são atômicos no Firestore: dois cliques quase
+    # simultâneos de pessoas diferentes não se sobrescrevem.
+    if usuario_id in curtidas:
+        ref.update({"curtidas": ArrayRemove([usuario_id])})
+        return jsonify(ok=True, curtido_por_mim=False, curtidas_total=len(curtidas) - 1)
+    ref.update({"curtidas": ArrayUnion([usuario_id])})
+    return jsonify(ok=True, curtido_por_mim=True, curtidas_total=len(curtidas) + 1)
+
+
+@app.route("/api/feed/<post_id>/comentarios", methods=["GET"])
+def listar_comentarios_feed(post_id):
+    docs = db.collection(FEED_COMENTARIOS_COLLECTION).where(filter=FieldFilter("post_id", "==", post_id)).stream()
+    comentarios = [_feed_serializar_comentario(d) for d in docs]
+    comentarios.sort(key=lambda c: c["criado_em"])
+    return jsonify(ok=True, comentarios=comentarios)
+
+
+@app.route("/api/feed/<post_id>/comentarios", methods=["POST"])
+@requer_operador
+def criar_comentario_feed(post_id):
+    data = request.get_json(force=True) or {}
+    texto = _feed_texto_valido(data)
+    if texto is None:
+        return jsonify(ok=False, error=f"Escreva o comentário (até {FEED_TEXTO_MAX} caracteres)."), 400
+    ref_post = db.collection(FEED_POSTS_COLLECTION).document(post_id)
+    if not ref_post.get().exists:
+        return jsonify(ok=False, error="Publicação não encontrada."), 404
+
+    doc_ref = db.collection(FEED_COMENTARIOS_COLLECTION).document()
+    doc_ref.set({
+        "post_id": post_id,
+        "texto": texto,
+        "autor_id": session.get("app_usuario_id", ""),
+        "autor_nome": session.get("app_usuario_nome", ""),
+        "criado_em": _feed_agora(),
+    })
+    ref_post.update({"comentarios_total": Increment(1)})
+    return jsonify(ok=True, comentario=_feed_serializar_comentario(doc_ref.get()))
+
+
+@app.route("/api/feed/comentarios/<comentario_id>", methods=["DELETE"])
+@requer_operador
+def excluir_comentario_feed(comentario_id):
+    ref = db.collection(FEED_COMENTARIOS_COLLECTION).document(comentario_id)
+    doc = ref.get()
+    if not doc.exists:
+        return jsonify(ok=False, error="Comentário não encontrado."), 404
+    dados = doc.to_dict() or {}
+    if not _feed_pode_excluir(dados.get("autor_id", "")):
+        return jsonify(ok=False, error="Só quem comentou (ou um admin) pode excluir."), 403
+    ref.delete()
+    db.collection(FEED_POSTS_COLLECTION).document(dados.get("post_id", "")).update({"comentarios_total": Increment(-1)})
+    return jsonify(ok=True)
 
 
 if __name__ == "__main__":

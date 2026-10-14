@@ -19,6 +19,7 @@ verdade) — só visual/fluxo.
 import atexit
 import json
 import os
+from datetime import datetime
 import sys
 import threading
 import time
@@ -30,6 +31,7 @@ os.environ.setdefault("FIREBASE_CREDENTIALS_JSON", '{"type": "service_account"}'
 
 import firebase_admin
 from firebase_admin import credentials as fb_credentials, firestore as fb_firestore
+from google.cloud.firestore import ArrayRemove, ArrayUnion, Increment
 
 MODO_UM_CLIENTE = "--um-cliente" in sys.argv
 ARQUIVO_DADOS = os.path.join(
@@ -95,9 +97,48 @@ def _match(data, filtros):
         atual = data.get(f.field_path)
         if f.op_string == "==" and atual != f.value:
             return False
+        if f.op_string == "<" and not (atual is not None and _chave_ordem(atual) < _chave_ordem(f.value)):
+            return False
         if f.op_string == "array_contains" and f.value not in (atual or []):
             return False
     return True
+
+
+def _chave_ordem(valor):
+    """Datas viram ISO (ver _normalizar_valor). Aqui o lado da consulta pode
+    chegar como datetime e o gravado como texto — os dois passam pelo mesmo
+    isoformat() antes de comparar, senão "T" e " " quebram a ordem."""
+    if isinstance(valor, datetime):
+        return valor.isoformat()
+    if isinstance(valor, str):
+        try:
+            return datetime.fromisoformat(valor).isoformat()
+        except ValueError:
+            return valor
+    return str(valor)
+
+
+def _normalizar_valor(valor):
+    """Datetime vira texto ISO ao gravar — é o que o JSON local guardaria de
+    qualquer forma (default=str), mas aqui já fica certo na memória."""
+    return valor.isoformat() if hasattr(valor, "isoformat") else valor
+
+
+def _aplicar_dados(atual, data):
+    """Mescla `data` em `atual` entendendo os sentinelas do Firestore que o
+    app usa: ArrayUnion, ArrayRemove e Increment."""
+    for chave, valor in data.items():
+        if isinstance(valor, ArrayUnion):
+            lista = list(atual.get(chave) or [])
+            lista.extend(v for v in valor._values if v not in lista)
+            atual[chave] = lista
+        elif isinstance(valor, ArrayRemove):
+            atual[chave] = [v for v in (atual.get(chave) or []) if v not in valor._values]
+        elif isinstance(valor, Increment):
+            atual[chave] = (atual.get(chave) or 0) + valor._value
+        else:
+            atual[chave] = _normalizar_valor(valor)
+    return atual
 
 
 class FakeDocumentRef:
@@ -111,16 +152,14 @@ class FakeDocumentRef:
 
     def set(self, data, merge=False):
         if merge and self.path in self._store:
-            atual = dict(self._store[self.path])
-            atual.update(data)
+            atual = _aplicar_dados(dict(self._store[self.path]), data)
             self._store[self.path] = atual
         else:
-            self._store[self.path] = dict(data)
+            self._store[self.path] = _aplicar_dados({}, data)
         self._store.marcar_alterado()
 
     def update(self, data):
-        atual = dict(self._store.get(self.path, {}))
-        atual.update(data)
+        atual = _aplicar_dados(dict(self._store.get(self.path, {})), data)
         self._store[self.path] = atual
         self._store.marcar_alterado()
 
