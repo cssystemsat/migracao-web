@@ -3,10 +3,12 @@
 """
 conversorkml.py
 ---------------
-Converte um arquivo .kml qualquer (ex.: exportado do Google My Maps, Google Earth etc.)
+Converte um arquivo .kml ou .kmz qualquer (ex.: exportado do Google My Maps, Google Earth etc.)
 para o padrão de importação SSX descrito no manual.
 
 O que o script faz:
+  0. Se a entrada for um .kmz (zip com um .kml dentro, geralmente "doc.kml"), extrai
+     o .kml automaticamente antes de processar;
   1. Lê todos os <Placemark> do arquivo de entrada (Polygon, LineString ou Point);
   2. Coleta os dados do <ExtendedData> existente e/ou do bloco {{...}} na descrição
      (padrão: {{Nome|Cód.categoria|Cód.grupo|Tolerância|Cód.área|Cód.cor}});
@@ -34,10 +36,12 @@ Mesmas regras do conversor da página (static/script.js), que é o usado pela fe
 
 import argparse
 import html
+import io
 import re
 import sys
 import unicodedata
 import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import dataclass
 from typing import Optional
 from xml.sax.saxutils import escape
@@ -354,6 +358,25 @@ def montar_placemark(placemark, config, indice):
     }
 
 
+def extrair_texto_kml(conteudo_bytes):
+    """
+    Recebe os bytes crus de um arquivo .kml ou .kmz e devolve o texto do KML.
+    KMZ é apenas um .zip contendo um .kml (geralmente "doc.kml") junto com
+    ícones/imagens; extrai o primeiro .kml encontrado dentro do pacote.
+    """
+    if conteudo_bytes[:2] == b"PK":
+        with zipfile.ZipFile(io.BytesIO(conteudo_bytes)) as zf:
+            nomes_kml = [n for n in zf.namelist() if n.lower().endswith(".kml")]
+            if not nomes_kml:
+                raise ValueError("O arquivo .kmz não contém nenhum .kml dentro do pacote.")
+            nome_kml = next(
+                (n for n in nomes_kml if n.lower().rsplit("/", 1)[-1] == "doc.kml"),
+                nomes_kml[0],
+            )
+            return zf.read(nome_kml).decode("utf-8")
+    return conteudo_bytes.decode("utf-8")
+
+
 def processar(kml_text, config):
     """
     Parseia o KML (a partir de uma string) e devolve a lista de registros
@@ -595,9 +618,15 @@ def exibir_relatorio(registros, saida, csv_saida=None, verbose=False):
 
 def converter(entrada, saida, args, csv_saida=None):
     try:
-        with open(entrada, "r", encoding="utf-8") as f:
-            kml_text = f.read()
+        with open(entrada, "rb") as f:
+            conteudo = f.read()
     except OSError as e:
+        print(f"{Cores.VERMELHO}ERRO: não foi possível ler '{entrada}': {e}{Cores.RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        kml_text = extrair_texto_kml(conteudo)
+    except (zipfile.BadZipFile, UnicodeDecodeError, ValueError) as e:
         print(f"{Cores.VERMELHO}ERRO: não foi possível ler '{entrada}': {e}{Cores.RESET}", file=sys.stderr)
         sys.exit(1)
 
@@ -636,7 +665,7 @@ def main():
         description="Converte um arquivo .kml para o padrão de importação SSX.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("entrada", help="Arquivo .kml de origem")
+    parser.add_argument("entrada", help="Arquivo .kml ou .kmz de origem")
     parser.add_argument("saida", help="Arquivo .kml de saída (padrão SSX)")
     parser.add_argument("--categoria", default=None,
                         help="CategoryIntegrationCode padrão (pode ser lista: cod1,cod2)")

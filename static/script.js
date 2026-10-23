@@ -4,7 +4,7 @@ const el = (id) => document.getElementById(id);
 // com data-icone="engrenagem" e recebem o ícone no carregamento; os criados via JS usam
 // aplicarIconeEngrenagem. O title do botão vira também o aria-label.
 const ICONE_ENGRENAGEM =
-  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
 
 function aplicarIconeEngrenagem(btn) {
   btn.innerHTML = ICONE_ENGRENAGEM;
@@ -41,6 +41,9 @@ const overlay = el("overlay");
 const modalTitulo = el("modal-titulo");
 const inputArquivo = el("input-arquivo");
 const arquivoNome = el("arquivo-nome");
+const importPassoUpload = el("import-passo-upload");
+const importPassoOrigemConvcli = el("import-passo-origem-convcli");
+const importOrigemConvcliTexto = el("import-origem-convcli-texto");
 const mapaCampos = el("mapa-campos");
 const btnIniciarImport = el("btn-iniciar-import");
 const progressoContainer = el("progresso-container");
@@ -68,6 +71,10 @@ const estado = {
   fileId: null,
   colunas: [],
   campos: [],
+  // Só setado por abrirModalImportDeConvcli (mapeamento de significado
+  // conhecido, ver CONVERSOR_CLIENTES_PARA_API em app.py) — null = usa o
+  // auto-mapeamento por texto normal de renderMapaCampos().
+  mapeamentoSugerido: null,
   credencialAtualNome: null,
   conversorArquivo: null,
   conversorCor: null,
@@ -109,6 +116,28 @@ function mostrarErro(msg) {
   p.style.color = "#b91c1c";
   p.textContent = "Erro: " + msg;
   setSaida(p);
+}
+
+// O endpoint /Login da SSX só devolve AccessToken + validade (confirmado no
+// Swagger) — nenhum "nome da base". app.py decodifica o AccessToken (JWT) e
+// devolve os claims crus em data.claims; aqui tenta achar, por um nome de
+// chave plausível, algo que pareça o nome da base/central — sem garantia
+// nenhuma de que a chave certa está nessa lista (ninguém confirmou ainda
+// qual é), por isso cada tela também guarda os claims crus num title/tooltip
+// pra conferir à mão caso nenhum candidato bata.
+function extrairNomeBaseDeClaims(claims) {
+  if (!claims || typeof claims !== "object") return "";
+  const candidatos = [
+    "CentralName", "central_name", "CentralNome", "NomeBase", "nome_base",
+    "BaseName", "base_name", "CompanyName", "company_name", "Empresa", "empresa",
+    "Central", "Base", "Account", "account_name", "Tenant", "tenant",
+    "Organization", "organization", "Nome", "name",
+  ];
+  for (const chave of candidatos) {
+    const valor = claims[chave];
+    if (typeof valor === "string" && valor.trim()) return valor.trim();
+  }
+  return "";
 }
 
 // null/"" sempre vão pro fim, independente da direção; números comparam como número
@@ -365,6 +394,13 @@ function renderListaCredenciais() {
 
     const tdNome = document.createElement("td");
     tdNome.textContent = c.nome;
+    if (c.origem === "cliente") {
+      const tagCliente = document.createElement("span");
+      tagCliente.className = "tag-momento";
+      tagCliente.title = "Cadastrada na configuração do cliente (Ficha) — edite por lá.";
+      tagCliente.textContent = " cliente";
+      tdNome.appendChild(tagCliente);
+    }
 
     const tdLogin = document.createElement("td");
     tdLogin.textContent = c.login;
@@ -393,19 +429,25 @@ function renderListaCredenciais() {
       await autenticarComCampos(c.nome);
     });
 
-    const btnEditar = document.createElement("button");
-    btnEditar.textContent = "Editar";
-    btnEditar.className = "btn-secondary";
-    btnEditar.addEventListener("click", () => abrirEdicaoCredencial(c));
-
-    const btnExcluir = document.createElement("button");
-    btnExcluir.textContent = "Excluir";
-    btnExcluir.className = "btn-secondary";
-    btnExcluir.addEventListener("click", () => excluirCredencial(c.id));
-
     tdAcoes.appendChild(btnUsar);
-    tdAcoes.appendChild(btnEditar);
-    tdAcoes.appendChild(btnExcluir);
+
+    // Credencial "de cliente" (vinda da Ficha) só se edita/exclui por lá —
+    // esta lista é read-only pra essas, pra nunca dessincronizar os dois
+    // cadastros.
+    if (c.origem !== "cliente") {
+      const btnEditar = document.createElement("button");
+      btnEditar.textContent = "Editar";
+      btnEditar.className = "btn-secondary";
+      btnEditar.addEventListener("click", () => abrirEdicaoCredencial(c));
+
+      const btnExcluir = document.createElement("button");
+      btnExcluir.textContent = "Excluir";
+      btnExcluir.className = "btn-secondary";
+      btnExcluir.addEventListener("click", () => excluirCredencial(c.id));
+
+      tdAcoes.appendChild(btnEditar);
+      tdAcoes.appendChild(btnExcluir);
+    }
 
     tr.appendChild(tdNome);
     tr.appendChild(tdLogin);
@@ -954,7 +996,7 @@ function criarIconeFlag(flag) {
   const span = document.createElement("span");
   span.className = "kanban-card-flag-icone";
   span.title = flag;
-  span.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="${cor}"><path d="M5 3v18h2v-7h11l-3-4 3-4H7V3z"/></svg>`;
+  span.innerHTML = `<svg viewBox="0 0 24 24" width="11" height="11" fill="${cor}"><path d="M5 3v18h2v-7h11l-3-4 3-4H7V3z"/></svg>`;
   return span;
 }
 
@@ -1028,9 +1070,9 @@ function clienteParado(c) {
 }
 
 const ICONES_CARD_MARCOS = {
-  calendario: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
-  caminhao: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h15v13H1zM16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
-  pessoa: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  calendario: '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+  caminhao: '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h15v13H1zM16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
+  pessoa: '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
 };
 
 function linhaCardMarcos(icone, html) {
@@ -1063,7 +1105,7 @@ function montarCardMarcos(c) {
   if (corFlag) {
     const flag = document.createElement("span");
     flag.className = `kmarcos-card-flag kmarcos-flag-${c.flag.split(" ")[0].toLowerCase()}`;
-    flag.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M5 3v18h2v-7h11l-3-4 3-4H7V3z"/></svg>';
+    flag.innerHTML = '<svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><path d="M5 3v18h2v-7h11l-3-4 3-4H7V3z"/></svg>';
     flag.appendChild(document.createTextNode(c.flag));
     linhaStatus.appendChild(flag);
   }
@@ -1180,7 +1222,7 @@ function construirBarraStatsMarcos(clientes, aoMudarFiltro) {
     b.className = `kmarcos-stat ${classe}${ativo ? " ativo" : ""}`;
     const r = document.createElement("span");
     r.className = "kmarcos-stat-rotulo";
-    if (iconeFlag) r.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M5 3v18h2v-7h11l-3-4 3-4H7V3z"/></svg>';
+    if (iconeFlag) r.innerHTML = '<svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><path d="M5 3v18h2v-7h11l-3-4 3-4H7V3z"/></svg>';
     r.appendChild(document.createTextNode(rotulo));
     const v = document.createElement("span");
     v.className = "kmarcos-stat-valor";
@@ -1319,7 +1361,7 @@ function formatarDataBRSimples(iso) {
 
 // Largura da coluna Objetivo, ajustável arrastando a alça no cabeçalho —
 // guardada no navegador (localStorage) pra continuar do jeito que a pessoa deixou.
-let implantacaoLarguraObjetivo = Number(localStorage.getItem("implantacaoLarguraObjetivo")) || 260;
+let implantacaoLarguraObjetivo = Number(localStorage.getItem("implantacaoLarguraObjetivo")) || 208;
 
 function iniciarResizeObjetivo(e, th, tds) {
   e.preventDefault();
@@ -1946,7 +1988,6 @@ function mostrarFormularioCliente() {
 // cá a cada render da aba), então os listeners ligados no carregamento valem.
 function construirFichaMarcos(implantacao, migracao) {
   const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
   if (!implantacao) {
     const p = document.createElement("p");
     p.className = "placeholder";
@@ -2501,6 +2542,44 @@ btnImportarClientesConfirmar.addEventListener("click", async () => {
 // ordenados cronologicamente. A ordem aqui precisa bater com IMPLANTACAO_SETORES no app.py.
 const IMPLANTACAO_SETORES = ["Implantação", "Migração", "Suporte", "Comercial"];
 
+// Tag opcional do acontecimento (mesmas 6 + cores do "Acompanhamento de
+// cliente" do kanban_dashboard_dev — replicado aqui pra manter o mesmo
+// formato visual na Timeline da Ficha). A ordem aqui precisa bater com
+// EVENTO_TAGS no app.py.
+const EVENTO_TAGS = [
+  ["Operação", "#2563EB"],
+  ["Migração", "#16A34A"],
+  ["Fricção", "#EAB308"],
+  ["Sugestão de desenvolvimento", "#D1D5DB"],
+  ["Travamento", "#FCA5A5"],
+  ["Problema", "#991B1B"],
+];
+const EVENTO_TAG_COR = Object.fromEntries(EVENTO_TAGS);
+const EVENTO_TAG_COR_PADRAO = "#94A3B8"; // acontecimento sem tag
+
+// Cor de apoio pro acontecimento sem Tag (chat da aba Detalhado) — mesma
+// paleta por setor já usada em .timeline-setor[data-setor=...], só que como
+// valor de JS pra virar border-left da mensagem.
+const IMPLANTACAO_SETOR_COR = {
+  "Implantação": "var(--amarelo-escuro)",
+  "Migração": "var(--violeta)",
+  "Suporte": "var(--turquesa)",
+  "Comercial": "var(--azul)",
+};
+
+// Versão "pastel" das Tags (fundo claro + texto na própria cor) só pro chip
+// dentro da mensagem do chat — a cor sólida das Tags (EVENTO_TAG_COR) continua
+// cheia na Timeline (bolinhas/legenda), mas ali vira peso demais lado a lado
+// com o texto da mensagem.
+const EVENTO_TAG_CHIP = {
+  "Operação": { bg: "#DBEAFE", fg: "#1D4ED8" },
+  "Migração": { bg: "#DCFCE7", fg: "#15803D" },
+  "Fricção": { bg: "#FEF9C3", fg: "#A16207" },
+  "Sugestão de desenvolvimento": { bg: "#F3F4F6", fg: "#4B5563" },
+  "Travamento": { bg: "#FEE2E2", fg: "#B91C1C" },
+  "Problema": { bg: "#FEE2E2", fg: "#7F1D1D" },
+};
+
 const overlayImplantacaoTimeline = el("overlay-implantacao-timeline");
 const implantacaoTimelineTitulo = el("implantacao-timeline-titulo");
 const implantacaoTimelineSetores = el("implantacao-timeline-setores");
@@ -2509,6 +2588,7 @@ const overlayImplantacaoEvento = el("overlay-implantacao-evento");
 const formImplantacaoEvento = el("form-implantacao-evento");
 const implantacaoEventoModalTitulo = el("implantacao-evento-modal-titulo");
 const inputImplantacaoEventoTitulo = el("implantacao-evento-titulo");
+const inputImplantacaoEventoTag = el("implantacao-evento-tag");
 const inputImplantacaoEventoDescricao = el("implantacao-evento-descricao");
 const inputImplantacaoEventoData = el("implantacao-evento-data");
 const inputImplantacaoEventoResponsavel = el("implantacao-evento-responsavel");
@@ -2591,6 +2671,14 @@ function construirCardEvento(ev) {
   data.textContent = formatarDataBRSimples(ev.data) || "Sem data";
   card.appendChild(data);
 
+  if (ev.tag) {
+    const tag = document.createElement("span");
+    tag.className = "timeline-card-tag";
+    tag.style.backgroundColor = EVENTO_TAG_COR[ev.tag] || EVENTO_TAG_COR_PADRAO;
+    tag.textContent = ev.tag;
+    card.appendChild(tag);
+  }
+
   if (ev.descricao) {
     const desc = document.createElement("div");
     desc.className = "timeline-card-descricao";
@@ -2655,6 +2743,7 @@ function abrirModalImplantacaoEvento(setor, evento) {
   implantacaoEventoSetorAtual = setor;
   implantacaoEventoModalTitulo.textContent = evento ? `Editar acontecimento — ${setor}` : `Adicionar acontecimento — ${setor}`;
   inputImplantacaoEventoTitulo.value = evento ? evento.titulo : "";
+  inputImplantacaoEventoTag.value = evento ? evento.tag || "" : "";
   inputImplantacaoEventoDescricao.value = evento ? evento.descricao || "" : "";
   inputImplantacaoEventoData.value = evento ? evento.data || "" : "";
   inputImplantacaoEventoResponsavel.value = evento ? evento.responsavel || "" : "";
@@ -2671,6 +2760,7 @@ formImplantacaoEvento.addEventListener("submit", async (e) => {
   const payload = {
     setor: implantacaoEventoSetorAtual,
     titulo: inputImplantacaoEventoTitulo.value.trim(),
+    tag: inputImplantacaoEventoTag.value,
     descricao: inputImplantacaoEventoDescricao.value.trim(),
     data: inputImplantacaoEventoData.value,
     responsavel: inputImplantacaoEventoResponsavel.value.trim(),
@@ -3840,9 +3930,18 @@ async function excluirLinhaVeiculo(tr) {
 // cabeçalho (não só uma coluna específica) — largura de cada uma fica salva no
 // navegador (localStorage) por chaveArmazenamento, pra continuar do jeito que a
 // pessoa deixou da próxima vez que abrir essa tabela.
-function tornarColunasRedimensionaveis(table, chaveArmazenamento) {
+// Idempotente de propósito (pode chamar de novo a cada vez que o <tbody> for
+// reconstruído, tipo paginação/filtro — não duplica alça nem listener; a alça
+// sempre lê as linhas atuais da tabela na hora do arrasto, não uma lista presa
+// do momento em que foi criada).
+// `larguraFixaPorIndice` ({indice: px}, opcional): colunas que NUNCA mudam
+// de largura (nem por arrasto, nem por localStorage) — sem alça de
+// redimensionar. Usado pelas colunas congeladas "Linha"/"Problema" do
+// Conversor de Veículos, cujo "left" no CSS é um valor fixo (precisa que a
+// largura seja sempre a mesma, senão a 2ª coluna desalinha).
+function tornarColunasRedimensionaveis(table, chaveArmazenamento, larguraFixaPorIndice) {
+  larguraFixaPorIndice = larguraFixaPorIndice || {};
   const ths = Array.from(table.querySelectorAll("thead th"));
-  const linhas = Array.from(table.querySelectorAll("tbody tr"));
   let larguras = {};
   try {
     larguras = JSON.parse(localStorage.getItem(chaveArmazenamento) || "{}");
@@ -3850,36 +3949,77 @@ function tornarColunasRedimensionaveis(table, chaveArmazenamento) {
     larguras = {};
   }
 
+  // table-layout:fixed faz cada coluna respeitar exatamente a largura do th
+  // (em vez do navegador recalcular pelo conteúdo). Mas só funciona de verdade
+  // se TODA coluna tiver uma largura explícita e ESTÁVEL: se uma ficar "solta"
+  // (sem largura nossa), o navegador reescala ela toda vez que outra coluna
+  // muda — e como a gente lia offsetWidth pra somar o total, isso virava um
+  // loop de realimentação (a largura "oficial" de cada coluna ficava deriva,
+  // ver investigação em `git log`). Por isso cada largura mora só aqui dentro
+  // (`larguraAtual`), nunca mais lida de volta do DOM depois de aplicada.
+  table.style.tableLayout = "fixed";
+  // offsetWidth só é confiável aqui se a tabela já tiver uma largura própria
+  // definida — sem isso, um <table> largura "auto" se espalha pelo contêiner
+  // disponível (podendo inflar MUITO além do que faz sentido) antes da gente
+  // conseguir travar o total. Por isso prioriza a largura que o th já veio com
+  // (quem montou o cabeçalho pode ter definido um padrão, ex. 180px) e só cai
+  // pro offsetWidth (real, mas potencialmente inflado) como último recurso.
+  const larguraDoEstilo = (th) => {
+    const n = parseFloat(th.style.width);
+    return Number.isFinite(n) ? n : null;
+  };
+  const larguraAtual = {};
   ths.forEach((th, i) => {
-    const tds = linhas.map((tr) => tr.children[i]).filter(Boolean);
-    if (larguras[i]) {
-      th.style.width = `${larguras[i]}px`;
-      tds.forEach((td) => { td.style.width = `${larguras[i]}px`; });
-    }
+    larguraAtual[i] = larguraFixaPorIndice[i] !== undefined
+      ? larguraFixaPorIndice[i]
+      : (larguras[i] || larguraDoEstilo(th) || th.offsetWidth || 140);
+  });
+
+  const aplicarLargura = (i, px) => {
+    larguraAtual[i] = px;
+    if (ths[i]) ths[i].style.width = `${px}px`;
+    table.querySelectorAll("tbody tr").forEach((tr) => {
+      if (tr.children[i]) tr.children[i].style.width = `${px}px`;
+    });
+  };
+  const atualizarLarguraTotal = () => {
+    table.style.width = `${ths.reduce((soma, _, i) => soma + larguraAtual[i], 0)}px`;
+  };
+
+  ths.forEach((th, i) => {
+    aplicarLargura(i, larguraAtual[i]);
+    if (larguraFixaPorIndice[i] !== undefined) return; // largura fixa — sem alça de redimensionar
+    if (th.querySelector(".col-resize-handle")) return; // já tem alça dessa vez
     th.classList.add("th-redimensionavel");
     const alca = document.createElement("span");
     alca.className = "col-resize-handle";
     alca.title = "Arraste para redimensionar";
     th.appendChild(alca);
+    // O "click" sintético que o navegador dispara depois do mouseup é um evento
+    // À PARTE do mousedown — stopPropagation() no mousedown não o alcança, por
+    // isso precisa barrar os dois pra não deixar o th com onClick (ex.: ordenar)
+    // disparar sem querer logo depois de um arrasto.
+    alca.addEventListener("click", (e) => e.stopPropagation());
     alca.addEventListener("mousedown", (e) => {
       e.preventDefault();
+      e.stopPropagation();
       const startX = e.clientX;
-      const startWidth = th.offsetWidth;
+      const startWidth = larguraAtual[i];
       function aoMover(ev) {
-        const nova = Math.max(40, startWidth + (ev.clientX - startX));
-        th.style.width = `${nova}px`;
-        tds.forEach((td) => { td.style.width = `${nova}px`; });
+        aplicarLargura(i, Math.max(40, startWidth + (ev.clientX - startX)));
+        atualizarLarguraTotal();
       }
       function aoSoltar() {
         document.removeEventListener("mousemove", aoMover);
         document.removeEventListener("mouseup", aoSoltar);
-        larguras[i] = th.offsetWidth;
+        larguras[i] = larguraAtual[i];
         localStorage.setItem(chaveArmazenamento, JSON.stringify(larguras));
       }
       document.addEventListener("mousemove", aoMover);
       document.addEventListener("mouseup", aoSoltar);
     });
   });
+  atualizarLarguraTotal();
 }
 
 function renderTabelaVeiculosMigracao(clienteId, veiculos) {
@@ -4250,8 +4390,13 @@ async function abrirModalImport(tipo, idcentral) {
   estado.importIdcentral = idcentral || null;
   estado.fileId = null;
   estado.colunas = [];
+  estado.mapeamentoSugerido = null;
   inputArquivo.value = "";
   arquivoNome.textContent = "Nenhum arquivo selecionado";
+  // Sempre volta pro modo "upload normal" — se a última abertura foi via
+  // abrirModalImportDeConvcli() essa etapa ficou escondida.
+  importPassoUpload.classList.remove("hidden");
+  importPassoOrigemConvcli.classList.add("hidden");
   progressoContainer.classList.add("hidden");
   progressoBar.style.width = "0%";
   progressoPct.textContent = "0%";
@@ -4269,8 +4414,452 @@ async function abrirModalImport(tipo, idcentral) {
   overlay.classList.remove("hidden");
 }
 
+// Variante usada pelo botão "Importar via API" do Conversor de Clientes:
+// em vez do passo 1 pedir upload de um Excel novo, reaproveita os registros
+// JÁ carregados/mapeados/editados na própria tela (convcliFileId), convertidos
+// no servidor pra um "upload" do modal genérico (ver
+// /api/conversor-clientes/usar-como-upload). O resto do fluxo (passo 2 em
+// diante) é idêntico ao abrirModalImport — mesmo mapeamento, mesma
+// importação, mesmo polling.
+async function abrirModalImportDeConvcli() {
+  estado.importTipo = "cliente";
+  estado.importIdcentral = null;
+  estado.fileId = null;
+  estado.colunas = [];
+  estado.mapeamentoSugerido = null;
+  importPassoUpload.classList.add("hidden");
+  importPassoOrigemConvcli.classList.remove("hidden");
+  progressoContainer.classList.add("hidden");
+  progressoBar.style.width = "0%";
+  progressoPct.textContent = "0%";
+  importLog.innerHTML = "";
+  btnIniciarImport.disabled = true;
+  btnIniciarImport.textContent = "Iniciar Importação";
+
+  const rParams = await fetch("/api/import/params/cliente");
+  const dataParams = await parseJsonResponse(rParams);
+  if (!dataParams.ok) return mostrarErroConvcli(dataParams.error || "Tipo desconhecido.");
+  modalTitulo.textContent = `Mapeamento: ${dataParams.titulo}`;
+  estado.campos = dataParams.campos;
+
+  importOrigemConvcliTexto.textContent = "Carregando a planilha do Conversor de Clientes...";
+  overlay.classList.remove("hidden");
+
+  try {
+    const rUsar = await fetch("/api/conversor-clientes/usar-como-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId }),
+    });
+    const dataUsar = await parseJsonResponse(rUsar);
+    if (!dataUsar.ok) {
+      overlay.classList.add("hidden");
+      return mostrarErroConvcli(dataUsar.error || "Falha ao preparar os dados pra importação.");
+    }
+    estado.fileId = dataUsar.file_id;
+    estado.colunas = dataUsar.colunas;
+    estado.mapeamentoSugerido = dataUsar.mapeamento_sugerido || null;
+    importOrigemConvcliTexto.textContent = `Usando a planilha do Conversor de Clientes (${dataUsar.total_linhas} linha(s))`;
+    btnIniciarImport.disabled = false;
+  } catch (err) {
+    overlay.classList.add("hidden");
+    return mostrarErroConvcli(String(err));
+  }
+
+  renderMapaCampos();
+}
+
+// Mesma ideia de abrirModalImportDeConvcli, mas pro Conversor de Veículos:
+// reaproveita os registros já carregados/mapeados em convveiFileId (ver
+// /api/conversor-veiculos/usar-como-upload) em vez de pedir upload de novo.
+async function abrirModalImportDeConvvei() {
+  estado.importTipo = "veiculo";
+  estado.importIdcentral = null;
+  estado.fileId = null;
+  estado.colunas = [];
+  estado.mapeamentoSugerido = null;
+  importPassoUpload.classList.add("hidden");
+  importPassoOrigemConvcli.classList.remove("hidden");
+  progressoContainer.classList.add("hidden");
+  progressoBar.style.width = "0%";
+  progressoPct.textContent = "0%";
+  importLog.innerHTML = "";
+  btnIniciarImport.disabled = true;
+  btnIniciarImport.textContent = "Iniciar Importação";
+
+  const rParams = await fetch("/api/import/params/veiculo");
+  const dataParams = await parseJsonResponse(rParams);
+  if (!dataParams.ok) return mostrarErroConvvei(dataParams.error || "Tipo desconhecido.");
+  modalTitulo.textContent = `Mapeamento: ${dataParams.titulo}`;
+  estado.campos = dataParams.campos;
+
+  importOrigemConvcliTexto.textContent = "Carregando a planilha do Conversor de Veículos...";
+  overlay.classList.remove("hidden");
+
+  try {
+    const rUsar = await fetch("/api/conversor-veiculos/usar-como-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId }),
+    });
+    const dataUsar = await parseJsonResponse(rUsar);
+    if (!dataUsar.ok) {
+      overlay.classList.add("hidden");
+      return mostrarErroConvvei(dataUsar.error || "Falha ao preparar os dados pra importação.");
+    }
+    estado.fileId = dataUsar.file_id;
+    estado.colunas = dataUsar.colunas;
+    estado.mapeamentoSugerido = dataUsar.mapeamento_sugerido || null;
+    importOrigemConvcliTexto.textContent = `Usando a planilha do Conversor de Veículos (${dataUsar.total_linhas} linha(s))`;
+    btnIniciarImport.disabled = false;
+  } catch (err) {
+    overlay.classList.add("hidden");
+    return mostrarErroConvvei(String(err));
+  }
+
+  renderMapaCampos();
+}
+
+// Mesma ideia de abrirModalImportDeConvvei, mas pro Conversor de
+// Rastreadores: reaproveita os registros já carregados/mapeados em
+// convrstFileId (ver /api/conversor-rastreadores/usar-como-upload).
+async function abrirModalImportDeConvrst() {
+  estado.importTipo = "rastreador";
+  estado.importIdcentral = null;
+  estado.fileId = null;
+  estado.colunas = [];
+  estado.mapeamentoSugerido = null;
+  importPassoUpload.classList.add("hidden");
+  importPassoOrigemConvcli.classList.remove("hidden");
+  progressoContainer.classList.add("hidden");
+  progressoBar.style.width = "0%";
+  progressoPct.textContent = "0%";
+  importLog.innerHTML = "";
+  btnIniciarImport.disabled = true;
+  btnIniciarImport.textContent = "Iniciar Importação";
+
+  const rParams = await fetch("/api/import/params/rastreador");
+  const dataParams = await parseJsonResponse(rParams);
+  if (!dataParams.ok) return mostrarErroConvrst(dataParams.error || "Tipo desconhecido.");
+  modalTitulo.textContent = `Mapeamento: ${dataParams.titulo}`;
+  estado.campos = dataParams.campos;
+
+  importOrigemConvcliTexto.textContent = "Carregando a planilha do Conversor de Rastreadores...";
+  overlay.classList.remove("hidden");
+
+  try {
+    const rUsar = await fetch("/api/conversor-rastreadores/usar-como-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId }),
+    });
+    const dataUsar = await parseJsonResponse(rUsar);
+    if (!dataUsar.ok) {
+      overlay.classList.add("hidden");
+      return mostrarErroConvrst(dataUsar.error || "Falha ao preparar os dados pra importação.");
+    }
+    estado.fileId = dataUsar.file_id;
+    estado.colunas = dataUsar.colunas;
+    estado.mapeamentoSugerido = dataUsar.mapeamento_sugerido || null;
+    importOrigemConvcliTexto.textContent = `Usando a planilha do Conversor de Rastreadores (${dataUsar.total_linhas} linha(s))`;
+    btnIniciarImport.disabled = false;
+  } catch (err) {
+    overlay.classList.add("hidden");
+    return mostrarErroConvrst(String(err));
+  }
+
+  renderMapaCampos();
+}
+
+// Mesma ideia de abrirModalImportDeConvvei, mas pro Conversor de SIM Cards:
+// reaproveita os registros já carregados/mapeados em convsimFileId (ver
+// /api/conversor-simcards/usar-como-upload).
+async function abrirModalImportDeConvsim() {
+  estado.importTipo = "simcard";
+  estado.importIdcentral = null;
+  estado.fileId = null;
+  estado.colunas = [];
+  estado.mapeamentoSugerido = null;
+  importPassoUpload.classList.add("hidden");
+  importPassoOrigemConvcli.classList.remove("hidden");
+  progressoContainer.classList.add("hidden");
+  progressoBar.style.width = "0%";
+  progressoPct.textContent = "0%";
+  importLog.innerHTML = "";
+  btnIniciarImport.disabled = true;
+  btnIniciarImport.textContent = "Iniciar Importação";
+
+  const rParams = await fetch("/api/import/params/simcard");
+  const dataParams = await parseJsonResponse(rParams);
+  if (!dataParams.ok) return mostrarErroConvsim(dataParams.error || "Tipo desconhecido.");
+  modalTitulo.textContent = `Mapeamento: ${dataParams.titulo}`;
+  estado.campos = dataParams.campos;
+
+  importOrigemConvcliTexto.textContent = "Carregando a planilha do Conversor de SIM Cards...";
+  overlay.classList.remove("hidden");
+
+  try {
+    const rUsar = await fetch("/api/conversor-simcards/usar-como-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convsimFileId }),
+    });
+    const dataUsar = await parseJsonResponse(rUsar);
+    if (!dataUsar.ok) {
+      overlay.classList.add("hidden");
+      return mostrarErroConvsim(dataUsar.error || "Falha ao preparar os dados pra importação.");
+    }
+    estado.fileId = dataUsar.file_id;
+    estado.colunas = dataUsar.colunas;
+    estado.mapeamentoSugerido = dataUsar.mapeamento_sugerido || null;
+    importOrigemConvcliTexto.textContent = `Usando a planilha do Conversor de SIM Cards (${dataUsar.total_linhas} linha(s))`;
+    btnIniciarImport.disabled = false;
+  } catch (err) {
+    overlay.classList.add("hidden");
+    return mostrarErroConvsim(String(err));
+  }
+
+  renderMapaCampos();
+}
+
+// Mesma ideia de abrirModalImportDeConvvei, mas pro Conversor de Unidades
+// Organizacionais: reaproveita os registros já carregados/mapeados em
+// convuoFileId (ver /api/conversor-uo/usar-como-upload). Único Conversor
+// onde este É o único caminho de conclusão (sem "Baixar arquivo" — a SSX
+// não tem layout de arquivo pra Unidade Organizacional, só API).
+// Mesma ideia de abrirModalImportDeConvrst, mas pro Conversor de
+// Colaboradores: reaproveita os registros já carregados/mapeados em
+// convcolFileId (ver /api/conversor-colaboradores/usar-como-upload).
+async function abrirModalImportDeConvcol() {
+  estado.importTipo = "colaborador";
+  estado.importIdcentral = null;
+  estado.fileId = null;
+  estado.colunas = [];
+  estado.mapeamentoSugerido = null;
+  importPassoUpload.classList.add("hidden");
+  importPassoOrigemConvcli.classList.remove("hidden");
+  progressoContainer.classList.add("hidden");
+  progressoBar.style.width = "0%";
+  progressoPct.textContent = "0%";
+  importLog.innerHTML = "";
+  btnIniciarImport.disabled = true;
+  btnIniciarImport.textContent = "Iniciar Importação";
+
+  const rParams = await fetch("/api/import/params/colaborador");
+  const dataParams = await parseJsonResponse(rParams);
+  if (!dataParams.ok) return mostrarErroConvcol(dataParams.error || "Tipo desconhecido.");
+  modalTitulo.textContent = `Mapeamento: ${dataParams.titulo}`;
+  estado.campos = dataParams.campos;
+
+  importOrigemConvcliTexto.textContent = "Carregando a planilha do Conversor de Colaboradores...";
+  overlay.classList.remove("hidden");
+
+  try {
+    const rUsar = await fetch("/api/conversor-colaboradores/usar-como-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcolFileId }),
+    });
+    const dataUsar = await parseJsonResponse(rUsar);
+    if (!dataUsar.ok) {
+      overlay.classList.add("hidden");
+      return mostrarErroConvcol(dataUsar.error || "Falha ao preparar os dados pra importação.");
+    }
+    estado.fileId = dataUsar.file_id;
+    estado.colunas = dataUsar.colunas;
+    estado.mapeamentoSugerido = dataUsar.mapeamento_sugerido || null;
+    importOrigemConvcliTexto.textContent = `Usando a planilha do Conversor de Colaboradores (${dataUsar.total_linhas} linha(s))`;
+    btnIniciarImport.disabled = false;
+  } catch (err) {
+    overlay.classList.add("hidden");
+    return mostrarErroConvcol(String(err));
+  }
+
+  renderMapaCampos();
+}
+
+async function abrirModalImportDeConvuo() {
+  estado.importTipo = "uo";
+  estado.importIdcentral = null;
+  estado.fileId = null;
+  estado.colunas = [];
+  estado.mapeamentoSugerido = null;
+  importPassoUpload.classList.add("hidden");
+  importPassoOrigemConvcli.classList.remove("hidden");
+  progressoContainer.classList.add("hidden");
+  progressoBar.style.width = "0%";
+  progressoPct.textContent = "0%";
+  importLog.innerHTML = "";
+  btnIniciarImport.disabled = true;
+  btnIniciarImport.textContent = "Iniciar Importação";
+
+  const rParams = await fetch("/api/import/params/uo");
+  const dataParams = await parseJsonResponse(rParams);
+  if (!dataParams.ok) return mostrarErroConvuo(dataParams.error || "Tipo desconhecido.");
+  modalTitulo.textContent = `Mapeamento: ${dataParams.titulo}`;
+  estado.campos = dataParams.campos;
+
+  importOrigemConvcliTexto.textContent = "Carregando a planilha do Conversor de Unidades Organizacionais...";
+  overlay.classList.remove("hidden");
+
+  try {
+    const rUsar = await fetch("/api/conversor-uo/usar-como-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convuoFileId }),
+    });
+    const dataUsar = await parseJsonResponse(rUsar);
+    if (!dataUsar.ok) {
+      overlay.classList.add("hidden");
+      return mostrarErroConvuo(dataUsar.error || "Falha ao preparar os dados pra importação.");
+    }
+    estado.fileId = dataUsar.file_id;
+    estado.colunas = dataUsar.colunas;
+    estado.mapeamentoSugerido = dataUsar.mapeamento_sugerido || null;
+    importOrigemConvcliTexto.textContent = `Usando a planilha do Conversor de Unidades Organizacionais (${dataUsar.total_linhas} linha(s))`;
+    btnIniciarImport.disabled = false;
+  } catch (err) {
+    overlay.classList.add("hidden");
+    return mostrarErroConvuo(String(err));
+  }
+
+  renderMapaCampos();
+}
+
+async function abrirModalImportDeConvare() {
+  estado.importTipo = "area";
+  estado.importIdcentral = null;
+  estado.fileId = null;
+  estado.colunas = [];
+  estado.mapeamentoSugerido = null;
+  importPassoUpload.classList.add("hidden");
+  importPassoOrigemConvcli.classList.remove("hidden");
+  progressoContainer.classList.add("hidden");
+  progressoBar.style.width = "0%";
+  progressoPct.textContent = "0%";
+  importLog.innerHTML = "";
+  btnIniciarImport.disabled = true;
+  btnIniciarImport.textContent = "Iniciar Importação";
+
+  const rParams = await fetch("/api/import/params/area");
+  const dataParams = await parseJsonResponse(rParams);
+  if (!dataParams.ok) return mostrarErroConvare(dataParams.error || "Tipo desconhecido.");
+  modalTitulo.textContent = `Mapeamento: ${dataParams.titulo}`;
+  estado.campos = dataParams.campos;
+
+  importOrigemConvcliTexto.textContent = "Carregando a planilha do Conversor de Áreas...";
+  overlay.classList.remove("hidden");
+
+  try {
+    const rUsar = await fetch("/api/conversor-areas/usar-como-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId }),
+    });
+    const dataUsar = await parseJsonResponse(rUsar);
+    if (!dataUsar.ok) {
+      overlay.classList.add("hidden");
+      return mostrarErroConvare(dataUsar.error || "Falha ao preparar os dados pra importação.");
+    }
+    estado.fileId = dataUsar.file_id;
+    estado.colunas = dataUsar.colunas;
+    estado.mapeamentoSugerido = dataUsar.mapeamento_sugerido || null;
+    importOrigemConvcliTexto.textContent = `Usando a planilha do Conversor de Áreas (${dataUsar.total_linhas} linha(s))`;
+    btnIniciarImport.disabled = false;
+  } catch (err) {
+    overlay.classList.add("hidden");
+    return mostrarErroConvare(String(err));
+  }
+
+  renderMapaCampos();
+}
+
+// Normaliza pra comparação de nomes: sem acento, minúsculo, só letras/dígitos
+// (espaço, pontuação etc. somem) — "Nome do Cliente" e "nome_cliente" batem igual.
+function normalizarBlobMapeamento(txt) {
+  return String(txt || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+// Preposições/conectivos que uma planilha pode omitir ou incluir sem mudar o
+// sentido do nome do campo ("Código Integração Cliente" == "Código de
+// integração do cliente") — removidas numa segunda comparação pra não perder
+// esses casos só porque o blob bruto não bate como substring contíguo.
+const MAPEAMENTO_STOPWORDS = new Set(["de", "do", "da", "dos", "das", "e"]);
+function normalizarBlobSemStopwordsMapeamento(txt) {
+  const semAcento = String(txt || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return semAcento
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t && !MAPEAMENTO_STOPWORDS.has(t))
+    .join("");
+}
+
+// Pontua um par (rótulo do campo, nome da coluna): 100 = igual, 50-90 = um
+// "contém" o outro (pontuado pela proporção do menor dentro do maior), 0 =
+// sem relação. Compara tanto o blob bruto quanto o blob sem stopwords e usa o
+// melhor dos dois, pra "Login" bater em "Login do Cliente" (bruto) e
+// "Código Integração Cliente" bater em "Código de integração do cliente"
+// (sem stopwords) ao mesmo tempo.
+function pontuarParMapeamento(rotulo, coluna) {
+  const pares = [
+    [normalizarBlobMapeamento(rotulo), normalizarBlobMapeamento(coluna)],
+    [normalizarBlobSemStopwordsMapeamento(rotulo), normalizarBlobSemStopwordsMapeamento(coluna)],
+  ];
+  let melhor = 0;
+  pares.forEach(([a, b]) => {
+    if (!a || !b) return;
+    let score = 0;
+    if (a === b) {
+      score = 100;
+    } else if (a.includes(b) || b.includes(a)) {
+      const menor = Math.min(a.length, b.length);
+      const maior = Math.max(a.length, b.length);
+      score = 50 + Math.round((menor / maior) * 40);
+    }
+    if (score > melhor) melhor = score;
+  });
+  return melhor;
+}
+
+// Sugere, pra cada campo da API, a coluna da planilha com nome mais parecido
+// (normalizado). Cada coluna só é usada numa sugestão (a de maior score), o
+// resto fica "(Não mapeado)" — a pessoa ajusta/sobrescreve tudo depois, isso
+// é só ponto de partida.
+function sugerirMapeamentoAutomatico(campos, colunas) {
+  const usadas = new Set();
+  const sugestao = {};
+
+  campos.forEach((campo) => {
+    if (!campo.rotulo) return;
+    let melhorCol = null;
+    let melhorScore = 0;
+    colunas.forEach((col) => {
+      if (usadas.has(col)) return;
+      const score = pontuarParMapeamento(campo.rotulo, col);
+      if (score > melhorScore) {
+        melhorScore = score;
+        melhorCol = col;
+      }
+    });
+    if (melhorCol && melhorScore >= 60) {
+      sugestao[campo.nome] = melhorCol;
+      usadas.add(melhorCol);
+    }
+  });
+
+  return sugestao;
+}
+
 function renderMapaCampos() {
   mapaCampos.innerHTML = "";
+  // estado.mapeamentoSugerido: mapeamento exato vindo do servidor (ver
+  // abrirModalImportDeConvcli) — usado no lugar do auto-mapeamento por texto
+  // quando a correspondência é de SIGNIFICADO, não de nome parecido (ex.
+  // "Registro" = "IE / RG"), que o algoritmo abaixo nunca acertaria.
+  const sugestoes = estado.mapeamentoSugerido || sugerirMapeamentoAutomatico(estado.campos, estado.colunas);
   estado.campos.forEach((campo) => {
     const linha = document.createElement("div");
     linha.className = "mapa-linha";
@@ -4292,6 +4881,9 @@ function renderMapaCampos() {
       opt.textContent = col;
       select.appendChild(opt);
     });
+    if (sugestoes[campo.nome]) {
+      select.value = sugestoes[campo.nome];
+    }
 
     linha.appendChild(nome);
     linha.appendChild(select);
@@ -5242,6 +5834,85 @@ function kmlMontarPlacemark(placemark, config, indice) {
   return { indice, nome, descricao, tipoOriginal, tipoFinal, convertido, pontos, dados, avisos, erros };
 }
 
+// KMZ é só um .kml compactado em .zip (geralmente como "doc.kml") junto com ícones/imagens.
+// Lê o índice central do ZIP (sem lib externa) pra achar e descomprimir esse .kml.
+async function kmlExtrairTextoDeKmz(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const view = new DataView(arrayBuffer);
+
+  // Localiza o End Of Central Directory varrendo de trás pra frente: o .zip pode
+  // ter um comentário final de tamanho variável (até 65535 bytes) antes do fim do arquivo.
+  let eocdOffset = -1;
+  const limiteBusca = Math.max(0, bytes.length - 22 - 65535);
+  for (let i = bytes.length - 22; i >= limiteBusca; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) {
+    throw new Error("Arquivo .kmz inválido: não foi possível localizar o índice do pacote ZIP.");
+  }
+
+  const totalEntradas = view.getUint16(eocdOffset + 10, true);
+  let cdOffset = view.getUint32(eocdOffset + 16, true);
+
+  const entradasKml = [];
+  for (let i = 0; i < totalEntradas; i++) {
+    if (view.getUint32(cdOffset, true) !== 0x02014b50) {
+      throw new Error("Arquivo .kmz inválido: índice do pacote ZIP corrompido.");
+    }
+    const metodoCompressao = view.getUint16(cdOffset + 10, true);
+    const tamanhoComprimido = view.getUint32(cdOffset + 20, true);
+    const tamanhoNome = view.getUint16(cdOffset + 28, true);
+    const tamanhoExtra = view.getUint16(cdOffset + 30, true);
+    const tamanhoComentario = view.getUint16(cdOffset + 32, true);
+    const offsetLocal = view.getUint32(cdOffset + 42, true);
+    const nome = new TextDecoder("utf-8").decode(bytes.subarray(cdOffset + 46, cdOffset + 46 + tamanhoNome));
+
+    if (nome.toLowerCase().endsWith(".kml")) {
+      entradasKml.push({ nome, metodoCompressao, tamanhoComprimido, offsetLocal });
+    }
+    cdOffset += 46 + tamanhoNome + tamanhoExtra + tamanhoComentario;
+  }
+
+  if (entradasKml.length === 0) {
+    throw new Error("O arquivo .kmz não contém nenhum .kml dentro do pacote.");
+  }
+  // Prioriza "doc.kml" (padrão do Google Earth/My Maps); senão usa o primeiro .kml encontrado.
+  const entrada = entradasKml.find((e) => e.nome.toLowerCase().split("/").pop() === "doc.kml") || entradasKml[0];
+
+  // O cabeçalho local pode ter nome/campo extra de tamanho diferente do índice central,
+  // então é preciso reler esses tamanhos ali pra saber onde os dados comprimidos começam.
+  const tamanhoNomeLocal = view.getUint16(entrada.offsetLocal + 26, true);
+  const tamanhoExtraLocal = view.getUint16(entrada.offsetLocal + 28, true);
+  const inicioDados = entrada.offsetLocal + 30 + tamanhoNomeLocal + tamanhoExtraLocal;
+  const dadosComprimidos = bytes.subarray(inicioDados, inicioDados + entrada.tamanhoComprimido);
+
+  let dadosFinais;
+  if (entrada.metodoCompressao === 0) {
+    dadosFinais = dadosComprimidos;
+  } else if (entrada.metodoCompressao === 8) {
+    if (typeof DecompressionStream === "undefined") {
+      throw new Error("Este navegador não sabe descompactar arquivos .kmz. Extraia o .kml de dentro do .kmz e envie-o diretamente.");
+    }
+    const stream = new Blob([dadosComprimidos]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    dadosFinais = new Uint8Array(await new Response(stream).arrayBuffer());
+  } else {
+    throw new Error(`O .kml dentro do .kmz usa um método de compressão não suportado (código ${entrada.metodoCompressao}).`);
+  }
+
+  return new TextDecoder("utf-8").decode(dadosFinais);
+}
+
+async function kmlLerArquivoConversor(file) {
+  if (!/\.kmz$/i.test(file.name)) {
+    return file.text();
+  }
+  const buffer = await file.arrayBuffer();
+  return kmlExtrairTextoDeKmz(buffer);
+}
+
 function kmlProcessar(kmlText, config) {
   const doc = new DOMParser().parseFromString(kmlText, "application/xml");
   if (doc.querySelector("parsererror")) {
@@ -5279,8 +5950,10 @@ function kmlMontarXmlPlacemark(registro) {
   return `  <Placemark>\n    <name>${kmlEscapeXml(nome)}</name>\n${descXml}${extXml}\n${geomXml}\n  </Placemark>`;
 }
 
+// Gera a partir exatamente dos registros recebidos (quem chama decide se já
+// filtrou os com erro ou não — ver baixarConversao, que oferece as duas opções).
 function kmlGerarKml(registros) {
-  const blocos = registros.filter((r) => r.erros.length === 0).map(kmlMontarXmlPlacemark);
+  const blocos = registros.map(kmlMontarXmlPlacemark);
   return (
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n' +
@@ -5295,28 +5968,26 @@ const KML_CSV_CABECALHO = "Nome;Descricao;Tipo;Coordenadas;Tolerancia;Cod.integr
 // CSV do manual (pág. 2): sem acentos, ';' como separador, \r\n, coordenadas "lon lat" separadas por ','.
 function kmlGerarCsv(registros) {
   const linhas = [KML_CSV_CABECALHO];
-  registros
-    .filter((r) => r.erros.length === 0)
-    .forEach((r) => {
-      const coords = r.pontos
-        .map((p) => {
-          const [lon, lat] = p.split(",");
-          return `${lon} ${lat}`;
-        })
-        .join(",");
-      const campos = [
-        r.nome,
-        r.descricao,
-        KML_TIPO_CSV[r.tipoFinal || ""] || "",
-        coords,
-        r.dados.Tolerance || "",
-        r.dados.GeoIntegrationCode || "",
-        r.dados.CategoryIntegrationCode || "",
-        r.dados.GroupIntegrationCode || "",
-        r.dados.ColorCode || "",
-      ];
-      linhas.push(campos.map((c) => kmlSemAcento(c).replace(/\r/g, " ").replace(/\n/g, " ").replace(/;/g, ",")).join(";") + ";");
-    });
+  registros.forEach((r) => {
+    const coords = r.pontos
+      .map((p) => {
+        const [lon, lat] = p.split(",");
+        return `${lon} ${lat}`;
+      })
+      .join(",");
+    const campos = [
+      r.nome,
+      r.descricao,
+      KML_TIPO_CSV[r.tipoFinal || ""] || "",
+      coords,
+      r.dados.Tolerance || "",
+      r.dados.GeoIntegrationCode || "",
+      r.dados.CategoryIntegrationCode || "",
+      r.dados.GroupIntegrationCode || "",
+      r.dados.ColorCode || "",
+    ];
+    linhas.push(campos.map((c) => kmlSemAcento(c).replace(/\r/g, " ").replace(/\n/g, " ").replace(/;/g, ",")).join(";") + ";");
+  });
   return linhas.join("\r\n") + "\r\n";
 }
 
@@ -5335,7 +6006,9 @@ function kmlBaixarArquivo(nomeArquivo, conteudo, mimetype) {
 function kmlMontarResultado(registros) {
   const nErro = registros.filter((r) => r.erros.length > 0).length;
   const nOk = registros.length - nErro;
-  const nPartes = nOk > KML_TAMANHO_PARTE ? Math.ceil(nOk / KML_TAMANHO_PARTE) : 1;
+  // Baseado no total (não só nos válidos): registros com erro também precisam de uma
+  // "parte" pra morar, já que agora é possível baixá-los (ver baixarConversao).
+  const nPartes = registros.length > KML_TAMANHO_PARTE ? Math.ceil(registros.length / KML_TAMANHO_PARTE) : 1;
   const avisosCompactados = { geoTruncado: 0, anelFechado: 0, coordenadasLongas: 0 };
   const problematicos = [];
 
@@ -5426,7 +6099,7 @@ conversorInputArquivo.addEventListener("change", () => {
   const file = conversorInputArquivo.files[0];
   estado.conversorArquivo = file || null;
   conversorArquivoNome.textContent = file ? file.name : "Nenhum arquivo selecionado";
-  conversorNomeBase = file ? file.name.replace(/\.kml$/i, "") : "conversao";
+  conversorNomeBase = file ? file.name.replace(/\.(kml|kmz)$/i, "") : "conversao";
   conversorRegistrosOriginais = null;
   conversorResultadoAtual = null;
   conversorResultado.innerHTML = "";
@@ -5446,17 +6119,55 @@ function kmlMensagens(r) {
   return [...r.erros.map((m) => `⛔ ${m}`), ...r.avisos.map((m) => `⚠️ ${m}`)].join("\n");
 }
 
-function baixarConversao(parte, formato) {
-  if (!conversorResultadoAtual) return;
-  const validos = conversorResultadoAtual.registros.filter((r) => r.erros.length === 0);
-  const fatia = validos.slice((parte - 1) * KML_TAMANHO_PARTE, parte * KML_TAMANHO_PARTE);
-  if (fatia.length === 0) return;
+function baixarConversaoComoArquivo(fatia, formato, parte) {
   const sufixoParte = conversorResultadoAtual.nPartes > 1 ? `_parte${parte}` : "";
   if (formato === "kml") {
     kmlBaixarArquivo(`${conversorNomeBase}_SSX${sufixoParte}.kml`, kmlGerarKml(fatia), "application/vnd.google-earth.kml+xml");
   } else {
     kmlBaixarArquivo(`${conversorNomeBase}_SSX${sufixoParte}.csv`, kmlGerarCsv(fatia), "text/csv");
   }
+}
+
+// Confirmação antes de baixar quando a parte selecionada tem registro(s) com erro —
+// modal próprio em vez de confirm() nativo, pra não quebrar a identidade visual do app
+// (mesmo padrão de confirmarVincularMigracao/confirmarLiberarPlanilha).
+const overlayConversorBaixarErro = el("overlay-conversor-baixar-erro");
+const textoConversorBaixarErro = el("conversor-baixar-erro-texto");
+let resolverConversorBaixarErro = null;
+function fecharConversorBaixarErro(escolha) {
+  overlayConversorBaixarErro.classList.add("hidden");
+  const resolve = resolverConversorBaixarErro;
+  resolverConversorBaixarErro = null;
+  if (resolve) resolve(escolha);
+}
+function confirmarConversorBaixarErro(nComErro) {
+  const plural = nComErro === 1 ? "registro não passou" : "registros não passaram";
+  textoConversorBaixarErro.textContent =
+    `${nComErro} ${plural} na validação e podem ser rejeitados pelo SSX na importação. Baixe só os válidos, ou inclua os com erro pra corrigir depois.`;
+  overlayConversorBaixarErro.classList.remove("hidden");
+  return new Promise((resolve) => { resolverConversorBaixarErro = resolve; });
+}
+el("conversor-baixar-erro-fechar").addEventListener("click", () => fecharConversorBaixarErro("cancelar"));
+el("btn-conversor-baixar-erro-cancelar").addEventListener("click", () => fecharConversorBaixarErro("cancelar"));
+el("btn-conversor-baixar-com-erros").addEventListener("click", () => fecharConversorBaixarErro("com-erros"));
+el("btn-conversor-baixar-sem-erros").addEventListener("click", () => fecharConversorBaixarErro("sem-erros"));
+
+async function baixarConversao(parte, formato) {
+  if (!conversorResultadoAtual) return;
+  const fatiaCompleta = conversorResultadoAtual.registros.slice((parte - 1) * KML_TAMANHO_PARTE, parte * KML_TAMANHO_PARTE);
+  if (fatiaCompleta.length === 0) return;
+  const nComErro = fatiaCompleta.filter((r) => r.erros.length > 0).length;
+
+  let fatiaFinal = fatiaCompleta;
+  if (nComErro > 0) {
+    const escolha = await confirmarConversorBaixarErro(nComErro);
+    if (escolha === "cancelar") return;
+    if (escolha === "sem-erros") {
+      fatiaFinal = fatiaCompleta.filter((r) => r.erros.length === 0);
+      if (fatiaFinal.length === 0) return; // essa parte era só registro(s) com erro
+    }
+  }
+  baixarConversaoComoArquivo(fatiaFinal, formato, parte);
 }
 
 function renderConversorResultado() {
@@ -5467,7 +6178,7 @@ function renderConversorResultado() {
   const tiles = document.createElement("div");
   tiles.className = "dashboard-tiles";
   [
-    { valor: r.nOk, label: "Prontos" },
+    { valor: r.nOk, label: "Válidos" },
     { valor: r.nErro, label: "Com erro" },
   ].forEach(({ valor, label }) => {
     const tile = document.createElement("div");
@@ -5486,14 +6197,14 @@ function renderConversorResultado() {
 
   const legenda = document.createElement("p");
   legenda.className = "placeholder";
-  legenda.textContent = `${r.nOk} de ${r.registros.length} registro(s) prontos para importar.`;
+  legenda.textContent = `${r.nOk} de ${r.registros.length} registro(s) válidos para importar.`;
   conversorResultado.appendChild(legenda);
 
-  if (r.nOk > KML_TAMANHO_PARTE) {
+  if (r.nPartes > 1) {
     const aviso = document.createElement("p");
     aviso.className = "placeholder";
     aviso.style.color = "#a16207";
-    aviso.textContent = `O SSX importa no máximo ${KML_MAX_LINHAS_IMPORTACAO} linhas por arquivo. Os ${r.nOk} registros prontos foram divididos em ${r.nPartes} arquivo(s) de até ${KML_TAMANHO_PARTE} cada — importe um de cada vez.`;
+    aviso.textContent = `O SSX importa no máximo ${KML_MAX_LINHAS_IMPORTACAO} linhas por arquivo. Os ${r.registros.length} registro(s) foram divididos em ${r.nPartes} arquivo(s) de até ${KML_TAMANHO_PARTE} cada — importe um de cada vez.`;
     conversorResultado.appendChild(aviso);
   }
 
@@ -5507,22 +6218,22 @@ function renderConversorResultado() {
   edicao.appendChild(btnEditar);
   conversorResultado.appendChild(edicao);
 
-  if (r.nOk > 0) {
-    const downloads = document.createElement("div");
-    downloads.className = "conversor-downloads";
-    for (let parte = 1; parte <= r.nPartes; parte++) {
-      const sufixoParte = r.nPartes > 1 ? ` (parte ${parte}/${r.nPartes})` : "";
-      ["kml", "csv"].forEach((formato) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "btn-secondary";
-        btn.textContent = `Baixar ${formato.toUpperCase()}${sufixoParte}`;
-        btn.addEventListener("click", () => baixarConversao(parte, formato));
-        downloads.appendChild(btn);
-      });
-    }
-    conversorResultado.appendChild(downloads);
+  // Botão aparece mesmo com nOk === 0 (todos com erro): ao clicar, baixarConversao()
+  // mostra o pop-up perguntando se quer baixar com ou sem os registros com erro.
+  const downloads = document.createElement("div");
+  downloads.className = "conversor-downloads";
+  for (let parte = 1; parte <= r.nPartes; parte++) {
+    const sufixoParte = r.nPartes > 1 ? ` (parte ${parte}/${r.nPartes})` : "";
+    ["kml", "csv"].forEach((formato) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary";
+      btn.textContent = `Baixar ${formato.toUpperCase()}${sufixoParte}`;
+      btn.addEventListener("click", () => baixarConversao(parte, formato));
+      downloads.appendChild(btn);
+    });
   }
+  conversorResultado.appendChild(downloads);
 
   const ac = r.avisosCompactados;
   const compactados = [
@@ -5588,7 +6299,7 @@ btnConversorConverter.addEventListener("click", async () => {
   btnConversorConverter.textContent = "Convertendo...";
   conversorResultado.innerHTML = "";
   try {
-    const kmlText = await estado.conversorArquivo.text();
+    const kmlText = await kmlLerArquivoConversor(estado.conversorArquivo);
     const tolTexto = conversorTolerancia.value.trim();
     const config = {
       categoria: conversorCategoria.value.trim() || undefined,
@@ -5886,6 +6597,7017 @@ el("btn-conversor-edicao-reverter").addEventListener("click", () => {
   );
 });
 
+// --- CONVERSOR DE CLIENTES -> SSX ---
+// Sub-tela "/ferramentas/conversor-clientes": upload -> mapear colunas ->
+// ajustar/transformar -> validar -> exportar. Diferente do conversor KML (que
+// roda 100% no navegador), aqui o processamento roda no servidor
+// (conversor_clientes.py + validador_importacao/) — reaproveita o motor de
+// validação em Python como única fonte de verdade das ~30 regras oficiais da
+// SSX, em vez de duplicar tudo em JS.
+const convcliInputArquivo = el("convcli-input-arquivo");
+const convcliArquivoNome = el("convcli-arquivo-nome");
+const convcliSecaoMapeamento = el("convcli-secao-mapeamento");
+const convcliMapaCampos = el("convcli-mapa-campos");
+const convcliMapaResumo = el("convcli-mapa-resumo");
+const convcliMapaResumoTexto = el("convcli-mapa-resumo-texto");
+const convcliMapaDetalhe = el("convcli-mapa-detalhe");
+const btnConvcliMapear = el("btn-convcli-mapear");
+const convcliSecaoTrabalho = el("convcli-secao-trabalho");
+const convcliResumo = el("convcli-resumo");
+const convcliTabelaThead = el("convcli-tabela-thead");
+const convcliTabelaTbody = el("convcli-tabela-tbody");
+const convcliTabelaElemento = convcliTabelaThead.closest("table");
+const convcliTamanhoPagina = el("convcli-tamanho-pagina");
+const convcliPaginacao = el("convcli-paginacao");
+const convcliTabelaArea = el("convcli-tabela-area");
+const CONVCLI_LARGURAS_KEY = "larguraColunas_convcliClientes";
+
+// A área da tabela (ver .convcli-tabela-area no CSS) ocupa a altura visível
+// de main.conteudo — não dá pra resolver só com flex/CSS porque os
+// ancestrais entre main.conteudo e esta área (.panel, .ferramentas-subtela,
+// .convcli-secao) são blocos comuns a outras sub-telas de Ferramentas e não
+// podem virar flex de altura esticada só por causa desta. Reage a resize da
+// janela E a mudanças no próprio main.conteudo (ex.: sidebar recolhendo não
+// muda a altura, mas é barato observar mesmo assim).
+const elConteudoPrincipal = document.querySelector("main.conteudo");
+function ajustarAlturaConvcliTabelaArea() {
+  if (!convcliTabelaArea || !elConteudoPrincipal) return;
+  // -24 = o margin-top da área (ver CSS) — sem descontar, margem + altura
+  // passariam do espaço disponível e sobrariam 24px de rolagem "fantasma".
+  convcliTabelaArea.style.height = `${elConteudoPrincipal.clientHeight - 24}px`;
+}
+if (elConteudoPrincipal && window.ResizeObserver) {
+  new ResizeObserver(ajustarAlturaConvcliTabelaArea).observe(elConteudoPrincipal);
+}
+window.addEventListener("resize", ajustarAlturaConvcliTabelaArea);
+
+let convcliFileId = null;
+let convcliColunasOrigem = [];
+let convcliCampos = [];          // definição oficial (chave, rótulo, obrigatório, tipo, tamanho_max)
+let convcliCamposMapeados = [];  // subconjunto de convcliCampos que entrou no mapeamento aplicado
+let convcliRegistros = [];       // [{indice, original, dados}]
+let convcliProblemasPorIndice = {}; // {indice: {erros:[...], avisos:[...]}}, populado por /validar
+let convcliDuplicadosPorIndice = {}; // idem, mas populado por /verificar-duplicidade (SSX) — store separado pra um não apagar o outro
+let convcliNomeBase = "clientes";
+let convcliPagina = 1;
+let convcliOrdenacao = null; // { chave: "indice" | <campo.chave>, direcao: 1 | -1 }
+
+// Autenticação na SSX pra "Verificar na SSX": de propósito NÃO reaproveita
+// estado.autenticado (sessão global, que sobrevive a F5 via cookie) — aqui a
+// confirmação é só pra ESTA planilha carregada nesta aba. Começa falso
+// sempre (recarregar a página já zera isso sozinho, só por ser variável de
+// JS) e volta a falso ao trocar de arquivo — melhor pedir login de novo
+// vezes demais do que arriscar verificar/importar com a sessão errada.
+let convcliSsxOk = false;
+let convcliSsxLogin = "";
+let convcliSsxBase = "";
+let convcliSsxClaimsRaw = null;
+
+function convcliAtualizarPillAuth() {
+  const pill = el("convcli-status-auth");
+  const btnLogout = el("btn-convcli-logout-ssx");
+  if (convcliSsxOk) {
+    pill.textContent = convcliSsxLogin
+      ? `Autenticado na SSX (${convcliSsxLogin}${convcliSsxBase ? " — " + convcliSsxBase : ""})`
+      : "Autenticado na SSX";
+    pill.title = convcliSsxClaimsRaw ? JSON.stringify(convcliSsxClaimsRaw) : "";
+    pill.className = "status-pill status-on";
+    btnLogout.classList.remove("hidden");
+  } else {
+    pill.textContent = "Não autenticado na SSX";
+    pill.className = "status-pill status-off";
+    btnLogout.classList.add("hidden");
+  }
+}
+
+function limparConvcli() {
+  convcliFileId = null;
+  convcliColunasOrigem = [];
+  convcliCamposMapeados = [];
+  convcliRegistros = [];
+  convcliProblemasPorIndice = {};
+  convcliDuplicadosPorIndice = {};
+  convcliSsxOk = false;
+  convcliSsxLogin = "";
+  convcliSsxBase = "";
+  convcliSsxClaimsRaw = null;
+  convcliAtualizarPillAuth();
+  convcliNomeBase = "clientes";
+  convcliPagina = 1;
+  convcliOrdenacao = null;
+  convcliInputArquivo.value = "";
+  convcliArquivoNome.textContent = "Nenhum arquivo selecionado";
+  convcliSecaoMapeamento.classList.add("hidden");
+  convcliSecaoTrabalho.classList.add("hidden");
+  convcliMapaResumo.classList.add("hidden");
+  convcliMapaDetalhe.classList.remove("hidden");
+  convcliMapaCampos.innerHTML = "";
+  convcliResumo.innerHTML = "";
+  convcliTabelaThead.innerHTML = "";
+  convcliTabelaTbody.innerHTML = "";
+  convcliPaginacao.innerHTML = "";
+  btnConvcliMapear.disabled = true;
+}
+limparConvcli();
+
+function mostrarErroConvcli(msg) {
+  convcliResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  convcliResumo.appendChild(p);
+}
+
+function mostrarInfoConvcli(msg) {
+  convcliResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = msg;
+  convcliResumo.appendChild(p);
+}
+
+async function carregarConvcliCampos() {
+  if (convcliCampos.length) return convcliCampos;
+  const r = await fetch("/api/conversor-clientes/campos");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "Falha ao carregar os campos da SSX.");
+  convcliCampos = data.campos;
+  return convcliCampos;
+}
+
+// Mapeamento padrão: posicional, pela ordem oficial do manual da SSX (campo 1
+// do manual <- coluna 1 da planilha enviada, campo 2 <- coluna 2, ...) —
+// independente do nome que a coluna tem na planilha de origem. Se a planilha
+// tiver menos colunas que os 30 campos oficiais, os campos que sobram (sempre
+// os últimos da ordem oficial) ficam sem sugestão — a usuária ajusta na mão o
+// que precisar.
+function renderConvcliMapaCampos() {
+  convcliMapaCampos.innerHTML = "";
+  convcliCampos.forEach((campo, i) => {
+    const linha = document.createElement("div");
+    linha.className = "convcli-mapa-linha";
+
+    const nome = document.createElement("span");
+    nome.className = "convcli-mapa-nome";
+    const marca = campo.obrigatorio === true ? " *" : campo.obrigatorio === "condicional" ? " (condicional)" : "";
+    nome.textContent = campo.rotulo + marca;
+    nome.title = campo.rotulo + marca; // rótulo pode truncar na coluna estreita — mostra inteiro no hover
+
+    const select = document.createElement("select");
+    select.dataset.campo = campo.chave;
+    const optVazio = document.createElement("option");
+    optVazio.value = "";
+    optVazio.textContent = "— não mapear —";
+    select.appendChild(optVazio);
+    convcliColunasOrigem.forEach((col) => {
+      const opt = document.createElement("option");
+      opt.value = col;
+      opt.textContent = col;
+      select.appendChild(opt);
+    });
+    if (convcliColunasOrigem[i] !== undefined) select.value = convcliColunasOrigem[i];
+
+    linha.appendChild(nome);
+    linha.appendChild(select);
+    convcliMapaCampos.appendChild(linha);
+  });
+}
+
+el("btn-convcli-mapear-limpar").addEventListener("click", () => {
+  convcliMapaCampos.querySelectorAll("select").forEach((sel) => { sel.value = ""; });
+});
+
+// Mesma regra posicional do preenchimento inicial (coluna 1 -> campo 1, ...) —
+// pra voltar pro automático depois de limpar ou mexer manualmente.
+el("btn-convcli-mapear-auto").addEventListener("click", () => {
+  convcliMapaCampos.querySelectorAll("select").forEach((sel, i) => {
+    sel.value = convcliColunasOrigem[i] !== undefined ? convcliColunasOrigem[i] : "";
+  });
+});
+
+el("btn-convcli-mapa-editar").addEventListener("click", () => {
+  convcliMapaResumo.classList.add("hidden");
+  convcliMapaDetalhe.classList.remove("hidden");
+});
+
+convcliInputArquivo.addEventListener("change", async () => {
+  const file = convcliInputArquivo.files[0];
+  if (!file) return;
+  convcliArquivoNome.textContent = "Enviando...";
+  convcliSecaoTrabalho.classList.add("hidden");
+  convcliSecaoMapeamento.classList.add("hidden");
+  // Trocou de planilha — some com a confirmação de SSX anterior, nem que seja
+  // o mesmo arquivo reenviado: melhor pedir login de novo do que arriscar
+  // verificar/importar com a sessão errada (ver convcliSsxOk acima).
+  convcliSsxOk = false;
+  convcliDuplicadosPorIndice = {};
+  convcliAtualizarPillAuth();
+  convcliTemplatesResultado = null;
+  try {
+    await carregarConvcliCampos();
+    const formData = new FormData();
+    formData.append("arquivo", file);
+    const r = await fetch("/api/conversor-clientes/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      convcliArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErroConvcli(data.error || "Falha ao enviar arquivo.");
+    }
+    convcliFileId = data.file_id;
+    convcliColunasOrigem = data.colunas;
+    convcliNomeBase = file.name.replace(/\.(xlsx|xls|csv)$/i, "");
+    convcliArquivoNome.textContent = `${file.name} (${data.total_linhas} linha(s))`;
+    renderConvcliMapaCampos();
+    convcliSecaoMapeamento.classList.remove("hidden");
+    btnConvcliMapear.disabled = false;
+  } catch (err) {
+    convcliArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErroConvcli(err.message || String(err));
+  }
+});
+
+btnConvcliMapear.addEventListener("click", async () => {
+  const mapping = {};
+  convcliMapaCampos.querySelectorAll("select").forEach((sel) => {
+    if (sel.value) mapping[sel.dataset.campo] = sel.value;
+  });
+  if (Object.keys(mapping).length === 0) {
+    return mostrarErroConvcli("Mapeie ao menos uma coluna antes de continuar.");
+  }
+  btnConvcliMapear.disabled = true;
+  btnConvcliMapear.textContent = "Aplicando...";
+  try {
+    const r = await fetch("/api/conversor-clientes/mapear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId, mapping }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcli(data.error || "Falha ao aplicar o mapeamento.");
+    convcliRegistros = data.registros;
+    convcliCamposMapeados = convcliCampos.filter((c) => mapping[c.chave]);
+    convcliProblemasPorIndice = {};
+    convcliDuplicadosPorIndice = {};
+    convcliPagina = 1;
+    convcliOrdenacao = null;
+    convcliSecaoTrabalho.classList.remove("hidden");
+    ajustarAlturaConvcliTabelaArea();
+    renderConvcliTabelaCabecalho();
+    renderConvcliTabela();
+    // Validação local (motor oficial + duplicidade dentro da planilha) já
+    // roda sozinha aqui — só "Verificar na SSX" continua precisando de
+    // clique manual (depende de login/rede, não dá pra disparar sozinho).
+    await rodarValidacaoConvcli();
+
+    // Recolhe o mapeamento depois de aplicado — a grade de 30 campos some e
+    // sobra só um resumo + "Editar mapeamento", liberando a tela pra tabela
+    // (senão a barra de rolagem horizontal ficava lá embaixo, fora da vista).
+    const n = convcliCamposMapeados.length;
+    convcliMapaResumoTexto.textContent = `${n} campo${n === 1 ? "" : "s"} mapeado${n === 1 ? "" : "s"}.`;
+    convcliMapaDetalhe.classList.add("hidden");
+    convcliMapaResumo.classList.remove("hidden");
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+  } finally {
+    btnConvcliMapear.disabled = false;
+    btnConvcliMapear.textContent = "Aplicar mapeamento";
+  }
+});
+
+// Ordenação por coluna: clique alterna crescente ("menor pro maior"/A-Z) e
+// decrescente, mesmo padrão visual (th-ordenavel/seta-ordenacao) das outras
+// tabelas do app (ver valorOrdenavel/ordenarLinhas, linha ~116).
+function convcliValorColuna(registro, chave) {
+  return chave === "indice" ? registro.indice : registro.dados[chave];
+}
+
+function ordenarConvcliRegistros(registros) {
+  if (!convcliOrdenacao) return registros;
+  const { chave, direcao } = convcliOrdenacao;
+  return registros.slice().sort((a, b) => {
+    const va = valorOrdenavel(convcliValorColuna(a, chave));
+    const vb = valorOrdenavel(convcliValorColuna(b, chave));
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * direcao;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * direcao;
+  });
+}
+
+function renderConvcliTabelaCabecalho() {
+  convcliTabelaThead.innerHTML = "";
+  const tr = document.createElement("tr");
+
+  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+    const th = document.createElement("th");
+    th.className = "th-ordenavel";
+    th.style.width = `${larguraPadrao}px`; // ponto de partida; tornarColunasRedimensionaveis troca pela largura salva, se tiver
+    th.textContent = texto;
+    if (convcliOrdenacao && convcliOrdenacao.chave === chave) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = convcliOrdenacao.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = convcliOrdenacao && convcliOrdenacao.chave === chave ? -convcliOrdenacao.direcao : 1;
+      convcliOrdenacao = { chave, direcao };
+      convcliPagina = 1;
+      renderConvcliTabelaCabecalho();
+      renderConvcliTabela();
+    });
+    return th;
+  };
+
+  tr.appendChild(criarThOrdenavel("#", "indice", 60));
+  convcliCamposMapeados.forEach((campo) => tr.appendChild(criarThOrdenavel(campo.rotulo, campo.chave, 180)));
+
+  // Coluna de ações (excluir linha) — sem ordenação, só o botão.
+  const thAcoes = document.createElement("th");
+  thAcoes.style.width = "46px";
+  thAcoes.textContent = "";
+  tr.appendChild(thAcoes);
+
+  convcliTabelaThead.appendChild(tr);
+}
+
+function convcliTotalPaginas() {
+  return Math.max(1, Math.ceil(convcliRegistros.length / Number(convcliTamanhoPagina.value)));
+}
+
+// Mescla a validação local (/validar) com a duplicidade da SSX
+// (/verificar-duplicidade) — stores separados (um não apaga o outro ao
+// rodar de novo), combinados só na hora de exibir.
+function convcliProblemaCombinado(indice) {
+  const a = convcliProblemasPorIndice[indice];
+  const b = convcliDuplicadosPorIndice[indice];
+  if (!a && !b) return null;
+  return {
+    erros: [...(a ? a.erros : []), ...(b ? b.erros : [])],
+    avisos: [...(a ? a.avisos : []), ...(b ? b.avisos : [])],
+  };
+}
+
+function montarLinhaConvcli(registro) {
+  const tr = document.createElement("tr");
+  tr.dataset.indice = registro.indice; // usado por irParaPrimeiroErroConvcli pra achar a linha depois de re-renderizar
+  const problema = convcliProblemaCombinado(registro.indice);
+
+  const tdIndice = document.createElement("td");
+  let icone = "";
+  if (problema && problema.erros.length > 0) {
+    icone = "🔴 ";
+    tr.classList.add("conversor-edicao-linha-erro");
+  } else if (problema && problema.avisos.length > 0) {
+    icone = "⚠️ ";
+  } else if (problema) {
+    icone = "✓ ";
+  }
+  tdIndice.textContent = icone + registro.indice;
+  if (problema) {
+    const msgs = [...problema.erros.map((e) => `⛔ ${e.mensagem}`), ...problema.avisos.map((a) => `⚠️ ${a.mensagem}`)];
+    tr.title = msgs.join("\n");
+  }
+  tr.appendChild(tdIndice);
+
+  // Duplicata marca o PRÓPRIO campo, não só o ícone da linha — mais fácil de
+  // ver qual valor exato está repetido. Duas cores conforme a gravidade:
+  // "duplicado_ssx" (vermelho) = já existe um cliente ATIVO na SSX com esse
+  // valor; "duplicado_planilha" (amarelo) = só se repete dentro da própria
+  // planilha sendo importada agora (pode ser coincidência). Mapeia por
+  // rótulo do campo porque é assim que vem em "campo" nos avisos (ver
+  // verificar_duplicidade_ssx/verificar_duplicidade_interna em
+  // conversor_clientes.py — mesmo rótulo de CampoSpec.rotulo). Processa SSX
+  // por último de propósito: se os dois baterem no mesmo campo, o vermelho
+  // (mais grave) prevalece sobre o amarelo.
+  const duplicadosPorCampo = {};
+  if (problema) {
+    const todos = [...problema.erros, ...problema.avisos];
+    todos.filter((p) => p.categoria === "duplicado_planilha").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+    todos.filter((p) => p.categoria === "duplicado_ssx").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+  }
+
+  convcliCamposMapeados.forEach((campo) => {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = registro.dados[campo.chave] || "";
+    const duplicado = duplicadosPorCampo[campo.rotulo];
+    if (duplicado) {
+      input.classList.add(duplicado.categoria === "duplicado_ssx" ? "convcli-campo-duplicado" : "convcli-campo-duplicado-planilha");
+      input.title = duplicado.mensagem;
+    }
+    input.addEventListener("change", async () => {
+      registro.dados[campo.chave] = input.value;
+      try {
+        const r = await fetch("/api/conversor-clientes/editar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: convcliFileId, indice: registro.indice, campo: campo.chave, valor: input.value }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return mostrarErroConvcli(data.error || "Falha ao salvar a edição.");
+        // Validação local (duplicidade dentro da planilha incluída) roda de
+        // novo sozinha a cada edição — "em tempo real", sem precisar clicar
+        // em "Validar planilha". Só "Verificar na SSX" continua manual.
+        await rodarValidacaoConvcli();
+      } catch (err) {
+        mostrarErroConvcli(err.message || String(err));
+      }
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+
+  const tdAcoes = document.createElement("td");
+  tdAcoes.className = "convcli-td-acoes";
+  const btnExcluir = document.createElement("button");
+  btnExcluir.type = "button";
+  btnExcluir.className = "btn-secondary convcli-btn-excluir-linha";
+  btnExcluir.textContent = "🗑️";
+  btnExcluir.title = "Excluir esta linha";
+  btnExcluir.addEventListener("click", () => excluirLinhaConvcli(registro.indice));
+  tdAcoes.appendChild(btnExcluir);
+  tr.appendChild(tdAcoes);
+
+  return tr;
+}
+
+function renderConvcliTabela() {
+  const tamanho = Number(convcliTamanhoPagina.value);
+  const registrosOrdenados = ordenarConvcliRegistros(convcliRegistros);
+  convcliPagina = Math.min(Math.max(1, convcliPagina), convcliTotalPaginas());
+  const inicio = (convcliPagina - 1) * tamanho;
+  convcliTabelaTbody.innerHTML = "";
+  registrosOrdenados.slice(inicio, inicio + tamanho).forEach((r) => convcliTabelaTbody.appendChild(montarLinhaConvcli(r)));
+  // Larguras de coluna arrastáveis, igual Excel — tbody é recriado a cada
+  // página/transformação/validação, por isso chama de novo a cada vez aqui
+  // (a função é idempotente: não duplica alça, só reaplica largura salva).
+  tornarColunasRedimensionaveis(convcliTabelaElemento, CONVCLI_LARGURAS_KEY);
+
+  convcliPaginacao.innerHTML = "";
+  const total = convcliTotalPaginas();
+  if (total > 1) {
+    const anterior = document.createElement("button");
+    anterior.type = "button";
+    anterior.className = "btn-secondary";
+    anterior.textContent = "‹ Anterior";
+    anterior.disabled = convcliPagina === 1;
+    anterior.addEventListener("click", () => { convcliPagina--; renderConvcliTabela(); });
+    const info = document.createElement("span");
+    info.textContent = `Página ${convcliPagina} de ${total}`;
+    const proxima = document.createElement("button");
+    proxima.type = "button";
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima ›";
+    proxima.disabled = convcliPagina === total;
+    proxima.addEventListener("click", () => { convcliPagina++; renderConvcliTabela(); });
+    [anterior, info, proxima].forEach((n) => convcliPaginacao.appendChild(n));
+  }
+}
+convcliTamanhoPagina.addEventListener("change", () => { convcliPagina = 1; renderConvcliTabela(); });
+
+// --- EXCLUIR / ADICIONAR LINHA ---
+async function excluirLinhaConvcli(indice) {
+  if (!convcliFileId) return;
+  if (!confirm(`Excluir a linha ${indice}? Essa ação não pode ser desfeita.`)) return;
+  try {
+    const r = await fetch("/api/conversor-clientes/excluir-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId, indice }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcli(data.error || "Falha ao excluir a linha.");
+    convcliRegistros = convcliRegistros.filter((r2) => r2.indice !== indice);
+    delete convcliDuplicadosPorIndice[indice];
+    // Revalida tudo (não só tira a linha excluída do dict): excluir pode
+    // "limpar" uma duplicata que só existia por causa dela — ex. se a linha
+    // excluída era a 1ª ocorrência de um nome repetido, a que restou deixa
+    // de ser duplicata depois que ela sai.
+    await rodarValidacaoConvcli();
+    mostrarInfoConvcli(`Linha ${indice} excluída.`);
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+  }
+}
+
+el("btn-convcli-adicionar-linha").addEventListener("click", async () => {
+  if (!convcliFileId) return;
+  try {
+    const r = await fetch("/api/conversor-clientes/adicionar-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcli(data.error || "Falha ao adicionar a linha.");
+    convcliRegistros.push(data.registro);
+    // Sem ordenação ativa a linha nova sempre cai no fim — com ordenação
+    // ativa, a posição dela ia depender dos valores (todos vazios) de um
+    // jeito pouco previsível; mais simples voltar pra ordem natural aqui.
+    convcliOrdenacao = null;
+    renderConvcliTabelaCabecalho();
+    convcliPagina = convcliTotalPaginas(); // pula pra última página, onde a linha nova vai aparecer
+    // Já valida — linha nova costuma faltar campo obrigatório (ex.: nome,
+    // código de integração), fica visível de cara sem precisar editar nada
+    // primeiro pra só então descobrir.
+    await rodarValidacaoConvcli();
+    mostrarInfoConvcli(`Linha ${data.registro.indice} adicionada — preencha os campos.`);
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+  }
+});
+
+el("btn-convcli-limpar-vazias").addEventListener("click", async () => {
+  if (!convcliFileId) return;
+  try {
+    const r = await fetch("/api/conversor-clientes/limpar-vazias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcli(data.error || "Falha ao limpar as linhas vazias.");
+    convcliRegistros = convcliRegistros.filter((reg) => Object.values(reg.dados).some((v) => (v || "").trim()));
+    convcliPagina = 1;
+    await rodarValidacaoConvcli();
+    mostrarInfoConvcli(data.removidos ? `${data.removidos} linha(s) vazia(s) removida(s).` : "Nenhuma linha vazia encontrada.");
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+  }
+});
+
+// Transformações em massa (seção 6 do pedido): roda no servidor sobre TODAS as
+// linhas mapeadas (seleção de linhas específicas fica pra uma próxima etapa) e
+// devolve só os registros que mudaram, pra não precisar redesenhar tudo.
+// `montarMensagem`, se passado, recebe a resposta inteira do servidor e monta
+// a mensagem de resumo — sem ele, usa a mensagem genérica de sempre.
+async function rodarTransformacaoConvcli(acao, params, montarMensagem) {
+  if (!convcliFileId) return;
+  try {
+    const r = await fetch("/api/conversor-clientes/transformar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId, acao, params: params || {} }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcli(data.error || "Falha ao aplicar a transformação.");
+    const porIndice = new Map(data.registros.map((r2) => [r2.indice, r2]));
+    convcliRegistros = convcliRegistros.map((r2) => porIndice.get(r2.indice) || r2);
+    // Validação local roda de novo sozinha (duplicidade dentro da planilha
+    // incluída) — a transformação pode ter mudado Nome/CPF/Login/etc. Já
+    // redesenha a tabela sozinha, não precisa chamar renderConvcliTabela()
+    // de novo aqui. Só "Verificar na SSX" continua manual.
+    await rodarValidacaoConvcli();
+    mostrarInfoConvcli(montarMensagem ? montarMensagem(data) : `${data.total_alterados} registro(s) alterado(s).`);
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+  }
+}
+
+el("btn-convcli-limpar-docs").addEventListener("click", () => rodarTransformacaoConvcli("limpar_documentos"));
+el("btn-convcli-gerar-emails").addEventListener("click", () => {
+  const dominio = el("convcli-dominio-email").value.trim();
+  if (!dominio) return mostrarErroConvcli("Informe o domínio pra gerar os logins ausentes.");
+  rodarTransformacaoConvcli("gerar_emails", { dominio });
+});
+el("btn-convcli-preencher-senhas").addEventListener("click", () => {
+  const senha = el("convcli-senha-padrao").value.trim();
+  if (!senha) return mostrarErroConvcli("Informe a senha a ser preenchida.");
+  const sobrescrever = el("convcli-senha-sobrescrever").checked;
+  rodarTransformacaoConvcli("preencher_senhas", { senha, sobrescrever });
+});
+el("btn-convcli-ajustar-tipo-pessoa").addEventListener("click", () => {
+  rodarTransformacaoConvcli("ajustar_tipo_pessoa", {}, (data) =>
+    `${data.pessoas_fisicas} pessoa(s) física(s), ${data.pessoas_juridicas} pessoa(s) jurídica(s) identificada(s)`
+    + (data.indefinidos ? ` e ${data.indefinidos} linha(s) sem CPF/CNPJ reconhecível (correção manual).` : "."));
+});
+el("btn-convcli-separar-endereco").addEventListener("click", () => {
+  rodarTransformacaoConvcli("separar_endereco", {}, (data) =>
+    `${data.enderecos_separados} endereço(s) separado(s)`
+    + (data.enderecos_ignorados ? ` e ${data.enderecos_ignorados} linha(s) sem endereço combinado reconhecível (já estava só a rua, ou vazio).` : "."));
+});
+el("btn-convcli-ajustar-telefones").addEventListener("click", () => {
+  const dddPadrao = el("convcli-ddd-padrao").value.trim() || "55";
+  rodarTransformacaoConvcli("ajustar_telefones", { ddd_padrao: dddPadrao }, (data) =>
+    `${data.telefones_ajustados} telefone(s) ajustado(s)`
+    + (data.telefones_nao_reconhecidos ? ` e ${data.telefones_nao_reconhecidos} número(s) com quantidade de dígitos não reconhecida (correção manual).` : "."));
+});
+el("btn-convcli-repetir-nome-usuario").addEventListener("click", () => {
+  rodarTransformacaoConvcli("repetir_nome_usuario", {}, (data) => `${data.repetidos} nome(s) repetido(s) em Nome do usuário.`);
+});
+el("btn-convcli-repetir-codigo-pessoa").addEventListener("click", () => {
+  rodarTransformacaoConvcli("repetir_codigo_integracao_pessoa", {}, (data) => `${data.repetidos} código(s) repetido(s) em Código integração pessoa.`);
+});
+el("btn-convcli-preencher-template").addEventListener("click", () => {
+  const valor = el("convcli-template-cliente-valor").value.trim();
+  if (!valor) return mostrarErroConvcli("Informe o template do cliente a ser preenchido.");
+  rodarTransformacaoConvcli("preencher_template_cliente", { valor }, (data) => `${data.preenchidos} linha(s) preenchida(s) com o template "${valor}".`);
+});
+el("btn-convcli-preencher-perfil").addEventListener("click", () => {
+  const valor = el("convcli-perfil-acesso-valor").value.trim();
+  if (!valor) return mostrarErroConvcli("Informe o perfil de acesso a ser preenchido.");
+  rodarTransformacaoConvcli("preencher_perfil_acesso", { valor }, (data) => `${data.preenchidos} linha(s) preenchida(s) com o perfil "${valor}".`);
+});
+
+function renderConvcliResumo(data) {
+  convcliResumo.innerHTML = "";
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.n_ok, label: "Válidos" },
+    { valor: data.n_erro, label: "Com erro", clicavel: data.n_erro > 0 },
+  ].forEach(({ valor, label, clicavel }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    tile.appendChild(l);
+    tile.appendChild(v);
+    if (clicavel) {
+      tile.classList.add("stat-tile-clicavel");
+      tile.title = "Ir para o primeiro registro com erro";
+      tile.addEventListener("click", irParaPrimeiroErroConvcli);
+    }
+    tiles.appendChild(tile);
+  });
+  convcliResumo.appendChild(tiles);
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) válidos para importar.`;
+  convcliResumo.appendChild(legenda);
+}
+
+// Pula pro primeiro registro com ERRO (não aviso), na mesma ordem em que a
+// tabela está exibida agora (respeita ordenação por coluna, se tiver uma
+// ativa) — troca de página se precisar e rola/realça a linha, pra não
+// obrigar a usuária a caçar manualmente entre centenas de linhas.
+function irParaPrimeiroErroConvcli() {
+  const ordenados = ordenarConvcliRegistros(convcliRegistros);
+  const posicao = ordenados.findIndex((r) => {
+    const p = convcliProblemaCombinado(r.indice);
+    return p && p.erros.length > 0;
+  });
+  if (posicao === -1) return;
+
+  const tamanho = Number(convcliTamanhoPagina.value);
+  convcliPagina = Math.floor(posicao / tamanho) + 1;
+  renderConvcliTabela();
+
+  const indice = ordenados[posicao].indice;
+  const tr = convcliTabelaTbody.querySelector(`tr[data-indice="${indice}"]`);
+  if (!tr) return;
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  tr.classList.add("convcli-linha-destacada");
+  setTimeout(() => tr.classList.remove("convcli-linha-destacada"), 2200);
+}
+
+async function rodarValidacaoConvcli() {
+  if (!convcliFileId) return null;
+  try {
+    const r = await fetch("/api/conversor-clientes/validar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvcli(data.error || "Falha ao validar.");
+      return null;
+    }
+    convcliProblemasPorIndice = {};
+    data.problemas.forEach((p) => { convcliProblemasPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvcliResumo(data);
+    renderConvcliTabela();
+    return data;
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+    return null;
+  }
+}
+el("btn-convcli-validar").addEventListener("click", () => rodarValidacaoConvcli());
+
+// --- VERIFICAR DUPLICIDADE NA SSX (opcional — exige login na API da SSX) ---
+// O /api/login chamado aqui é o mesmo da Área de Importação e Consulta (POST
+// /Login da SSX, token guardado na sessão Flask) — então dá pra reaproveitar
+// os logins salvos e o próprio backend não muda nada. Mas a CONFIRMAÇÃO de
+// "pode verificar/importar" (convcliSsxOk, acima) é local a esta tela e esta
+// planilha: não confia num token de sessão que ainda esteja válido de uma
+// aba/recarregamento anterior — sempre exige passar pelo modal de login de
+// novo depois de F5 ou de trocar de arquivo, de propósito (ver convcliSsxOk).
+// Como é opcional e não faz parte do fluxo normal (CSV), esse login só
+// aparece quando a usuária de fato pede pra verificar, num modal próprio —
+// não tem campo de login fixo na tela.
+const overlayConvcliLogin = el("overlay-convcli-login");
+const selectConvcliCredencial = el("convcli-select-credencial");
+
+function renderSelectConvcliCredenciais() {
+  selectConvcliCredencial.innerHTML = '<option value="">Login salvo...</option>';
+  credenciaisCache.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nome;
+    selectConvcliCredencial.appendChild(opt);
+  });
+}
+
+selectConvcliCredencial.addEventListener("change", () => {
+  const cred = credenciaisCache.find((c) => c.id === selectConvcliCredencial.value);
+  if (!cred) return;
+  el("convcli-login").value = cred.login;
+  el("convcli-senha").value = cred.senha;
+  selectConvcliCredencial.value = "";
+});
+
+// Esse login é compartilhado por dois gatilhos ("Verificar na SSX" e
+// "Importar via API") que precisam continuar em lugares diferentes depois de
+// logar — null = padrão (verificar duplicidade); setado antes de abrir o
+// overlay quando quem chamou precisa seguir pra outro lugar.
+let convcliLoginAoEntrar = null;
+
+el("convcli-login-fechar").addEventListener("click", () => {
+  convcliLoginAoEntrar = null;
+  overlayConvcliLogin.classList.add("hidden");
+});
+
+el("form-convcli-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const login = el("convcli-login").value.trim();
+  const senha = el("convcli-senha").value;
+  if (!login || !senha) return;
+  const btn = el("btn-convcli-autenticar");
+  btn.disabled = true;
+  btn.textContent = "Entrando...";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvcli(data.error || "Falha ao autenticar na SSX.");
+      return;
+    }
+    convcliSsxOk = true;
+    convcliSsxLogin = login;
+    convcliSsxBase = extrairNomeBaseDeClaims(data.claims);
+    convcliSsxClaimsRaw = data.claims || null;
+    convcliAtualizarPillAuth();
+    overlayConvcliLogin.classList.add("hidden");
+    el("convcli-senha").value = "";
+    const aoEntrar = convcliLoginAoEntrar;
+    convcliLoginAoEntrar = null;
+    if (aoEntrar) return await aoEntrar();
+    await rodarVerificacaoDuplicidadeConvcli();
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Entrar";
+  }
+});
+
+el("btn-convcli-logout-ssx").addEventListener("click", async () => {
+  await fetch("/api/logout-avulso", { method: "POST" });
+  convcliSsxOk = false;
+  convcliSsxLogin = "";
+  convcliSsxBase = "";
+  convcliSsxClaimsRaw = null;
+  convcliAtualizarPillAuth();
+  // Some com o resultado de "Verificar na SSX" (destaque vermelho) junto —
+  // ele veio de uma sessão que acabou de ser encerrada, não faz sentido
+  // continuar mostrando como se ainda valesse.
+  convcliDuplicadosPorIndice = {};
+  renderConvcliTabela();
+  mostrarInfoConvcli("Sessão da SSX encerrada.");
+});
+
+async function rodarVerificacaoDuplicidadeConvcli() {
+  if (!convcliFileId) return null;
+  const btn = el("btn-convcli-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-clientes/verificar-duplicidade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convcliSsxOk = false;
+        convcliAtualizarPillAuth();
+        renderSelectConvcliCredenciais();
+        overlayConvcliLogin.classList.remove("hidden");
+        return null;
+      }
+      mostrarErroConvcli(data.error || "Falha ao verificar duplicidade na SSX.");
+      return null;
+    }
+    convcliDuplicadosPorIndice = {};
+    data.problemas.forEach((p) => { convcliDuplicadosPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvcliTabela();
+    mostrarInfoConvcli(
+      data.total_duplicados
+        ? `${data.total_duplicados} de ${data.total_verificados} registro(s) com possível duplicata na SSX (só clientes ativos são comparados).`
+        : `Nenhuma duplicata encontrada entre os ${data.total_verificados} registro(s) verificados (só clientes ativos são comparados).`
+    );
+    return data;
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar na SSX";
+  }
+}
+
+el("btn-convcli-verificar-ssx").addEventListener("click", () => {
+  if (!convcliFileId) return;
+  if (!convcliSsxOk) {
+    convcliLoginAoEntrar = null;
+    renderSelectConvcliCredenciais();
+    overlayConvcliLogin.classList.remove("hidden");
+    return;
+  }
+  rodarVerificacaoDuplicidadeConvcli();
+});
+
+// Botão "Templates": lista o Template de cliente, a Unidade organizacional e
+// o Perfil de acesso usados na planilha inteira — aparece SEMPRE, direto de
+// convcliRegistros (já em memória), sem exigir login. Mesma ideia do botão
+// equivalente do Conversor de Veículos (ver abrirModalConvveiTemplates
+// acima) — a cor vermelha (⚠ "falta cadastrar") só aparece depois de
+// "Verificar cadastro na SSX", que aí sim pede autenticação.
+const overlayConvcliTemplates = el("overlay-convcli-templates");
+const convcliTemplatesListaTemplates = el("convcli-templates-lista-templates");
+const convcliTemplatesListaUos = el("convcli-templates-lista-uos");
+const convcliTemplatesListaPerfis = el("convcli-templates-lista-perfis");
+const convcliTemplatesLegenda = el("convcli-templates-legenda");
+// null = ainda não verificado na SSX nesta planilha; senão
+// {templates:[{valor,cadastrado}], uos:[...], perfis:[...]} vindo de
+// /listar-templates-perfis — reseta ao trocar de arquivo.
+let convcliTemplatesResultado = null;
+
+function convcliValoresDistintos(campo) {
+  const vistos = new Set();
+  convcliRegistros.forEach((r) => {
+    const valor = (r.dados[campo] || "").trim();
+    if (valor) vistos.add(valor);
+  });
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+}
+
+function renderConvcliTemplatesLista(container, itens) {
+  container.innerHTML = "";
+  itens.forEach(({ valor, cadastrado }) => {
+    const li = document.createElement("li");
+    if (cadastrado === false) {
+      li.classList.add("convvei-templates-faltando");
+      li.textContent = `⚠ ${valor}`;
+      li.title = "Falta cadastrar na SSX";
+    } else if (cadastrado === true) {
+      li.textContent = `✓ ${valor}`;
+      li.title = "Já cadastrado na SSX";
+    } else {
+      li.textContent = valor;
+    }
+    container.appendChild(li);
+  });
+}
+
+function renderConvcliTemplatesModal() {
+  if (convcliTemplatesResultado) {
+    renderConvcliTemplatesLista(convcliTemplatesListaTemplates, convcliTemplatesResultado.templates);
+    renderConvcliTemplatesLista(convcliTemplatesListaUos, convcliTemplatesResultado.uos);
+    renderConvcliTemplatesLista(convcliTemplatesListaPerfis, convcliTemplatesResultado.perfis);
+    convcliTemplatesLegenda.textContent = "⚠ em vermelho = falta cadastrar na SSX; ✓ = já cadastrado.";
+  } else {
+    const templates = convcliValoresDistintos("template_cliente").map((valor) => ({ valor }));
+    const uos = convcliValoresDistintos("unidade_organizacional").map((valor) => ({ valor }));
+    const perfis = convcliValoresDistintos("perfil_acesso").map((valor) => ({ valor }));
+    renderConvcliTemplatesLista(convcliTemplatesListaTemplates, templates);
+    renderConvcliTemplatesLista(convcliTemplatesListaUos, uos);
+    renderConvcliTemplatesLista(convcliTemplatesListaPerfis, perfis);
+    convcliTemplatesLegenda.textContent = 'Valores usados na planilha — clique em "Verificar cadastro na SSX" pra ver o que já está cadastrado.';
+  }
+}
+
+async function verificarConvcliTemplatesNaSsx() {
+  if (!convcliFileId) return;
+  const btn = el("btn-convcli-templates-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-clientes/listar-templates-perfis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcliFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convcliSsxOk = false;
+        convcliAtualizarPillAuth();
+        convcliLoginAoEntrar = verificarConvcliTemplatesNaSsx;
+        renderSelectConvcliCredenciais();
+        overlayConvcliLogin.classList.remove("hidden");
+        return;
+      }
+      mostrarErroConvcli(data.error || "Falha ao consultar templates/UO/perfis na SSX.");
+      return;
+    }
+    convcliTemplatesResultado = { templates: data.templates, uos: data.uos, perfis: data.perfis };
+    renderConvcliTemplatesModal();
+  } catch (err) {
+    mostrarErroConvcli(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar cadastro na SSX";
+  }
+}
+
+el("btn-convcli-templates").addEventListener("click", () => {
+  if (!convcliFileId) {
+    return mostrarErroConvcli("Carregue e mapeie uma planilha no Conversor de Clientes antes.");
+  }
+  renderConvcliTemplatesModal();
+  overlayConvcliTemplates.classList.remove("hidden");
+});
+
+el("btn-convcli-templates-verificar-ssx").addEventListener("click", () => {
+  if (!convcliSsxOk) {
+    convcliLoginAoEntrar = verificarConvcliTemplatesNaSsx;
+    renderSelectConvcliCredenciais();
+    overlayConvcliLogin.classList.remove("hidden");
+    return;
+  }
+  verificarConvcliTemplatesNaSsx();
+});
+
+el("convcli-templates-fechar").addEventListener("click", () => {
+  overlayConvcliTemplates.classList.add("hidden");
+});
+
+function baixarConvcliArquivo(modo) {
+  const a = document.createElement("a");
+  a.href = `/api/conversor-clientes/exportar/${convcliFileId}/${modo}`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// Pop-up "tem cliente com erro" — mesmo padrão visual/fluxo do pop-up equivalente
+// do conversor KML (.modal-aviso-erro em style.css), com os textos certos pro
+// contexto de clientes.
+const overlayConvcliBaixarErro = el("overlay-convcli-baixar-erro");
+const textoConvcliBaixarErro = el("convcli-baixar-erro-texto");
+let resolverConvcliBaixarErro = null;
+function fecharConvcliBaixarErro(escolha) {
+  overlayConvcliBaixarErro.classList.add("hidden");
+  const resolve = resolverConvcliBaixarErro;
+  resolverConvcliBaixarErro = null;
+  if (resolve) resolve(escolha);
+}
+function confirmarConvcliBaixarErro(nComErro) {
+  const plural = nComErro === 1 ? "cliente não passou" : "clientes não passaram";
+  textoConvcliBaixarErro.textContent =
+    `${nComErro} ${plural} na validação e podem ser rejeitados pelo SSX na importação. Baixe só os válidos, ou inclua os com erro pra corrigir depois.`;
+  overlayConvcliBaixarErro.classList.remove("hidden");
+  return new Promise((resolve) => { resolverConvcliBaixarErro = resolve; });
+}
+el("convcli-baixar-erro-fechar").addEventListener("click", () => fecharConvcliBaixarErro("cancelar"));
+el("btn-convcli-baixar-erro-cancelar").addEventListener("click", () => fecharConvcliBaixarErro("cancelar"));
+el("btn-convcli-baixar-com-erros").addEventListener("click", () => fecharConvcliBaixarErro("com-erros"));
+el("btn-convcli-baixar-sem-erros").addEventListener("click", () => fecharConvcliBaixarErro("sem-erros"));
+
+el("btn-convcli-baixar").addEventListener("click", async () => {
+  if (!convcliFileId) return;
+  const resultado = await rodarValidacaoConvcli();
+  if (!resultado) return;
+  if (resultado.n_erro > 0) {
+    const escolha = await confirmarConvcliBaixarErro(resultado.n_erro);
+    if (escolha === "cancelar") return;
+    baixarConvcliArquivo(escolha === "com-erros" ? "todos" : "validos");
+  } else {
+    baixarConvcliArquivo("todos");
+  }
+});
+
+// Alternativa ao "Baixar arquivo para importação": abre o mesmo modal de
+// importação genérico (upload -> mapear colunas -> progresso) usado em Área
+// de Importação e Consulta, já pronto pro tipo "cliente" — não reaproveita o
+// arquivo/mapeamento já carregados aqui (planilha de origem e layout costumam
+// ser diferentes do CSV da SSX), é um fluxo de importação à parte.
+el("btn-convcli-importar-api").addEventListener("click", () => {
+  if (!convcliFileId) {
+    return mostrarErroConvcli("Carregue e mapeie uma planilha no Conversor de Clientes antes.");
+  }
+  // Mesma sessão avulsa de "Verificar na SSX" (/api/login grava o mesmo
+  // session["token"] dos dois) — não existe uma autenticação "global"
+  // separada; se ainda não logou aqui nesta aba, abre o mesmo login, igual
+  // o botão "Verificar na SSX" faz.
+  if (!convcliSsxOk) {
+    convcliLoginAoEntrar = abrirModalImportDeConvcli;
+    renderSelectConvcliCredenciais();
+    overlayConvcliLogin.classList.remove("hidden");
+    return;
+  }
+  abrirModalImportDeConvcli();
+});
+
+// --- CONVERSOR DE VEÍCULOS -> SSX ---
+// Sub-tela "/ferramentas/conversor-veiculos": mesmo fluxo e mesmo molde da
+// seção "CONVERSOR DE CLIENTES -> SSX" acima (upload -> mapear colunas ->
+// ajustar/transformar -> validar -> exportar), rodando no servidor
+// (conversor_veiculos.py + validador_importacao/) — só as transformações em
+// massa mudam (campos de veículo/rastreador/chip em vez de pessoa/endereço).
+const convveiInputArquivo = el("convvei-input-arquivo");
+const convveiArquivoNome = el("convvei-arquivo-nome");
+const convveiSecaoMapeamento = el("convvei-secao-mapeamento");
+const convveiMapaCampos = el("convvei-mapa-campos");
+const convveiMapaResumo = el("convvei-mapa-resumo");
+const convveiMapaResumoTexto = el("convvei-mapa-resumo-texto");
+const convveiMapaDetalhe = el("convvei-mapa-detalhe");
+const btnConvveiMapear = el("btn-convvei-mapear");
+const convveiSecaoTrabalho = el("convvei-secao-trabalho");
+const convveiResumo = el("convvei-resumo");
+const convveiTabelaThead = el("convvei-tabela-thead");
+const convveiTabelaTbody = el("convvei-tabela-tbody");
+const convveiTabelaElemento = convveiTabelaThead.closest("table");
+const convveiTamanhoPagina = el("convvei-tamanho-pagina");
+const convveiPaginacao = el("convvei-paginacao");
+const convveiTabelaArea = el("convvei-tabela-area");
+const CONVVEI_LARGURAS_KEY = "larguraColunas_convveiVeiculos";
+
+// Mesmo ajuste de altura do Conversor de Clientes (ver ajustarAlturaConvcliTabelaArea
+// acima) — reaproveita o mesmo elConteudoPrincipal/ResizeObserver já criados lá.
+function ajustarAlturaConvveiTabelaArea() {
+  if (!convveiTabelaArea || !elConteudoPrincipal) return;
+  convveiTabelaArea.style.height = `${elConteudoPrincipal.clientHeight - 24}px`;
+}
+if (elConteudoPrincipal && window.ResizeObserver) {
+  new ResizeObserver(ajustarAlturaConvveiTabelaArea).observe(elConteudoPrincipal);
+}
+window.addEventListener("resize", ajustarAlturaConvveiTabelaArea);
+
+let convveiFileId = null;
+let convveiColunasOrigem = [];
+let convveiCampos = [];          // definição oficial (chave, rótulo, obrigatório, tipo, tamanho_max)
+let convveiCamposMapeados = [];  // subconjunto de convveiCampos que entrou no mapeamento aplicado
+let convveiRegistros = [];       // [{indice, original, dados}]
+let convveiProblemasPorIndice = {}; // {indice: {erros:[...], avisos:[...]}}, populado por /validar
+let convveiDuplicadosPorIndice = {}; // idem, mas populado por /verificar-duplicidade (SSX) — store separado pra um não apagar o outro
+let convveiNomeBase = "veiculos";
+let convveiPagina = 1;
+let convveiOrdenacao = null; // { chave: "indice" | "problema" | <campo.chave>, direcao: 1 | -1 }
+
+// Autenticação na SSX pra "Verificar na SSX" — flag PRÓPRIA desta tela (nunca
+// estado.autenticado, de outra tela — ver gotcha nº1 do Conversor de Clientes).
+// Começa falsa sempre e volta a falsa ao trocar de arquivo.
+let convveiSsxOk = false;
+let convveiSsxLogin = "";
+let convveiSsxBase = "";
+let convveiSsxClaimsRaw = null;
+
+function convveiAtualizarPillAuth() {
+  const pill = el("convvei-status-auth");
+  const btnLogout = el("btn-convvei-logout-ssx");
+  if (convveiSsxOk) {
+    pill.textContent = convveiSsxLogin
+      ? `Autenticado na SSX (${convveiSsxLogin}${convveiSsxBase ? " — " + convveiSsxBase : ""})`
+      : "Autenticado na SSX";
+    pill.title = convveiSsxClaimsRaw ? JSON.stringify(convveiSsxClaimsRaw) : "";
+    pill.className = "status-pill status-on";
+    btnLogout.classList.remove("hidden");
+  } else {
+    pill.textContent = "Não autenticado na SSX";
+    pill.className = "status-pill status-off";
+    btnLogout.classList.add("hidden");
+  }
+}
+
+function limparConvvei() {
+  convveiFileId = null;
+  convveiColunasOrigem = [];
+  convveiCamposMapeados = [];
+  convveiRegistros = [];
+  convveiProblemasPorIndice = {};
+  convveiDuplicadosPorIndice = {};
+  convveiSsxOk = false;
+  convveiSsxLogin = "";
+  convveiSsxBase = "";
+  convveiSsxClaimsRaw = null;
+  convveiAtualizarPillAuth();
+  convveiNomeBase = "veiculos";
+  convveiPagina = 1;
+  convveiOrdenacao = null;
+  convveiInputArquivo.value = "";
+  convveiArquivoNome.textContent = "Nenhum arquivo selecionado";
+  convveiSecaoMapeamento.classList.add("hidden");
+  convveiSecaoTrabalho.classList.add("hidden");
+  convveiMapaResumo.classList.add("hidden");
+  convveiMapaDetalhe.classList.remove("hidden");
+  convveiMapaCampos.innerHTML = "";
+  convveiResumo.innerHTML = "";
+  convveiTabelaThead.innerHTML = "";
+  convveiTabelaTbody.innerHTML = "";
+  convveiPaginacao.innerHTML = "";
+  btnConvveiMapear.disabled = true;
+}
+limparConvvei();
+
+// mostrarErro() genérico escreve no painel "Saída", escondido em Ferramentas
+// Auxiliares (ver gotcha nº2 do Conversor de Clientes) — por isso função
+// própria, que escreve dentro desta sub-tela.
+function mostrarErroConvvei(msg) {
+  convveiResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  convveiResumo.appendChild(p);
+}
+
+function mostrarInfoConvvei(msg) {
+  convveiResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = msg;
+  convveiResumo.appendChild(p);
+}
+
+async function carregarConvveiCampos() {
+  if (convveiCampos.length) return convveiCampos;
+  const r = await fetch("/api/conversor-veiculos/campos");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "Falha ao carregar os campos da SSX.");
+  convveiCampos = data.campos;
+  return convveiCampos;
+}
+
+// Mapeamento padrão: posicional, pela ordem oficial do manual da SSX — mesma
+// regra do Conversor de Clientes (ver renderConvcliMapaCampos).
+function renderConvveiMapaCampos() {
+  convveiMapaCampos.innerHTML = "";
+  convveiCampos.forEach((campo, i) => {
+    const linha = document.createElement("div");
+    linha.className = "convcli-mapa-linha";
+
+    const nome = document.createElement("span");
+    nome.className = "convcli-mapa-nome";
+    const marca = campo.obrigatorio === true ? " *" : campo.obrigatorio === "condicional" ? " (condicional)" : "";
+    nome.textContent = campo.rotulo + marca;
+    nome.title = campo.rotulo + marca;
+
+    const select = document.createElement("select");
+    select.dataset.campo = campo.chave;
+    const optVazio = document.createElement("option");
+    optVazio.value = "";
+    optVazio.textContent = "— não mapear —";
+    select.appendChild(optVazio);
+    convveiColunasOrigem.forEach((col) => {
+      const opt = document.createElement("option");
+      opt.value = col;
+      opt.textContent = col;
+      select.appendChild(opt);
+    });
+    if (convveiColunasOrigem[i] !== undefined) select.value = convveiColunasOrigem[i];
+
+    linha.appendChild(nome);
+    linha.appendChild(select);
+    convveiMapaCampos.appendChild(linha);
+  });
+}
+
+el("btn-convvei-mapear-limpar").addEventListener("click", () => {
+  convveiMapaCampos.querySelectorAll("select").forEach((sel) => { sel.value = ""; });
+});
+
+el("btn-convvei-mapear-auto").addEventListener("click", () => {
+  convveiMapaCampos.querySelectorAll("select").forEach((sel, i) => {
+    sel.value = convveiColunasOrigem[i] !== undefined ? convveiColunasOrigem[i] : "";
+  });
+});
+
+el("btn-convvei-mapa-editar").addEventListener("click", () => {
+  convveiMapaResumo.classList.add("hidden");
+  convveiMapaDetalhe.classList.remove("hidden");
+});
+
+convveiInputArquivo.addEventListener("change", async () => {
+  const file = convveiInputArquivo.files[0];
+  if (!file) return;
+  convveiArquivoNome.textContent = "Enviando...";
+  convveiSecaoTrabalho.classList.add("hidden");
+  convveiSecaoMapeamento.classList.add("hidden");
+  convveiSsxOk = false;
+  convveiDuplicadosPorIndice = {};
+  convveiAtualizarPillAuth();
+  resetarConvveiGt06();
+  convveiTemplatesResultado = null;
+  try {
+    await carregarConvveiCampos();
+    const formData = new FormData();
+    formData.append("arquivo", file);
+    const r = await fetch("/api/conversor-veiculos/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      convveiArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErroConvvei(data.error || "Falha ao enviar arquivo.");
+    }
+    convveiFileId = data.file_id;
+    convveiColunasOrigem = data.colunas;
+    convveiNomeBase = file.name.replace(/\.(xlsx|xls|csv)$/i, "");
+    convveiArquivoNome.textContent = `${file.name} (${data.total_linhas} linha(s))`;
+    renderConvveiMapaCampos();
+    convveiSecaoMapeamento.classList.remove("hidden");
+    btnConvveiMapear.disabled = false;
+  } catch (err) {
+    convveiArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErroConvvei(err.message || String(err));
+  }
+});
+
+btnConvveiMapear.addEventListener("click", async () => {
+  const mapping = {};
+  convveiMapaCampos.querySelectorAll("select").forEach((sel) => {
+    if (sel.value) mapping[sel.dataset.campo] = sel.value;
+  });
+  if (Object.keys(mapping).length === 0) {
+    return mostrarErroConvvei("Mapeie ao menos uma coluna antes de continuar.");
+  }
+  btnConvveiMapear.disabled = true;
+  btnConvveiMapear.textContent = "Aplicando...";
+  try {
+    const r = await fetch("/api/conversor-veiculos/mapear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId, mapping }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvvei(data.error || "Falha ao aplicar o mapeamento.");
+    convveiRegistros = data.registros;
+    convveiCamposMapeados = convveiCampos.filter((c) => mapping[c.chave]);
+    convveiProblemasPorIndice = {};
+    convveiDuplicadosPorIndice = {};
+    convveiPagina = 1;
+    convveiOrdenacao = null;
+    convveiSecaoTrabalho.classList.remove("hidden");
+    ajustarAlturaConvveiTabelaArea();
+    renderConvveiTabelaCabecalho();
+    renderConvveiTabela();
+    await rodarValidacaoConvvei();
+
+    const n = convveiCamposMapeados.length;
+    convveiMapaResumoTexto.textContent = `${n} campo${n === 1 ? "" : "s"} mapeado${n === 1 ? "" : "s"}.`;
+    convveiMapaDetalhe.classList.add("hidden");
+    convveiMapaResumo.classList.remove("hidden");
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+  } finally {
+    btnConvveiMapear.disabled = false;
+    btnConvveiMapear.textContent = "Aplicar mapeamento";
+  }
+});
+
+function convveiValorColuna(registro, chave) {
+  if (chave === "indice") return registro.indice;
+  if (chave === "problema") return convveiRegistroTemProblema(registro.indice) ? 1 : 0;
+  return registro.dados[chave];
+}
+
+function ordenarConvveiRegistros(registros) {
+  if (!convveiOrdenacao) return registros;
+  const { chave, direcao } = convveiOrdenacao;
+  return registros.slice().sort((a, b) => {
+    const va = valorOrdenavel(convveiValorColuna(a, chave));
+    const vb = valorOrdenavel(convveiValorColuna(b, chave));
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * direcao;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * direcao;
+  });
+}
+
+function renderConvveiTabelaCabecalho() {
+  convveiTabelaThead.innerHTML = "";
+  const tr = document.createElement("tr");
+
+  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+    const th = document.createElement("th");
+    th.className = "th-ordenavel";
+    th.style.width = `${larguraPadrao}px`;
+    th.textContent = texto;
+    if (convveiOrdenacao && convveiOrdenacao.chave === chave) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = convveiOrdenacao.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = convveiOrdenacao && convveiOrdenacao.chave === chave ? -convveiOrdenacao.direcao : 1;
+      convveiOrdenacao = { chave, direcao };
+      convveiPagina = 1;
+      renderConvveiTabelaCabecalho();
+      renderConvveiTabela();
+    });
+    return th;
+  };
+
+  // "Linha" e "Problema" — colunas próprias (separadas do "#" único de
+  // antes), só com ordenação (sem filtro) — congeladas com largura fixa
+  // (ver larguraFixaPorIndice em tornarColunasRedimensionaveis, chamada em
+  // renderConvveiTabela): fixa porque o CSS trava o "left" da 2ª coluna num
+  // valor fixo (52px, a largura exata da 1ª), não dava pra deixar
+  // redimensionável sem recalcular esse offset a cada arrasto.
+  const thLinha = criarThOrdenavel("Linha", "indice", 52);
+  thLinha.classList.add("convvei-th-linha");
+  tr.appendChild(thLinha);
+  const thProblema = criarThOrdenavel("Prob.", "problema", 40);
+  thProblema.classList.add("convvei-th-problema");
+  tr.appendChild(thProblema);
+
+  convveiCamposMapeados.forEach((campo) => tr.appendChild(criarThOrdenavel(campo.rotulo, campo.chave, 180)));
+
+  const thAcoes = document.createElement("th");
+  thAcoes.style.width = "46px";
+  thAcoes.textContent = "";
+  tr.appendChild(thAcoes);
+
+  convveiTabelaThead.appendChild(tr);
+}
+
+function convveiTotalPaginas() {
+  return Math.max(1, Math.ceil(convveiRegistros.length / Number(convveiTamanhoPagina.value)));
+}
+
+function convveiProblemaCombinado(indice) {
+  const a = convveiProblemasPorIndice[indice];
+  const b = convveiDuplicadosPorIndice[indice];
+  if (!a && !b) return null;
+  return {
+    erros: [...(a ? a.erros : []), ...(b ? b.erros : [])],
+    avisos: [...(a ? a.avisos : []), ...(b ? b.avisos : [])],
+  };
+}
+
+function convveiRegistroTemProblema(indice) {
+  const p = convveiProblemaCombinado(indice);
+  return !!(p && (p.erros.length > 0 || p.avisos.length > 0));
+}
+
+function montarLinhaConvvei(registro) {
+  const tr = document.createElement("tr");
+  tr.dataset.indice = registro.indice;
+  const problema = convveiProblemaCombinado(registro.indice);
+
+  // "Linha" e "Problema" — colunas separadas (antes era um "#" só, com
+  // ícone + número juntos no mesmo texto).
+  const tdLinha = document.createElement("td");
+  tdLinha.className = "convvei-td-linha";
+  tdLinha.textContent = String(registro.indice);
+  tr.appendChild(tdLinha);
+
+  const tdProblema = document.createElement("td");
+  tdProblema.className = "convvei-td-problema";
+  let icone = "";
+  if (problema && problema.erros.length > 0) {
+    icone = "🔴";
+    tr.classList.add("conversor-edicao-linha-erro");
+  } else if (problema && problema.avisos.length > 0) {
+    icone = "⚠️";
+  } else if (problema) {
+    icone = "✓";
+  }
+  tdProblema.textContent = icone;
+  if (problema) {
+    const msgs = [...problema.erros.map((e) => `⛔ ${e.mensagem}`), ...problema.avisos.map((a) => `⚠️ ${a.mensagem}`)];
+    tr.title = msgs.join("\n");
+    tdProblema.title = tr.title;
+  }
+  tr.appendChild(tdProblema);
+
+  // "duplicado_ssx" (vermelho) e "nao_cadastrado_ssx" (vermelho também —
+  // referência que deveria existir na SSX e não existe, mesma gravidade de
+  // uma duplicata real) vêm de "Verificar na SSX"; "duplicado_planilha"
+  // (amarelo) é só dentro da própria planilha, sempre local/automático.
+  const duplicadosPorCampo = {};
+  if (problema) {
+    const todos = [...problema.erros, ...problema.avisos];
+    todos.filter((p) => p.categoria === "duplicado_planilha").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+    todos.filter((p) => p.categoria === "duplicado_ssx" || p.categoria === "nao_cadastrado_ssx").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+  }
+
+  convveiCamposMapeados.forEach((campo) => {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = registro.dados[campo.chave] || "";
+    const duplicado = duplicadosPorCampo[campo.rotulo];
+    if (duplicado) {
+      input.classList.add((duplicado.categoria === "duplicado_ssx" || duplicado.categoria === "nao_cadastrado_ssx") ? "convcli-campo-duplicado" : "convcli-campo-duplicado-planilha");
+      input.title = duplicado.mensagem;
+    }
+    input.addEventListener("change", async () => {
+      registro.dados[campo.chave] = input.value;
+      try {
+        const r = await fetch("/api/conversor-veiculos/editar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: convveiFileId, indice: registro.indice, campo: campo.chave, valor: input.value }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return mostrarErroConvvei(data.error || "Falha ao salvar a edição.");
+        await rodarValidacaoConvvei();
+      } catch (err) {
+        mostrarErroConvvei(err.message || String(err));
+      }
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+
+  const tdAcoes = document.createElement("td");
+  tdAcoes.className = "convcli-td-acoes";
+  const btnExcluir = document.createElement("button");
+  btnExcluir.type = "button";
+  btnExcluir.className = "btn-secondary convcli-btn-excluir-linha";
+  btnExcluir.textContent = "🗑️";
+  btnExcluir.title = "Excluir esta linha";
+  btnExcluir.addEventListener("click", () => excluirLinhaConvvei(registro.indice));
+  tdAcoes.appendChild(btnExcluir);
+  tr.appendChild(tdAcoes);
+
+  return tr;
+}
+
+function renderConvveiTabela() {
+  const tamanho = Number(convveiTamanhoPagina.value);
+  const registrosOrdenados = ordenarConvveiRegistros(convveiRegistros);
+  convveiPagina = Math.min(Math.max(1, convveiPagina), convveiTotalPaginas());
+  const inicio = (convveiPagina - 1) * tamanho;
+  convveiTabelaTbody.innerHTML = "";
+  registrosOrdenados.slice(inicio, inicio + tamanho).forEach((r) => convveiTabelaTbody.appendChild(montarLinhaConvvei(r)));
+  // "Linha"/"Problema" ficam de fora do redimensionamento (ver
+  // larguraFixaPorIndice) — largura sempre fixa (52px/40px), pra bater com o
+  // "left" fixo das duas colunas congeladas no CSS (.convvei-td-problema).
+  tornarColunasRedimensionaveis(convveiTabelaElemento, CONVVEI_LARGURAS_KEY, { 0: 52, 1: 40 });
+  atualizarConvveiGt06Lista();
+
+  convveiPaginacao.innerHTML = "";
+  const total = convveiTotalPaginas();
+  if (total > 1) {
+    const anterior = document.createElement("button");
+    anterior.type = "button";
+    anterior.className = "btn-secondary";
+    anterior.textContent = "‹ Anterior";
+    anterior.disabled = convveiPagina === 1;
+    anterior.addEventListener("click", () => { convveiPagina--; renderConvveiTabela(); });
+    const info = document.createElement("span");
+    info.textContent = `Página ${convveiPagina} de ${total}`;
+    const proxima = document.createElement("button");
+    proxima.type = "button";
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima ›";
+    proxima.disabled = convveiPagina === total;
+    proxima.addEventListener("click", () => { convveiPagina++; renderConvveiTabela(); });
+    [anterior, info, proxima].forEach((n) => convveiPaginacao.appendChild(n));
+  }
+}
+convveiTamanhoPagina.addEventListener("change", () => { convveiPagina = 1; renderConvveiTabela(); });
+
+// --- EXCLUIR / ADICIONAR LINHA (Conversor de Veículos) ---
+async function excluirLinhaConvvei(indice) {
+  if (!convveiFileId) return;
+  if (!confirm(`Excluir a linha ${indice}? Essa ação não pode ser desfeita.`)) return;
+  try {
+    const r = await fetch("/api/conversor-veiculos/excluir-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId, indice }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvvei(data.error || "Falha ao excluir a linha.");
+    convveiRegistros = convveiRegistros.filter((r2) => r2.indice !== indice);
+    delete convveiDuplicadosPorIndice[indice];
+    await rodarValidacaoConvvei();
+    mostrarInfoConvvei(`Linha ${indice} excluída.`);
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+  }
+}
+
+el("btn-convvei-adicionar-linha").addEventListener("click", async () => {
+  if (!convveiFileId) return;
+  try {
+    const r = await fetch("/api/conversor-veiculos/adicionar-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvvei(data.error || "Falha ao adicionar a linha.");
+    convveiRegistros.push(data.registro);
+    convveiOrdenacao = null;
+    renderConvveiTabelaCabecalho();
+    convveiPagina = convveiTotalPaginas();
+    await rodarValidacaoConvvei();
+    mostrarInfoConvvei(`Linha ${data.registro.indice} adicionada — preencha os campos.`);
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+  }
+});
+
+el("btn-convvei-limpar-vazias").addEventListener("click", async () => {
+  if (!convveiFileId) return;
+  try {
+    const r = await fetch("/api/conversor-veiculos/limpar-vazias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvvei(data.error || "Falha ao limpar as linhas vazias.");
+    convveiRegistros = convveiRegistros.filter((reg) => Object.values(reg.dados).some((v) => (v || "").trim()));
+    convveiPagina = 1;
+    await rodarValidacaoConvvei();
+    mostrarInfoConvvei(data.removidos ? `${data.removidos} linha(s) vazia(s) removida(s).` : "Nenhuma linha vazia encontrada.");
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+  }
+});
+
+// Transformações em massa: roda no servidor sobre TODAS as linhas mapeadas e
+// devolve só os registros que mudaram — mesmo padrão de
+// rodarTransformacaoConvcli (Conversor de Clientes).
+async function rodarTransformacaoConvvei(acao, params, montarMensagem) {
+  if (!convveiFileId) return;
+  try {
+    const r = await fetch("/api/conversor-veiculos/transformar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId, acao, params: params || {} }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvvei(data.error || "Falha ao aplicar a transformação.");
+    const porIndice = new Map(data.registros.map((r2) => [r2.indice, r2]));
+    convveiRegistros = convveiRegistros.map((r2) => porIndice.get(r2.indice) || r2);
+    await rodarValidacaoConvvei();
+    mostrarInfoConvvei(montarMensagem ? montarMensagem(data) : `${data.total_alterados} registro(s) alterado(s).`);
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+  }
+}
+
+el("btn-convvei-limpar-placa").addEventListener("click", () =>
+  rodarTransformacaoConvvei("limpar_campo", { campo: "placa" }, (data) => `${data.ajustados} placa(s) limpa(s).`));
+el("btn-convvei-ajustar-chips").addEventListener("click", () => {
+  const dddPadrao = el("convvei-ddd-padrao").value.trim() || "55";
+  rodarTransformacaoConvvei("ajustar_chips", { ddd_padrao: dddPadrao }, (data) =>
+    `${data.linhas_ajustadas} linha(s) com DDI/DDD de chip ajustado(s).`);
+});
+
+// "Padrão GT06": a lista de templates distintos de Rastreador 1 usados na
+// planilha (considerando TODAS as linhas, não só a página visível — vem de
+// convveiRegistros, já carregado inteiro em memória) aparece sozinha, sem
+// precisar de um botão "identificar" — atualizarConvveiGt06Lista() é
+// chamada a cada renderConvveiTabela() (ou seja, a cada upload/mapeamento/
+// transformação/edição/validação). Só mexe no DOM quando a lista de
+// templates realmente muda, pra não perder o que já estava marcado nem o
+// foco só por causa de troca de página.
+const convveiGt06Vazio = el("convvei-gt06-vazio");
+const convveiGt06Lista = el("convvei-gt06-lista");
+const convveiGt06AplicarWrap = el("convvei-gt06-aplicar-wrap");
+let convveiGt06UltimaListaTemplates = null; // string[] da última renderização
+let convveiGt06Marcados = new Set(); // nomes marcados — sobrevive a reconstruções da lista
+
+function resetarConvveiGt06() {
+  convveiGt06UltimaListaTemplates = null;
+  convveiGt06Marcados = new Set();
+  convveiGt06Lista.innerHTML = "";
+  convveiGt06Lista.classList.add("hidden");
+  convveiGt06AplicarWrap.classList.add("hidden");
+  convveiGt06Vazio.classList.remove("hidden");
+}
+
+function convveiTemplatesDistintosRastreador1() {
+  const vistos = new Set();
+  convveiRegistros.forEach((r) => {
+    const valor = (r.dados.rastreador1_template || "").trim();
+    if (valor) vistos.add(valor);
+  });
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+}
+
+function atualizarConvveiGt06Lista() {
+  const templates = convveiTemplatesDistintosRastreador1();
+  const mudou = !convveiGt06UltimaListaTemplates
+    || templates.length !== convveiGt06UltimaListaTemplates.length
+    || templates.some((t, i) => t !== convveiGt06UltimaListaTemplates[i]);
+  if (!mudou) return;
+  convveiGt06UltimaListaTemplates = templates;
+  convveiGt06Marcados = new Set([...convveiGt06Marcados].filter((t) => templates.includes(t)));
+
+  convveiGt06Lista.innerHTML = "";
+  if (templates.length === 0) {
+    convveiGt06Lista.classList.add("hidden");
+    convveiGt06AplicarWrap.classList.add("hidden");
+    convveiGt06Vazio.classList.remove("hidden");
+    return;
+  }
+  templates.forEach((t, i) => {
+    const label = document.createElement("label");
+    label.className = "convcli-checkbox-inline";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = t;
+    input.id = `convvei-gt06-template-${i}`;
+    input.checked = convveiGt06Marcados.has(t);
+    input.addEventListener("change", () => {
+      if (input.checked) convveiGt06Marcados.add(t);
+      else convveiGt06Marcados.delete(t);
+    });
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(t));
+    convveiGt06Lista.appendChild(label);
+  });
+  convveiGt06Vazio.classList.add("hidden");
+  convveiGt06Lista.classList.remove("hidden");
+  convveiGt06AplicarWrap.classList.remove("hidden");
+}
+
+function convveiGt06Selecionados() {
+  return Array.from(convveiGt06Marcados);
+}
+
+el("btn-convvei-gt06-aplicar").addEventListener("click", () => {
+  const selecionados = convveiGt06Selecionados();
+  if (selecionados.length === 0) {
+    return mostrarErroConvvei("Selecione ao menos um template antes de aplicar o padrão GT06.");
+  }
+  rodarTransformacaoConvvei("aplicar_gt06", { templates: selecionados }, (data) =>
+    `${data.ajustados} identificação(ões) e ${data.ajustados_codigo_integracao} código(s) de integração de Rastreador 1 ajustado(s) (zero inicial) para o(s) template(s): ${selecionados.join(", ")}.`);
+});
+
+// "Limpar padrão GT06": remove só o 1º zero do início da identificação E do
+// código de integração — oposto de "Aplicar padrão GT06". Sem nenhum
+// template marcado, vale pra TODOS os templates da lista (ver
+// conversor_veiculos.limpar_padrao_gt06), mas só depois de confirmar —
+// ação mais ampla, risco maior de engano.
+el("btn-convvei-gt06-limpar").addEventListener("click", () => {
+  const selecionados = convveiGt06Selecionados();
+  if (selecionados.length === 0) {
+    const confirmado = confirm(
+      "Nenhum template selecionado. Isso vai remover o zero inicial da identificação e do código de integração de TODOS os templates da lista. Confirma?"
+    );
+    if (!confirmado) return;
+  }
+  rodarTransformacaoConvvei("limpar_gt06", { templates: selecionados }, (data) =>
+    `${data.ajustados} identificação(ões) e ${data.ajustados_codigo_integracao} código(s) de integração de Rastreador 1 com o zero inicial removido`
+    + (selecionados.length ? ` para o(s) template(s): ${selecionados.join(", ")}.` : " (todos os templates)."));
+});
+
+el("btn-convvei-repetir-codigo-veiculo-cliente").addEventListener("click", () => {
+  rodarTransformacaoConvvei(
+    "repetir_campo", { origem: "codigo_integracao_veiculo", destino: "veiculo_cliente" },
+    (data) => `${data.repetidos} código(s) de veículo repetido(s) em Código de integração do veículo do cliente.`
+  );
+});
+el("btn-convvei-repetir-placa-identificacao").addEventListener("click", () => {
+  rodarTransformacaoConvvei("repetir_campo", { origem: "placa", destino: "identificacao" }, (data) =>
+    `${data.repetidos} placa(s) repetida(s) em Identificação.`);
+});
+el("btn-convvei-repetir-placa-codigo-veiculo").addEventListener("click", () => {
+  rodarTransformacaoConvvei("repetir_campo", { origem: "placa", destino: "codigo_integracao_veiculo" }, (data) =>
+    `${data.repetidos} placa(s) repetida(s) em Código de integração do veículo.`);
+});
+el("btn-convvei-repetir-rastreador1-codigo").addEventListener("click", () => {
+  rodarTransformacaoConvvei(
+    "repetir_campo", { origem: "rastreador1_identificacao", destino: "rastreador1_codigo_integracao" },
+    (data) => `${data.repetidos} identificação(ões) repetida(s) em Código de integração (Rastreador 1).`
+  );
+});
+
+// "Preencher pra todas as linhas" — um único handler genérico (acao
+// "preencher_campo", igual o backend espera), reaproveitado pelos botões
+// de ícone/cor do mapa em vez de repetir a mesma lógica duas vezes.
+function ligarBtnConvveiPreencherTodas(idBotao, idInput, campo, rotuloErro) {
+  el(idBotao).addEventListener("click", () => {
+    const valor = el(idInput).value.trim();
+    if (!valor) return mostrarErroConvvei(`Informe ${rotuloErro} a ser preenchido.`);
+    rodarTransformacaoConvvei("preencher_campo", { campo, valor }, (data) =>
+      `${data.preenchidos} linha(s) preenchida(s) com "${valor}".`);
+  });
+}
+ligarBtnConvveiPreencherTodas("btn-convvei-preencher-icone", "convvei-icone-mapa-valor", "icone_mapa", "o ícone do mapa");
+
+// Cor do ícone do mapa: escala de cores (CORES_SSX, já usada pelo Conversor
+// KML — mesma tabela "Cores de Ícones do Mapa" do manual) em vez de pedir
+// pra digitar o número de cor de cabeça — mesmo componente visual
+// (".conversor-cor-mini-grupo"/".conversor-cor-mini") usado na edição manual
+// do Conversor KML, só que aqui pra escolher UM valor que vale pra toda a
+// planilha ao clicar "Preencher todas" (não por linha).
+let convveiCorIconeMapaSelecionada = null;
+const convveiCorIconeMapaSwatches = el("convvei-cor-icone-mapa-swatches");
+
+function renderConvveiCorIconeMapaSwatches() {
+  convveiCorIconeMapaSwatches.innerHTML = "";
+  CORES_SSX.forEach(({ codigo, hex }) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "conversor-cor-mini";
+    btn.style.background = hex;
+    btn.title = `Código ${codigo} (${hex})`;
+    btn.textContent = String(codigo);
+    if (convveiCorIconeMapaSelecionada === codigo) btn.classList.add("selecionada");
+    btn.addEventListener("click", () => {
+      convveiCorIconeMapaSelecionada = convveiCorIconeMapaSelecionada === codigo ? null : codigo;
+      renderConvveiCorIconeMapaSwatches();
+    });
+    convveiCorIconeMapaSwatches.appendChild(btn);
+  });
+}
+renderConvveiCorIconeMapaSwatches();
+
+el("btn-convvei-preencher-cor-icone").addEventListener("click", () => {
+  if (!convveiCorIconeMapaSelecionada) return mostrarErroConvvei("Selecione uma cor na escala antes de preencher.");
+  const valor = String(convveiCorIconeMapaSelecionada);
+  rodarTransformacaoConvvei("preencher_campo", { campo: "cor_icone_mapa", valor }, (data) =>
+    `${data.preenchidos} linha(s) preenchida(s) com a cor ${valor}.`);
+});
+
+// Preenchimento em massa dos 4 status do mapa — só os campos marcados nos
+// checkboxes são preenchidos (com "1"), os demais ficam intocados. Se
+// nenhum estiver marcado, orienta a selecionar ao menos um em vez de
+// mandar a requisição (o backend também recusa, mas aqui evita a ida e
+// volta e dá a mensagem na hora).
+const CONVVEI_CAMPOS_STATUS_MAPA = [
+  { id: "convvei-status-ignicao", campo: "exibir_status_ignicao", rotulo: "Exibir status ignição" },
+  { id: "convvei-status-operacional", campo: "exibir_status_operacional", rotulo: "Exibir status operacional" },
+  { id: "convvei-status-gps", campo: "exibir_status_gps", rotulo: "Exibir status GPS" },
+  { id: "convvei-status-violacao", campo: "exibir_status_violacao", rotulo: "Exibir status violação" },
+];
+el("btn-convvei-preencher-status").addEventListener("click", () => {
+  // Os 4 campos são sempre preenchidos: marcado -> 1, não marcado -> 0 (ver
+  // conversor_veiculos.preencher_status_mapa) — inclusive sem nenhum
+  // checkbox marcado, que preenche os 4 com "0" em vez de bloquear.
+  const marcados = CONVVEI_CAMPOS_STATUS_MAPA.filter((s) => el(s.id).checked);
+  rodarTransformacaoConvvei("preencher_status", { campos: marcados.map((s) => s.campo) }, (data) =>
+    CONVVEI_CAMPOS_STATUS_MAPA.map((s) => {
+      const marcado = marcados.some((m) => m.campo === s.campo);
+      return `${s.rotulo} = ${marcado ? "1" : "0"} (${data.preenchidos_por_campo[s.campo]} linha(s))`;
+    }).join("; ") + ".");
+});
+
+function renderConvveiResumo(data) {
+  convveiResumo.innerHTML = "";
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.n_ok, label: "Válidos" },
+    { valor: data.n_erro, label: "Com erro", clicavel: data.n_erro > 0 },
+  ].forEach(({ valor, label, clicavel }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    tile.appendChild(l);
+    tile.appendChild(v);
+    if (clicavel) {
+      tile.classList.add("stat-tile-clicavel");
+      tile.title = "Ir para o primeiro registro com erro";
+      tile.addEventListener("click", irParaPrimeiroErroConvvei);
+    }
+    tiles.appendChild(tile);
+  });
+  convveiResumo.appendChild(tiles);
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) válidos para importar.`;
+  convveiResumo.appendChild(legenda);
+}
+
+function irParaPrimeiroErroConvvei() {
+  const ordenados = ordenarConvveiRegistros(convveiRegistros);
+  const posicao = ordenados.findIndex((r) => {
+    const p = convveiProblemaCombinado(r.indice);
+    return p && p.erros.length > 0;
+  });
+  if (posicao === -1) return;
+
+  const tamanho = Number(convveiTamanhoPagina.value);
+  convveiPagina = Math.floor(posicao / tamanho) + 1;
+  renderConvveiTabela();
+
+  const indice = ordenados[posicao].indice;
+  const tr = convveiTabelaTbody.querySelector(`tr[data-indice="${indice}"]`);
+  if (!tr) return;
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  tr.classList.add("convcli-linha-destacada");
+  setTimeout(() => tr.classList.remove("convcli-linha-destacada"), 2200);
+}
+
+async function rodarValidacaoConvvei() {
+  if (!convveiFileId) return null;
+  try {
+    const r = await fetch("/api/conversor-veiculos/validar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvvei(data.error || "Falha ao validar.");
+      return null;
+    }
+    convveiProblemasPorIndice = {};
+    data.problemas.forEach((p) => { convveiProblemasPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvveiResumo(data);
+    renderConvveiTabela();
+    return data;
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+    return null;
+  }
+}
+el("btn-convvei-validar").addEventListener("click", () => rodarValidacaoConvvei());
+
+// --- VERIFICAR DUPLICIDADE NA SSX (Conversor de Veículos, opcional) ---
+const overlayConvveiLogin = el("overlay-convvei-login");
+const selectConvveiCredencial = el("convvei-select-credencial");
+
+function renderSelectConvveiCredenciais() {
+  selectConvveiCredencial.innerHTML = '<option value="">Login salvo...</option>';
+  credenciaisCache.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nome;
+    selectConvveiCredencial.appendChild(opt);
+  });
+}
+
+selectConvveiCredencial.addEventListener("change", () => {
+  const cred = credenciaisCache.find((c) => c.id === selectConvveiCredencial.value);
+  if (!cred) return;
+  el("convvei-login").value = cred.login;
+  el("convvei-senha").value = cred.senha;
+  selectConvveiCredencial.value = "";
+});
+
+// Callback setado antes de abrir o login, executado 1x depois de autenticar
+// e resetado pra null em todo caminho que fecha/reabre o modal — mesmo
+// padrão de convcliLoginAoEntrar (ver gotcha nº3 do Conversor de Clientes).
+let convveiLoginAoEntrar = null;
+
+el("convvei-login-fechar").addEventListener("click", () => {
+  convveiLoginAoEntrar = null;
+  overlayConvveiLogin.classList.add("hidden");
+});
+
+el("form-convvei-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const login = el("convvei-login").value.trim();
+  const senha = el("convvei-senha").value;
+  if (!login || !senha) return;
+  const btn = el("btn-convvei-autenticar");
+  btn.disabled = true;
+  btn.textContent = "Entrando...";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvvei(data.error || "Falha ao autenticar na SSX.");
+      return;
+    }
+    convveiSsxOk = true;
+    convveiSsxLogin = login;
+    convveiSsxBase = extrairNomeBaseDeClaims(data.claims);
+    convveiSsxClaimsRaw = data.claims || null;
+    convveiAtualizarPillAuth();
+    overlayConvveiLogin.classList.add("hidden");
+    el("convvei-senha").value = "";
+    const aoEntrar = convveiLoginAoEntrar;
+    convveiLoginAoEntrar = null;
+    if (aoEntrar) return await aoEntrar();
+    await rodarVerificacaoDuplicidadeConvvei();
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Entrar";
+  }
+});
+
+el("btn-convvei-logout-ssx").addEventListener("click", async () => {
+  await fetch("/api/logout-avulso", { method: "POST" });
+  convveiSsxOk = false;
+  convveiSsxLogin = "";
+  convveiSsxBase = "";
+  convveiSsxClaimsRaw = null;
+  convveiAtualizarPillAuth();
+  convveiDuplicadosPorIndice = {};
+  renderConvveiTabela();
+  mostrarInfoConvvei("Sessão da SSX encerrada.");
+});
+
+async function rodarVerificacaoDuplicidadeConvvei() {
+  if (!convveiFileId) return null;
+  const btn = el("btn-convvei-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-veiculos/verificar-duplicidade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convveiSsxOk = false;
+        convveiAtualizarPillAuth();
+        renderSelectConvveiCredenciais();
+        overlayConvveiLogin.classList.remove("hidden");
+        return null;
+      }
+      mostrarErroConvvei(data.error || "Falha ao verificar duplicidade na SSX.");
+      return null;
+    }
+    convveiDuplicadosPorIndice = {};
+    data.problemas.forEach((p) => { convveiDuplicadosPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvveiTabela();
+    // Mistura duas checagens (ver conversor_veiculos.verificar_duplicidade_ssx
+    // e verificar_referencias_ssx) — a mensagem fica genérica de propósito,
+    // os detalhes (qual campo, duplicata ou referência não cadastrada)
+    // aparecem no hover da célula/linha marcada.
+    mostrarInfoConvvei(
+      data.total_duplicados
+        ? `${data.total_duplicados} de ${data.total_verificados} registro(s) com possível problema na SSX (duplicata ou referência — cliente, template, APN, responsável — não cadastrada).`
+        : `Nenhum problema encontrado entre os ${data.total_verificados} registro(s) verificados (duplicata e referências na SSX).`
+    );
+    return data;
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar na SSX";
+  }
+}
+
+el("btn-convvei-verificar-ssx").addEventListener("click", () => {
+  if (!convveiFileId) return;
+  if (!convveiSsxOk) {
+    convveiLoginAoEntrar = null;
+    renderSelectConvveiCredenciais();
+    overlayConvveiLogin.classList.remove("hidden");
+    return;
+  }
+  rodarVerificacaoDuplicidadeConvvei();
+});
+
+// Botão "Templates": lista os Templates de rastreador e APNs usados na
+// planilha inteira — aparece SEMPRE, direto de convveiRegistros (já em
+// memória), sem exigir login. A cor vermelha (⚠ "falta cadastrar") é um
+// passo à parte e opcional ("Verificar cadastro na SSX" dentro do modal),
+// que só então pede autenticação — mesma sessão/login de "Verificar na
+// SSX" (convveiSsxOk/convveiLoginAoEntrar).
+const overlayConvveiTemplates = el("overlay-convvei-templates");
+const convveiTemplatesListaTemplates = el("convvei-templates-lista-templates");
+const convveiTemplatesListaApns = el("convvei-templates-lista-apns");
+const convveiTemplatesLegenda = el("convvei-templates-legenda");
+// null = ainda não verificado na SSX nesta planilha; senão {templates:[{valor,cadastrado}], apns:[...]}
+// vindo de /listar-templates-apns — reseta ao trocar de arquivo (ver convveiInputArquivo "change").
+let convveiTemplatesResultado = null;
+
+function convveiValoresDistintos(campos) {
+  const vistos = new Set();
+  convveiRegistros.forEach((r) => {
+    campos.forEach((chave) => {
+      const valor = (r.dados[chave] || "").trim();
+      if (valor) vistos.add(valor);
+    });
+  });
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+}
+
+function renderConvveiTemplatesLista(container, itens) {
+  container.innerHTML = "";
+  itens.forEach(({ valor, cadastrado }) => {
+    const li = document.createElement("li");
+    if (cadastrado === false) {
+      li.classList.add("convvei-templates-faltando");
+      li.textContent = `⚠ ${valor}`;
+      li.title = "Falta cadastrar na SSX";
+    } else if (cadastrado === true) {
+      li.textContent = `✓ ${valor}`;
+      li.title = "Já cadastrado na SSX";
+    } else {
+      li.textContent = valor;
+    }
+    container.appendChild(li);
+  });
+}
+
+function renderConvveiTemplatesModal() {
+  if (convveiTemplatesResultado) {
+    renderConvveiTemplatesLista(convveiTemplatesListaTemplates, convveiTemplatesResultado.templates);
+    renderConvveiTemplatesLista(convveiTemplatesListaApns, convveiTemplatesResultado.apns);
+    convveiTemplatesLegenda.textContent = "⚠ em vermelho = falta cadastrar na SSX; ✓ = já cadastrado.";
+  } else {
+    const templates = convveiValoresDistintos(["rastreador1_template", "rastreador2_template"]).map((valor) => ({ valor }));
+    const apns = convveiValoresDistintos(["rastreador1_apn1", "rastreador1_apn2", "rastreador2_apn1", "rastreador2_apn2"]).map((valor) => ({ valor }));
+    renderConvveiTemplatesLista(convveiTemplatesListaTemplates, templates);
+    renderConvveiTemplatesLista(convveiTemplatesListaApns, apns);
+    convveiTemplatesLegenda.textContent = 'Valores usados na planilha — clique em "Verificar cadastro na SSX" pra ver o que já está cadastrado.';
+  }
+}
+
+async function verificarConvveiTemplatesNaSsx() {
+  if (!convveiFileId) return;
+  const btn = el("btn-convvei-templates-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-veiculos/listar-templates-apns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convveiFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convveiSsxOk = false;
+        convveiAtualizarPillAuth();
+        convveiLoginAoEntrar = verificarConvveiTemplatesNaSsx;
+        renderSelectConvveiCredenciais();
+        overlayConvveiLogin.classList.remove("hidden");
+        return;
+      }
+      mostrarErroConvvei(data.error || "Falha ao consultar templates/APNs na SSX.");
+      return;
+    }
+    convveiTemplatesResultado = { templates: data.templates, apns: data.apns };
+    renderConvveiTemplatesModal();
+  } catch (err) {
+    mostrarErroConvvei(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar cadastro na SSX";
+  }
+}
+
+el("btn-convvei-templates").addEventListener("click", () => {
+  if (!convveiFileId) {
+    return mostrarErroConvvei("Carregue e mapeie uma planilha no Conversor de Veículos antes.");
+  }
+  renderConvveiTemplatesModal();
+  overlayConvveiTemplates.classList.remove("hidden");
+});
+
+el("btn-convvei-templates-verificar-ssx").addEventListener("click", () => {
+  if (!convveiSsxOk) {
+    convveiLoginAoEntrar = verificarConvveiTemplatesNaSsx;
+    renderSelectConvveiCredenciais();
+    overlayConvveiLogin.classList.remove("hidden");
+    return;
+  }
+  verificarConvveiTemplatesNaSsx();
+});
+
+el("convvei-templates-fechar").addEventListener("click", () => {
+  overlayConvveiTemplates.classList.add("hidden");
+});
+
+function baixarConvveiArquivo(modo) {
+  const a = document.createElement("a");
+  a.href = `/api/conversor-veiculos/exportar/${convveiFileId}/${modo}`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+const overlayConvveiBaixarErro = el("overlay-convvei-baixar-erro");
+const textoConvveiBaixarErro = el("convvei-baixar-erro-texto");
+let resolverConvveiBaixarErro = null;
+function fecharConvveiBaixarErro(escolha) {
+  overlayConvveiBaixarErro.classList.add("hidden");
+  const resolve = resolverConvveiBaixarErro;
+  resolverConvveiBaixarErro = null;
+  if (resolve) resolve(escolha);
+}
+function confirmarConvveiBaixarErro(nComErro) {
+  const plural = nComErro === 1 ? "veículo não passou" : "veículos não passaram";
+  textoConvveiBaixarErro.textContent =
+    `${nComErro} ${plural} na validação e podem ser rejeitados pelo SSX na importação. Baixe só os válidos, ou inclua os com erro pra corrigir depois.`;
+  overlayConvveiBaixarErro.classList.remove("hidden");
+  return new Promise((resolve) => { resolverConvveiBaixarErro = resolve; });
+}
+el("convvei-baixar-erro-fechar").addEventListener("click", () => fecharConvveiBaixarErro("cancelar"));
+el("btn-convvei-baixar-erro-cancelar").addEventListener("click", () => fecharConvveiBaixarErro("cancelar"));
+el("btn-convvei-baixar-com-erros").addEventListener("click", () => fecharConvveiBaixarErro("com-erros"));
+el("btn-convvei-baixar-sem-erros").addEventListener("click", () => fecharConvveiBaixarErro("sem-erros"));
+
+el("btn-convvei-baixar").addEventListener("click", async () => {
+  if (!convveiFileId) return;
+  const resultado = await rodarValidacaoConvvei();
+  if (!resultado) return;
+  if (resultado.n_erro > 0) {
+    const escolha = await confirmarConvveiBaixarErro(resultado.n_erro);
+    if (escolha === "cancelar") return;
+    baixarConvveiArquivo(escolha === "com-erros" ? "todos" : "validos");
+  } else {
+    baixarConvveiArquivo("todos");
+  }
+});
+
+el("btn-convvei-importar-api").addEventListener("click", () => {
+  if (!convveiFileId) {
+    return mostrarErroConvvei("Carregue e mapeie uma planilha no Conversor de Veículos antes.");
+  }
+  if (!convveiSsxOk) {
+    convveiLoginAoEntrar = abrirModalImportDeConvvei;
+    renderSelectConvveiCredenciais();
+    overlayConvveiLogin.classList.remove("hidden");
+    return;
+  }
+  abrirModalImportDeConvvei();
+});
+
+// --- CONVERSOR DE RASTREADORES -> SSX ---
+// Sub-tela "/ferramentas/conversor-rastreadores": mesmo fluxo e mesmo molde
+// da seção "CONVERSOR DE VEÍCULOS -> SSX" acima (upload -> mapear colunas ->
+// ajustar/transformar -> validar -> exportar), rodando no servidor
+// (conversor_rastreadores.py + validador_importacao/) — domínio bem menor
+// (10 campos, sem "slots" repetidos), então sem GT06/cores de ícone, mas com
+// botão "Templates" (Template + Status de rastreador são referências que
+// precisam já existir na SSX).
+const convrstInputArquivo = el("convrst-input-arquivo");
+const convrstArquivoNome = el("convrst-arquivo-nome");
+const convrstSecaoMapeamento = el("convrst-secao-mapeamento");
+const convrstMapaCampos = el("convrst-mapa-campos");
+const convrstMapaResumo = el("convrst-mapa-resumo");
+const convrstMapaResumoTexto = el("convrst-mapa-resumo-texto");
+const convrstMapaDetalhe = el("convrst-mapa-detalhe");
+const btnConvrstMapear = el("btn-convrst-mapear");
+const convrstSecaoTrabalho = el("convrst-secao-trabalho");
+const convrstResumo = el("convrst-resumo");
+const convrstTabelaThead = el("convrst-tabela-thead");
+const convrstTabelaTbody = el("convrst-tabela-tbody");
+const convrstTabelaElemento = convrstTabelaThead.closest("table");
+const convrstTamanhoPagina = el("convrst-tamanho-pagina");
+const convrstPaginacao = el("convrst-paginacao");
+const convrstTabelaArea = el("convrst-tabela-area");
+const CONVRST_LARGURAS_KEY = "larguraColunas_convrstRastreadores";
+
+function ajustarAlturaConvrstTabelaArea() {
+  if (!convrstTabelaArea || !elConteudoPrincipal) return;
+  convrstTabelaArea.style.height = `${elConteudoPrincipal.clientHeight - 24}px`;
+}
+if (elConteudoPrincipal && window.ResizeObserver) {
+  new ResizeObserver(ajustarAlturaConvrstTabelaArea).observe(elConteudoPrincipal);
+}
+window.addEventListener("resize", ajustarAlturaConvrstTabelaArea);
+
+let convrstFileId = null;
+let convrstColunasOrigem = [];
+let convrstCampos = [];
+let convrstCamposMapeados = [];
+let convrstRegistros = [];
+let convrstProblemasPorIndice = {};
+let convrstDuplicadosPorIndice = {};
+let convrstNomeBase = "rastreadores";
+let convrstPagina = 1;
+let convrstOrdenacao = null;
+
+// Autenticação na SSX — flag PRÓPRIA desta tela (nunca estado.autenticado,
+// de outra tela — ver gotcha nº1 do Conversor de Clientes).
+let convrstSsxOk = false;
+let convrstSsxLogin = "";
+let convrstSsxBase = "";
+let convrstSsxClaimsRaw = null;
+
+function convrstAtualizarPillAuth() {
+  const pill = el("convrst-status-auth");
+  const btnLogout = el("btn-convrst-logout-ssx");
+  if (convrstSsxOk) {
+    pill.textContent = convrstSsxLogin
+      ? `Autenticado na SSX (${convrstSsxLogin}${convrstSsxBase ? " — " + convrstSsxBase : ""})`
+      : "Autenticado na SSX";
+    pill.title = convrstSsxClaimsRaw ? JSON.stringify(convrstSsxClaimsRaw) : "";
+    pill.className = "status-pill status-on";
+    btnLogout.classList.remove("hidden");
+  } else {
+    pill.textContent = "Não autenticado na SSX";
+    pill.className = "status-pill status-off";
+    btnLogout.classList.add("hidden");
+  }
+}
+
+// null = ainda não verificado na SSX nesta planilha; senão {templates:[...], status:[...]}
+// vindo de /listar-templates-status — reseta ao trocar de arquivo.
+let convrstTemplatesResultado = null;
+
+function limparConvrst() {
+  convrstFileId = null;
+  convrstColunasOrigem = [];
+  convrstCamposMapeados = [];
+  convrstRegistros = [];
+  convrstProblemasPorIndice = {};
+  convrstDuplicadosPorIndice = {};
+  convrstSsxOk = false;
+  convrstSsxLogin = "";
+  convrstSsxBase = "";
+  convrstSsxClaimsRaw = null;
+  convrstAtualizarPillAuth();
+  convrstNomeBase = "rastreadores";
+  convrstPagina = 1;
+  convrstOrdenacao = null;
+  convrstInputArquivo.value = "";
+  convrstArquivoNome.textContent = "Nenhum arquivo selecionado";
+  convrstSecaoMapeamento.classList.add("hidden");
+  convrstSecaoTrabalho.classList.add("hidden");
+  convrstMapaResumo.classList.add("hidden");
+  convrstMapaDetalhe.classList.remove("hidden");
+  convrstMapaCampos.innerHTML = "";
+  convrstResumo.innerHTML = "";
+  convrstTabelaThead.innerHTML = "";
+  convrstTabelaTbody.innerHTML = "";
+  convrstPaginacao.innerHTML = "";
+  btnConvrstMapear.disabled = true;
+  convrstTemplatesResultado = null;
+}
+limparConvrst();
+
+// mostrarErro() genérico escreve no painel "Saída", escondido em Ferramentas
+// Auxiliares (ver gotcha nº2 do Conversor de Clientes) — por isso função
+// própria, que escreve dentro desta sub-tela.
+function mostrarErroConvrst(msg) {
+  convrstResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  convrstResumo.appendChild(p);
+}
+
+function mostrarInfoConvrst(msg) {
+  convrstResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = msg;
+  convrstResumo.appendChild(p);
+}
+
+async function carregarConvrstCampos() {
+  if (convrstCampos.length) return convrstCampos;
+  const r = await fetch("/api/conversor-rastreadores/campos");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "Falha ao carregar os campos da SSX.");
+  convrstCampos = data.campos;
+  return convrstCampos;
+}
+
+// Mapeamento padrão: posicional, pela ordem oficial do manual da SSX — mesma
+// regra do Conversor de Clientes/Veículos.
+function renderConvrstMapaCampos() {
+  convrstMapaCampos.innerHTML = "";
+  convrstCampos.forEach((campo, i) => {
+    const linha = document.createElement("div");
+    linha.className = "convcli-mapa-linha";
+
+    const nome = document.createElement("span");
+    nome.className = "convcli-mapa-nome";
+    const marca = campo.obrigatorio === true ? " *" : campo.obrigatorio === "condicional" ? " (condicional)" : "";
+    nome.textContent = campo.rotulo + marca;
+    nome.title = campo.rotulo + marca;
+
+    const select = document.createElement("select");
+    select.dataset.campo = campo.chave;
+    const optVazio = document.createElement("option");
+    optVazio.value = "";
+    optVazio.textContent = "— não mapear —";
+    select.appendChild(optVazio);
+    convrstColunasOrigem.forEach((col) => {
+      const opt = document.createElement("option");
+      opt.value = col;
+      opt.textContent = col;
+      select.appendChild(opt);
+    });
+    if (convrstColunasOrigem[i] !== undefined) select.value = convrstColunasOrigem[i];
+
+    linha.appendChild(nome);
+    linha.appendChild(select);
+    convrstMapaCampos.appendChild(linha);
+  });
+}
+
+el("btn-convrst-mapear-limpar").addEventListener("click", () => {
+  convrstMapaCampos.querySelectorAll("select").forEach((sel) => { sel.value = ""; });
+});
+
+el("btn-convrst-mapear-auto").addEventListener("click", () => {
+  convrstMapaCampos.querySelectorAll("select").forEach((sel, i) => {
+    sel.value = convrstColunasOrigem[i] !== undefined ? convrstColunasOrigem[i] : "";
+  });
+});
+
+el("btn-convrst-mapa-editar").addEventListener("click", () => {
+  convrstMapaResumo.classList.add("hidden");
+  convrstMapaDetalhe.classList.remove("hidden");
+});
+
+convrstInputArquivo.addEventListener("change", async () => {
+  const file = convrstInputArquivo.files[0];
+  if (!file) return;
+  convrstArquivoNome.textContent = "Enviando...";
+  convrstSecaoTrabalho.classList.add("hidden");
+  convrstSecaoMapeamento.classList.add("hidden");
+  convrstSsxOk = false;
+  convrstDuplicadosPorIndice = {};
+  convrstAtualizarPillAuth();
+  resetarConvrstGt06();
+  convrstTemplatesResultado = null;
+  try {
+    await carregarConvrstCampos();
+    const formData = new FormData();
+    formData.append("arquivo", file);
+    const r = await fetch("/api/conversor-rastreadores/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      convrstArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErroConvrst(data.error || "Falha ao enviar arquivo.");
+    }
+    convrstFileId = data.file_id;
+    convrstColunasOrigem = data.colunas;
+    convrstNomeBase = file.name.replace(/\.(xlsx|xls|csv)$/i, "");
+    convrstArquivoNome.textContent = `${file.name} (${data.total_linhas} linha(s))`;
+    renderConvrstMapaCampos();
+    convrstSecaoMapeamento.classList.remove("hidden");
+    btnConvrstMapear.disabled = false;
+  } catch (err) {
+    convrstArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErroConvrst(err.message || String(err));
+  }
+});
+
+btnConvrstMapear.addEventListener("click", async () => {
+  const mapping = {};
+  convrstMapaCampos.querySelectorAll("select").forEach((sel) => {
+    if (sel.value) mapping[sel.dataset.campo] = sel.value;
+  });
+  if (Object.keys(mapping).length === 0) {
+    return mostrarErroConvrst("Mapeie ao menos uma coluna antes de continuar.");
+  }
+  btnConvrstMapear.disabled = true;
+  btnConvrstMapear.textContent = "Aplicando...";
+  try {
+    const r = await fetch("/api/conversor-rastreadores/mapear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId, mapping }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvrst(data.error || "Falha ao aplicar o mapeamento.");
+    convrstRegistros = data.registros;
+    convrstCamposMapeados = convrstCampos.filter((c) => mapping[c.chave]);
+    convrstProblemasPorIndice = {};
+    convrstDuplicadosPorIndice = {};
+    convrstPagina = 1;
+    convrstOrdenacao = null;
+    convrstSecaoTrabalho.classList.remove("hidden");
+    ajustarAlturaConvrstTabelaArea();
+    renderConvrstTabelaCabecalho();
+    renderConvrstTabela();
+    await rodarValidacaoConvrst();
+
+    const n = convrstCamposMapeados.length;
+    convrstMapaResumoTexto.textContent = `${n} campo${n === 1 ? "" : "s"} mapeado${n === 1 ? "" : "s"}.`;
+    convrstMapaDetalhe.classList.add("hidden");
+    convrstMapaResumo.classList.remove("hidden");
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+  } finally {
+    btnConvrstMapear.disabled = false;
+    btnConvrstMapear.textContent = "Aplicar mapeamento";
+  }
+});
+
+function convrstValorColuna(registro, chave) {
+  if (chave === "indice") return registro.indice;
+  if (chave === "problema") return convrstRegistroTemProblema(registro.indice) ? 1 : 0;
+  return registro.dados[chave];
+}
+
+function ordenarConvrstRegistros(registros) {
+  if (!convrstOrdenacao) return registros;
+  const { chave, direcao } = convrstOrdenacao;
+  return registros.slice().sort((a, b) => {
+    const va = valorOrdenavel(convrstValorColuna(a, chave));
+    const vb = valorOrdenavel(convrstValorColuna(b, chave));
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * direcao;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * direcao;
+  });
+}
+
+function renderConvrstTabelaCabecalho() {
+  convrstTabelaThead.innerHTML = "";
+  const tr = document.createElement("tr");
+
+  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+    const th = document.createElement("th");
+    th.className = "th-ordenavel";
+    th.style.width = `${larguraPadrao}px`;
+    th.textContent = texto;
+    if (convrstOrdenacao && convrstOrdenacao.chave === chave) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = convrstOrdenacao.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = convrstOrdenacao && convrstOrdenacao.chave === chave ? -convrstOrdenacao.direcao : 1;
+      convrstOrdenacao = { chave, direcao };
+      convrstPagina = 1;
+      renderConvrstTabelaCabecalho();
+      renderConvrstTabela();
+    });
+    return th;
+  };
+
+  // "Linha" e "Problema" — colunas próprias, congeladas, só com ordenação
+  // (sem filtro) — reaproveita as classes "convvei-th-linha"/"convvei-td-
+  // linha"/etc. (só visuais, não específicas de veículo — ver style.css).
+  const thLinha = criarThOrdenavel("Linha", "indice", 52);
+  thLinha.classList.add("convvei-th-linha");
+  tr.appendChild(thLinha);
+  const thProblema = criarThOrdenavel("Prob.", "problema", 40);
+  thProblema.classList.add("convvei-th-problema");
+  tr.appendChild(thProblema);
+
+  convrstCamposMapeados.forEach((campo) => tr.appendChild(criarThOrdenavel(campo.rotulo, campo.chave, 180)));
+
+  const thAcoes = document.createElement("th");
+  thAcoes.style.width = "46px";
+  thAcoes.textContent = "";
+  tr.appendChild(thAcoes);
+
+  convrstTabelaThead.appendChild(tr);
+}
+
+function convrstTotalPaginas() {
+  return Math.max(1, Math.ceil(convrstRegistros.length / Number(convrstTamanhoPagina.value)));
+}
+
+function convrstProblemaCombinado(indice) {
+  const a = convrstProblemasPorIndice[indice];
+  const b = convrstDuplicadosPorIndice[indice];
+  if (!a && !b) return null;
+  return {
+    erros: [...(a ? a.erros : []), ...(b ? b.erros : [])],
+    avisos: [...(a ? a.avisos : []), ...(b ? b.avisos : [])],
+  };
+}
+
+function convrstRegistroTemProblema(indice) {
+  const p = convrstProblemaCombinado(indice);
+  return !!(p && (p.erros.length > 0 || p.avisos.length > 0));
+}
+
+function montarLinhaConvrst(registro) {
+  const tr = document.createElement("tr");
+  tr.dataset.indice = registro.indice;
+  const problema = convrstProblemaCombinado(registro.indice);
+
+  const tdLinha = document.createElement("td");
+  tdLinha.className = "convvei-td-linha";
+  tdLinha.textContent = String(registro.indice);
+  tr.appendChild(tdLinha);
+
+  const tdProblema = document.createElement("td");
+  tdProblema.className = "convvei-td-problema";
+  let icone = "";
+  if (problema && problema.erros.length > 0) {
+    icone = "🔴";
+    tr.classList.add("conversor-edicao-linha-erro");
+  } else if (problema && problema.avisos.length > 0) {
+    icone = "⚠️";
+  } else if (problema) {
+    icone = "✓";
+  }
+  tdProblema.textContent = icone;
+  if (problema) {
+    const msgs = [...problema.erros.map((e) => `⛔ ${e.mensagem}`), ...problema.avisos.map((a) => `⚠️ ${a.mensagem}`)];
+    tr.title = msgs.join("\n");
+    tdProblema.title = tr.title;
+  }
+  tr.appendChild(tdProblema);
+
+  // "duplicado_ssx" (vermelho) e "nao_cadastrado_ssx" (vermelho também —
+  // referência que deveria existir na SSX e não existe) vêm de "Verificar na
+  // SSX"; "duplicado_planilha" (amarelo) é só dentro da própria planilha.
+  const duplicadosPorCampo = {};
+  if (problema) {
+    const todos = [...problema.erros, ...problema.avisos];
+    todos.filter((p) => p.categoria === "duplicado_planilha").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+    todos.filter((p) => p.categoria === "duplicado_ssx" || p.categoria === "nao_cadastrado_ssx").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+  }
+
+  convrstCamposMapeados.forEach((campo) => {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = registro.dados[campo.chave] || "";
+    const duplicado = duplicadosPorCampo[campo.rotulo];
+    if (duplicado) {
+      input.classList.add((duplicado.categoria === "duplicado_ssx" || duplicado.categoria === "nao_cadastrado_ssx") ? "convcli-campo-duplicado" : "convcli-campo-duplicado-planilha");
+      input.title = duplicado.mensagem;
+    }
+    input.addEventListener("change", async () => {
+      registro.dados[campo.chave] = input.value;
+      try {
+        const r = await fetch("/api/conversor-rastreadores/editar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: convrstFileId, indice: registro.indice, campo: campo.chave, valor: input.value }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return mostrarErroConvrst(data.error || "Falha ao salvar a edição.");
+        await rodarValidacaoConvrst();
+      } catch (err) {
+        mostrarErroConvrst(err.message || String(err));
+      }
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+
+  const tdAcoes = document.createElement("td");
+  tdAcoes.className = "convcli-td-acoes";
+  const btnExcluir = document.createElement("button");
+  btnExcluir.type = "button";
+  btnExcluir.className = "btn-secondary convcli-btn-excluir-linha";
+  btnExcluir.textContent = "🗑️";
+  btnExcluir.title = "Excluir esta linha";
+  btnExcluir.addEventListener("click", () => excluirLinhaConvrst(registro.indice));
+  tdAcoes.appendChild(btnExcluir);
+  tr.appendChild(tdAcoes);
+
+  return tr;
+}
+
+function renderConvrstTabela() {
+  const tamanho = Number(convrstTamanhoPagina.value);
+  const registrosOrdenados = ordenarConvrstRegistros(convrstRegistros);
+  convrstPagina = Math.min(Math.max(1, convrstPagina), convrstTotalPaginas());
+  const inicio = (convrstPagina - 1) * tamanho;
+  convrstTabelaTbody.innerHTML = "";
+  registrosOrdenados.slice(inicio, inicio + tamanho).forEach((r) => convrstTabelaTbody.appendChild(montarLinhaConvrst(r)));
+  tornarColunasRedimensionaveis(convrstTabelaElemento, CONVRST_LARGURAS_KEY, { 0: 52, 1: 40 });
+  atualizarConvrstGt06Lista();
+
+  convrstPaginacao.innerHTML = "";
+  const total = convrstTotalPaginas();
+  if (total > 1) {
+    const anterior = document.createElement("button");
+    anterior.type = "button";
+    anterior.className = "btn-secondary";
+    anterior.textContent = "‹ Anterior";
+    anterior.disabled = convrstPagina === 1;
+    anterior.addEventListener("click", () => { convrstPagina--; renderConvrstTabela(); });
+    const info = document.createElement("span");
+    info.textContent = `Página ${convrstPagina} de ${total}`;
+    const proxima = document.createElement("button");
+    proxima.type = "button";
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima ›";
+    proxima.disabled = convrstPagina === total;
+    proxima.addEventListener("click", () => { convrstPagina++; renderConvrstTabela(); });
+    [anterior, info, proxima].forEach((n) => convrstPaginacao.appendChild(n));
+  }
+}
+convrstTamanhoPagina.addEventListener("change", () => { convrstPagina = 1; renderConvrstTabela(); });
+
+// --- EXCLUIR / ADICIONAR LINHA (Conversor de Rastreadores) ---
+async function excluirLinhaConvrst(indice) {
+  if (!convrstFileId) return;
+  if (!confirm(`Excluir a linha ${indice}? Essa ação não pode ser desfeita.`)) return;
+  try {
+    const r = await fetch("/api/conversor-rastreadores/excluir-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId, indice }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvrst(data.error || "Falha ao excluir a linha.");
+    convrstRegistros = convrstRegistros.filter((r2) => r2.indice !== indice);
+    delete convrstDuplicadosPorIndice[indice];
+    await rodarValidacaoConvrst();
+    mostrarInfoConvrst(`Linha ${indice} excluída.`);
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+  }
+}
+
+el("btn-convrst-adicionar-linha").addEventListener("click", async () => {
+  if (!convrstFileId) return;
+  try {
+    const r = await fetch("/api/conversor-rastreadores/adicionar-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvrst(data.error || "Falha ao adicionar a linha.");
+    convrstRegistros.push(data.registro);
+    convrstOrdenacao = null;
+    renderConvrstTabelaCabecalho();
+    convrstPagina = convrstTotalPaginas();
+    await rodarValidacaoConvrst();
+    mostrarInfoConvrst(`Linha ${data.registro.indice} adicionada — preencha os campos.`);
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+  }
+});
+
+el("btn-convrst-limpar-vazias").addEventListener("click", async () => {
+  if (!convrstFileId) return;
+  try {
+    const r = await fetch("/api/conversor-rastreadores/limpar-vazias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvrst(data.error || "Falha ao limpar as linhas vazias.");
+    convrstRegistros = convrstRegistros.filter((reg) => Object.values(reg.dados).some((v) => (v || "").trim()));
+    convrstPagina = 1;
+    await rodarValidacaoConvrst();
+    mostrarInfoConvrst(data.removidos ? `${data.removidos} linha(s) vazia(s) removida(s).` : "Nenhuma linha vazia encontrada.");
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+  }
+});
+
+// Transformações em massa: roda no servidor sobre TODAS as linhas mapeadas e
+// devolve só os registros que mudaram — mesmo padrão de
+// rodarTransformacaoConvvei.
+async function rodarTransformacaoConvrst(acao, params, montarMensagem) {
+  if (!convrstFileId) return;
+  try {
+    const r = await fetch("/api/conversor-rastreadores/transformar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId, acao, params: params || {} }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvrst(data.error || "Falha ao aplicar a transformação.");
+    const porIndice = new Map(data.registros.map((r2) => [r2.indice, r2]));
+    convrstRegistros = convrstRegistros.map((r2) => porIndice.get(r2.indice) || r2);
+    await rodarValidacaoConvrst();
+    mostrarInfoConvrst(montarMensagem ? montarMensagem(data) : `${data.total_alterados} registro(s) alterado(s).`);
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+  }
+}
+
+el("btn-convrst-limpar-iccid1").addEventListener("click", () =>
+  rodarTransformacaoConvrst("limpar_campo", { campo: "iccid1" }, (data) => `${data.ajustados} ICCID1 limpo(s).`));
+el("btn-convrst-limpar-iccid2").addEventListener("click", () =>
+  rodarTransformacaoConvrst("limpar_campo", { campo: "iccid2" }, (data) => `${data.ajustados} ICCID2 limpo(s).`));
+el("btn-convrst-limpar-imei").addEventListener("click", () =>
+  rodarTransformacaoConvrst("limpar_campo", { campo: "imei" }, (data) => `${data.ajustados} IMEI limpo(s).`));
+
+el("btn-convrst-repetir-identificacao-codigo").addEventListener("click", () => {
+  rodarTransformacaoConvrst(
+    "repetir_campo", { origem: "identificacao", destino: "codigo_integracao" },
+    (data) => `${data.repetidos} identificação(ões) repetida(s) em Código de integração.`
+  );
+});
+
+// "Padrão GT06": a lista de templates distintos usados na planilha
+// (considerando TODAS as linhas, não só a página visível — vem de
+// convrstRegistros, já carregado inteiro em memória) aparece sozinha, sem
+// precisar de um botão "identificar" — atualizarConvrstGt06Lista() é
+// chamada a cada renderConvrstTabela() (ou seja, a cada upload/mapeamento/
+// transformação/edição/validação). Só mexe no DOM quando a lista de
+// templates realmente muda, pra não perder o que já estava marcado nem o
+// foco só por causa de troca de página. Mesmo padrão de
+// atualizarConvveiGt06Lista (Conversor de Veículos) — aqui sem "slot" de
+// rastreador (só existe um "Template"/"Identificação" por linha).
+const convrstGt06Vazio = el("convrst-gt06-vazio");
+const convrstGt06Lista = el("convrst-gt06-lista");
+const convrstGt06AplicarWrap = el("convrst-gt06-aplicar-wrap");
+let convrstGt06UltimaListaTemplates = null; // string[] da última renderização
+let convrstGt06Marcados = new Set(); // nomes marcados — sobrevive a reconstruções da lista
+
+function resetarConvrstGt06() {
+  convrstGt06UltimaListaTemplates = null;
+  convrstGt06Marcados = new Set();
+  convrstGt06Lista.innerHTML = "";
+  convrstGt06Lista.classList.add("hidden");
+  convrstGt06AplicarWrap.classList.add("hidden");
+  convrstGt06Vazio.classList.remove("hidden");
+}
+
+function atualizarConvrstGt06Lista() {
+  const templates = convrstValoresDistintos("template");
+  const mudou = !convrstGt06UltimaListaTemplates
+    || templates.length !== convrstGt06UltimaListaTemplates.length
+    || templates.some((t, i) => t !== convrstGt06UltimaListaTemplates[i]);
+  if (!mudou) return;
+  convrstGt06UltimaListaTemplates = templates;
+  convrstGt06Marcados = new Set([...convrstGt06Marcados].filter((t) => templates.includes(t)));
+
+  convrstGt06Lista.innerHTML = "";
+  if (templates.length === 0) {
+    convrstGt06Lista.classList.add("hidden");
+    convrstGt06AplicarWrap.classList.add("hidden");
+    convrstGt06Vazio.classList.remove("hidden");
+    return;
+  }
+  templates.forEach((t, i) => {
+    const label = document.createElement("label");
+    label.className = "convcli-checkbox-inline";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = t;
+    input.id = `convrst-gt06-template-${i}`;
+    input.checked = convrstGt06Marcados.has(t);
+    input.addEventListener("change", () => {
+      if (input.checked) convrstGt06Marcados.add(t);
+      else convrstGt06Marcados.delete(t);
+    });
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(t));
+    convrstGt06Lista.appendChild(label);
+  });
+  convrstGt06Vazio.classList.add("hidden");
+  convrstGt06Lista.classList.remove("hidden");
+  convrstGt06AplicarWrap.classList.remove("hidden");
+}
+
+function convrstGt06Selecionados() {
+  return Array.from(convrstGt06Marcados);
+}
+
+el("btn-convrst-gt06-aplicar").addEventListener("click", () => {
+  const selecionados = convrstGt06Selecionados();
+  if (selecionados.length === 0) {
+    return mostrarErroConvrst("Selecione ao menos um template antes de aplicar o padrão GT06.");
+  }
+  rodarTransformacaoConvrst("aplicar_gt06", { templates: selecionados }, (data) =>
+    `${data.ajustados} identificação(ões) e ${data.ajustados_codigo_integracao} código(s) de integração ajustado(s) (zero inicial) para o(s) template(s): ${selecionados.join(", ")}.`);
+});
+
+// "Limpar padrão GT06": remove só o 1º zero do início da identificação E do
+// código de integração — oposto de "Aplicar padrão GT06". Sem nenhum
+// template marcado, vale pra TODOS os templates da lista (ver
+// conversor_rastreadores.limpar_padrao_gt06), mas só depois de confirmar —
+// ação mais ampla, risco maior de engano.
+el("btn-convrst-gt06-limpar").addEventListener("click", () => {
+  const selecionados = convrstGt06Selecionados();
+  if (selecionados.length === 0) {
+    const confirmado = confirm(
+      "Nenhum template selecionado. Isso vai remover o zero inicial da identificação e do código de integração de TODOS os templates da lista. Confirma?"
+    );
+    if (!confirmado) return;
+  }
+  rodarTransformacaoConvrst("limpar_gt06", { templates: selecionados }, (data) =>
+    `${data.ajustados} identificação(ões) e ${data.ajustados_codigo_integracao} código(s) de integração com o zero inicial removido`
+    + (selecionados.length ? ` para o(s) template(s): ${selecionados.join(", ")}.` : " (todos os templates)."));
+});
+
+// "Preencher pra todas as linhas" — um único handler genérico (acao
+// "preencher_campo", igual o backend espera), reaproveitado pelos 3 botões
+// de Template/Status/Código do cliente.
+function ligarBtnConvrstPreencherTodas(idBotao, idInput, campo, rotuloErro) {
+  el(idBotao).addEventListener("click", () => {
+    const valor = el(idInput).value.trim();
+    if (!valor) return mostrarErroConvrst(`Informe ${rotuloErro} a ser preenchido.`);
+    rodarTransformacaoConvrst("preencher_campo", { campo, valor }, (data) =>
+      `${data.preenchidos} linha(s) preenchida(s) com "${valor}".`);
+  });
+}
+ligarBtnConvrstPreencherTodas("btn-convrst-preencher-template", "convrst-template-valor", "template", "o template");
+ligarBtnConvrstPreencherTodas("btn-convrst-preencher-status", "convrst-status-valor", "status", "o status");
+ligarBtnConvrstPreencherTodas("btn-convrst-preencher-cliente", "convrst-cliente-valor", "codigo_integracao_cliente", "o código do cliente");
+
+function renderConvrstResumo(data) {
+  convrstResumo.innerHTML = "";
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.n_ok, label: "Válidos" },
+    { valor: data.n_erro, label: "Com erro", clicavel: data.n_erro > 0 },
+  ].forEach(({ valor, label, clicavel }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    tile.appendChild(l);
+    tile.appendChild(v);
+    if (clicavel) {
+      tile.classList.add("stat-tile-clicavel");
+      tile.title = "Ir para o primeiro registro com erro";
+      tile.addEventListener("click", irParaPrimeiroErroConvrst);
+    }
+    tiles.appendChild(tile);
+  });
+  convrstResumo.appendChild(tiles);
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) válidos para importar.`;
+  convrstResumo.appendChild(legenda);
+}
+
+function irParaPrimeiroErroConvrst() {
+  const ordenados = ordenarConvrstRegistros(convrstRegistros);
+  const posicao = ordenados.findIndex((r) => {
+    const p = convrstProblemaCombinado(r.indice);
+    return p && p.erros.length > 0;
+  });
+  if (posicao === -1) return;
+
+  const tamanho = Number(convrstTamanhoPagina.value);
+  convrstPagina = Math.floor(posicao / tamanho) + 1;
+  renderConvrstTabela();
+
+  const indice = ordenados[posicao].indice;
+  const tr = convrstTabelaTbody.querySelector(`tr[data-indice="${indice}"]`);
+  if (!tr) return;
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  tr.classList.add("convcli-linha-destacada");
+  setTimeout(() => tr.classList.remove("convcli-linha-destacada"), 2200);
+}
+
+async function rodarValidacaoConvrst() {
+  if (!convrstFileId) return null;
+  try {
+    const r = await fetch("/api/conversor-rastreadores/validar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvrst(data.error || "Falha ao validar.");
+      return null;
+    }
+    convrstProblemasPorIndice = {};
+    data.problemas.forEach((p) => { convrstProblemasPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvrstResumo(data);
+    renderConvrstTabela();
+    return data;
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+    return null;
+  }
+}
+el("btn-convrst-validar").addEventListener("click", () => rodarValidacaoConvrst());
+
+// --- VERIFICAR DUPLICIDADE NA SSX (Conversor de Rastreadores, opcional) ---
+const overlayConvrstLogin = el("overlay-convrst-login");
+const selectConvrstCredencial = el("convrst-select-credencial");
+
+function renderSelectConvrstCredenciais() {
+  selectConvrstCredencial.innerHTML = '<option value="">Login salvo...</option>';
+  credenciaisCache.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nome;
+    selectConvrstCredencial.appendChild(opt);
+  });
+}
+
+selectConvrstCredencial.addEventListener("change", () => {
+  const cred = credenciaisCache.find((c) => c.id === selectConvrstCredencial.value);
+  if (!cred) return;
+  el("convrst-login").value = cred.login;
+  el("convrst-senha").value = cred.senha;
+  selectConvrstCredencial.value = "";
+});
+
+// Callback setado antes de abrir o login, executado 1x depois de autenticar
+// e resetado pra null em todo caminho que fecha/reabre o modal — mesmo
+// padrão de convcliLoginAoEntrar (ver gotcha nº3 do Conversor de Clientes).
+let convrstLoginAoEntrar = null;
+
+el("convrst-login-fechar").addEventListener("click", () => {
+  convrstLoginAoEntrar = null;
+  overlayConvrstLogin.classList.add("hidden");
+});
+
+el("form-convrst-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const login = el("convrst-login").value.trim();
+  const senha = el("convrst-senha").value;
+  if (!login || !senha) return;
+  const btn = el("btn-convrst-autenticar");
+  btn.disabled = true;
+  btn.textContent = "Entrando...";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvrst(data.error || "Falha ao autenticar na SSX.");
+      return;
+    }
+    convrstSsxOk = true;
+    convrstSsxLogin = login;
+    convrstSsxBase = extrairNomeBaseDeClaims(data.claims);
+    convrstSsxClaimsRaw = data.claims || null;
+    convrstAtualizarPillAuth();
+    overlayConvrstLogin.classList.add("hidden");
+    el("convrst-senha").value = "";
+    const aoEntrar = convrstLoginAoEntrar;
+    convrstLoginAoEntrar = null;
+    if (aoEntrar) return await aoEntrar();
+    await rodarVerificacaoDuplicidadeConvrst();
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Entrar";
+  }
+});
+
+el("btn-convrst-logout-ssx").addEventListener("click", async () => {
+  await fetch("/api/logout-avulso", { method: "POST" });
+  convrstSsxOk = false;
+  convrstSsxLogin = "";
+  convrstSsxBase = "";
+  convrstSsxClaimsRaw = null;
+  convrstAtualizarPillAuth();
+  convrstDuplicadosPorIndice = {};
+  renderConvrstTabela();
+  mostrarInfoConvrst("Sessão da SSX encerrada.");
+});
+
+async function rodarVerificacaoDuplicidadeConvrst() {
+  if (!convrstFileId) return null;
+  const btn = el("btn-convrst-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-rastreadores/verificar-duplicidade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convrstSsxOk = false;
+        convrstAtualizarPillAuth();
+        renderSelectConvrstCredenciais();
+        overlayConvrstLogin.classList.remove("hidden");
+        return null;
+      }
+      mostrarErroConvrst(data.error || "Falha ao verificar duplicidade na SSX.");
+      return null;
+    }
+    convrstDuplicadosPorIndice = {};
+    data.problemas.forEach((p) => { convrstDuplicadosPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvrstTabela();
+    mostrarInfoConvrst(
+      data.total_duplicados
+        ? `${data.total_duplicados} de ${data.total_verificados} registro(s) com possível problema na SSX (duplicata ou referência — template, status, cliente, ICCID — não cadastrada).`
+        : `Nenhum problema encontrado entre os ${data.total_verificados} registro(s) verificados (duplicata e referências na SSX).`
+    );
+    return data;
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar na SSX";
+  }
+}
+
+el("btn-convrst-verificar-ssx").addEventListener("click", () => {
+  if (!convrstFileId) return;
+  if (!convrstSsxOk) {
+    convrstLoginAoEntrar = null;
+    renderSelectConvrstCredenciais();
+    overlayConvrstLogin.classList.remove("hidden");
+    return;
+  }
+  rodarVerificacaoDuplicidadeConvrst();
+});
+
+// Botão "Templates": lista os Templates e Status de rastreador usados na
+// planilha inteira — aparece SEMPRE, direto de convrstRegistros (já em
+// memória), sem exigir login. A cor vermelha (⚠ "falta cadastrar") é um
+// passo à parte e opcional ("Verificar cadastro na SSX" dentro do modal),
+// que só então pede autenticação — mesma sessão/login de "Verificar na SSX"
+// (convrstSsxOk/convrstLoginAoEntrar).
+const overlayConvrstTemplates = el("overlay-convrst-templates");
+const convrstTemplatesListaTemplates = el("convrst-templates-lista-templates");
+const convrstTemplatesListaStatus = el("convrst-templates-lista-status");
+const convrstTemplatesLegenda = el("convrst-templates-legenda");
+
+function convrstValoresDistintos(chave) {
+  const vistos = new Set();
+  convrstRegistros.forEach((r) => {
+    const valor = (r.dados[chave] || "").trim();
+    if (valor) vistos.add(valor);
+  });
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+}
+
+function renderConvrstTemplatesLista(container, itens) {
+  container.innerHTML = "";
+  itens.forEach(({ valor, cadastrado }) => {
+    const li = document.createElement("li");
+    if (cadastrado === false) {
+      li.classList.add("convvei-templates-faltando");
+      li.textContent = `⚠ ${valor}`;
+      li.title = "Falta cadastrar na SSX";
+    } else if (cadastrado === true) {
+      li.textContent = `✓ ${valor}`;
+      li.title = "Já cadastrado na SSX";
+    } else {
+      li.textContent = valor;
+    }
+    container.appendChild(li);
+  });
+}
+
+function renderConvrstTemplatesModal() {
+  if (convrstTemplatesResultado) {
+    renderConvrstTemplatesLista(convrstTemplatesListaTemplates, convrstTemplatesResultado.templates);
+    renderConvrstTemplatesLista(convrstTemplatesListaStatus, convrstTemplatesResultado.status);
+    convrstTemplatesLegenda.textContent = "⚠ em vermelho = falta cadastrar na SSX; ✓ = já cadastrado.";
+  } else {
+    const templates = convrstValoresDistintos("template").map((valor) => ({ valor }));
+    const status = convrstValoresDistintos("status").map((valor) => ({ valor }));
+    renderConvrstTemplatesLista(convrstTemplatesListaTemplates, templates);
+    renderConvrstTemplatesLista(convrstTemplatesListaStatus, status);
+    convrstTemplatesLegenda.textContent = 'Valores usados na planilha — clique em "Verificar cadastro na SSX" pra ver o que já está cadastrado.';
+  }
+}
+
+async function verificarConvrstTemplatesNaSsx() {
+  if (!convrstFileId) return;
+  const btn = el("btn-convrst-templates-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-rastreadores/listar-templates-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convrstFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convrstSsxOk = false;
+        convrstAtualizarPillAuth();
+        convrstLoginAoEntrar = verificarConvrstTemplatesNaSsx;
+        renderSelectConvrstCredenciais();
+        overlayConvrstLogin.classList.remove("hidden");
+        return;
+      }
+      mostrarErroConvrst(data.error || "Falha ao consultar templates/status na SSX.");
+      return;
+    }
+    convrstTemplatesResultado = { templates: data.templates, status: data.status };
+    renderConvrstTemplatesModal();
+  } catch (err) {
+    mostrarErroConvrst(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar cadastro na SSX";
+  }
+}
+
+el("btn-convrst-templates").addEventListener("click", () => {
+  if (!convrstFileId) {
+    return mostrarErroConvrst("Carregue e mapeie uma planilha no Conversor de Rastreadores antes.");
+  }
+  renderConvrstTemplatesModal();
+  overlayConvrstTemplates.classList.remove("hidden");
+});
+
+el("btn-convrst-templates-verificar-ssx").addEventListener("click", () => {
+  if (!convrstSsxOk) {
+    convrstLoginAoEntrar = verificarConvrstTemplatesNaSsx;
+    renderSelectConvrstCredenciais();
+    overlayConvrstLogin.classList.remove("hidden");
+    return;
+  }
+  verificarConvrstTemplatesNaSsx();
+});
+
+el("convrst-templates-fechar").addEventListener("click", () => {
+  overlayConvrstTemplates.classList.add("hidden");
+});
+
+function baixarConvrstArquivo(modo) {
+  const a = document.createElement("a");
+  a.href = `/api/conversor-rastreadores/exportar/${convrstFileId}/${modo}`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+const overlayConvrstBaixarErro = el("overlay-convrst-baixar-erro");
+const textoConvrstBaixarErro = el("convrst-baixar-erro-texto");
+let resolverConvrstBaixarErro = null;
+function fecharConvrstBaixarErro(escolha) {
+  overlayConvrstBaixarErro.classList.add("hidden");
+  const resolve = resolverConvrstBaixarErro;
+  resolverConvrstBaixarErro = null;
+  if (resolve) resolve(escolha);
+}
+function confirmarConvrstBaixarErro(nComErro) {
+  const plural = nComErro === 1 ? "rastreador não passou" : "rastreadores não passaram";
+  textoConvrstBaixarErro.textContent =
+    `${nComErro} ${plural} na validação e podem ser rejeitados pelo SSX na importação. Baixe só os válidos, ou inclua os com erro pra corrigir depois.`;
+  overlayConvrstBaixarErro.classList.remove("hidden");
+  return new Promise((resolve) => { resolverConvrstBaixarErro = resolve; });
+}
+el("convrst-baixar-erro-fechar").addEventListener("click", () => fecharConvrstBaixarErro("cancelar"));
+el("btn-convrst-baixar-erro-cancelar").addEventListener("click", () => fecharConvrstBaixarErro("cancelar"));
+el("btn-convrst-baixar-com-erros").addEventListener("click", () => fecharConvrstBaixarErro("com-erros"));
+el("btn-convrst-baixar-sem-erros").addEventListener("click", () => fecharConvrstBaixarErro("sem-erros"));
+
+el("btn-convrst-baixar").addEventListener("click", async () => {
+  if (!convrstFileId) return;
+  const resultado = await rodarValidacaoConvrst();
+  if (!resultado) return;
+  if (resultado.n_erro > 0) {
+    const escolha = await confirmarConvrstBaixarErro(resultado.n_erro);
+    if (escolha === "cancelar") return;
+    baixarConvrstArquivo(escolha === "com-erros" ? "todos" : "validos");
+  } else {
+    baixarConvrstArquivo("todos");
+  }
+});
+
+el("btn-convrst-importar-api").addEventListener("click", () => {
+  if (!convrstFileId) {
+    return mostrarErroConvrst("Carregue e mapeie uma planilha no Conversor de Rastreadores antes.");
+  }
+  if (!convrstSsxOk) {
+    convrstLoginAoEntrar = abrirModalImportDeConvrst;
+    renderSelectConvrstCredenciais();
+    overlayConvrstLogin.classList.remove("hidden");
+    return;
+  }
+  abrirModalImportDeConvrst();
+});
+
+// --- CONVERSOR DE SIM CARDS -> SSX ---
+// Sub-tela "/ferramentas/conversor-simcards": mesmo fluxo e mesmo molde das
+// seções acima — domínio o mais simples da Central de Importação (10 campos,
+// nenhum campo de referência a um cadastro que precise já existir na SSX —
+// ver conversor_simcards.py), por isso sem botão "Templates" e com
+// "Verificar na SSX" checando só duplicidade de ICCID.
+const convsimInputArquivo = el("convsim-input-arquivo");
+const convsimArquivoNome = el("convsim-arquivo-nome");
+const convsimSecaoMapeamento = el("convsim-secao-mapeamento");
+const convsimMapaCampos = el("convsim-mapa-campos");
+const convsimMapaResumo = el("convsim-mapa-resumo");
+const convsimMapaResumoTexto = el("convsim-mapa-resumo-texto");
+const convsimMapaDetalhe = el("convsim-mapa-detalhe");
+const btnConvsimMapear = el("btn-convsim-mapear");
+const convsimSecaoTrabalho = el("convsim-secao-trabalho");
+const convsimResumo = el("convsim-resumo");
+const convsimTabelaThead = el("convsim-tabela-thead");
+const convsimTabelaTbody = el("convsim-tabela-tbody");
+const convsimTabelaElemento = convsimTabelaThead.closest("table");
+const convsimTamanhoPagina = el("convsim-tamanho-pagina");
+const convsimPaginacao = el("convsim-paginacao");
+const convsimTabelaArea = el("convsim-tabela-area");
+const CONVSIM_LARGURAS_KEY = "larguraColunas_convsimSimcards";
+
+function ajustarAlturaConvsimTabelaArea() {
+  if (!convsimTabelaArea || !elConteudoPrincipal) return;
+  convsimTabelaArea.style.height = `${elConteudoPrincipal.clientHeight - 24}px`;
+}
+if (elConteudoPrincipal && window.ResizeObserver) {
+  new ResizeObserver(ajustarAlturaConvsimTabelaArea).observe(elConteudoPrincipal);
+}
+window.addEventListener("resize", ajustarAlturaConvsimTabelaArea);
+
+let convsimFileId = null;
+let convsimColunasOrigem = [];
+let convsimCampos = [];
+let convsimCamposMapeados = [];
+let convsimRegistros = [];
+let convsimProblemasPorIndice = {};
+let convsimDuplicadosPorIndice = {};
+let convsimNomeBase = "simcards";
+let convsimPagina = 1;
+let convsimOrdenacao = null;
+
+let convsimSsxOk = false;
+let convsimSsxLogin = "";
+let convsimSsxBase = "";
+let convsimSsxClaimsRaw = null;
+
+function convsimAtualizarPillAuth() {
+  const pill = el("convsim-status-auth");
+  const btnLogout = el("btn-convsim-logout-ssx");
+  if (convsimSsxOk) {
+    pill.textContent = convsimSsxLogin
+      ? `Autenticado na SSX (${convsimSsxLogin}${convsimSsxBase ? " — " + convsimSsxBase : ""})`
+      : "Autenticado na SSX";
+    pill.title = convsimSsxClaimsRaw ? JSON.stringify(convsimSsxClaimsRaw) : "";
+    pill.className = "status-pill status-on";
+    btnLogout.classList.remove("hidden");
+  } else {
+    pill.textContent = "Não autenticado na SSX";
+    pill.className = "status-pill status-off";
+    btnLogout.classList.add("hidden");
+  }
+}
+
+function limparConvsim() {
+  convsimFileId = null;
+  convsimColunasOrigem = [];
+  convsimCamposMapeados = [];
+  convsimRegistros = [];
+  convsimProblemasPorIndice = {};
+  convsimDuplicadosPorIndice = {};
+  convsimSsxOk = false;
+  convsimSsxLogin = "";
+  convsimSsxBase = "";
+  convsimSsxClaimsRaw = null;
+  convsimAtualizarPillAuth();
+  convsimNomeBase = "simcards";
+  convsimPagina = 1;
+  convsimOrdenacao = null;
+  convsimInputArquivo.value = "";
+  convsimArquivoNome.textContent = "Nenhum arquivo selecionado";
+  convsimSecaoMapeamento.classList.add("hidden");
+  convsimSecaoTrabalho.classList.add("hidden");
+  convsimMapaResumo.classList.add("hidden");
+  convsimMapaDetalhe.classList.remove("hidden");
+  convsimMapaCampos.innerHTML = "";
+  convsimResumo.innerHTML = "";
+  convsimTabelaThead.innerHTML = "";
+  convsimTabelaTbody.innerHTML = "";
+  convsimPaginacao.innerHTML = "";
+  btnConvsimMapear.disabled = true;
+}
+limparConvsim();
+
+function mostrarErroConvsim(msg) {
+  convsimResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  convsimResumo.appendChild(p);
+}
+
+function mostrarInfoConvsim(msg) {
+  convsimResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = msg;
+  convsimResumo.appendChild(p);
+}
+
+async function carregarConvsimCampos() {
+  if (convsimCampos.length) return convsimCampos;
+  const r = await fetch("/api/conversor-simcards/campos");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "Falha ao carregar os campos da SSX.");
+  convsimCampos = data.campos;
+  return convsimCampos;
+}
+
+function renderConvsimMapaCampos() {
+  convsimMapaCampos.innerHTML = "";
+  convsimCampos.forEach((campo, i) => {
+    const linha = document.createElement("div");
+    linha.className = "convcli-mapa-linha";
+
+    const nome = document.createElement("span");
+    nome.className = "convcli-mapa-nome";
+    const marca = campo.obrigatorio === true ? " *" : campo.obrigatorio === "condicional" ? " (condicional)" : "";
+    nome.textContent = campo.rotulo + marca;
+    nome.title = campo.rotulo + marca;
+
+    const select = document.createElement("select");
+    select.dataset.campo = campo.chave;
+    const optVazio = document.createElement("option");
+    optVazio.value = "";
+    optVazio.textContent = "— não mapear —";
+    select.appendChild(optVazio);
+    convsimColunasOrigem.forEach((col) => {
+      const opt = document.createElement("option");
+      opt.value = col;
+      opt.textContent = col;
+      select.appendChild(opt);
+    });
+    if (convsimColunasOrigem[i] !== undefined) select.value = convsimColunasOrigem[i];
+
+    linha.appendChild(nome);
+    linha.appendChild(select);
+    convsimMapaCampos.appendChild(linha);
+  });
+}
+
+el("btn-convsim-mapear-limpar").addEventListener("click", () => {
+  convsimMapaCampos.querySelectorAll("select").forEach((sel) => { sel.value = ""; });
+});
+
+el("btn-convsim-mapear-auto").addEventListener("click", () => {
+  convsimMapaCampos.querySelectorAll("select").forEach((sel, i) => {
+    sel.value = convsimColunasOrigem[i] !== undefined ? convsimColunasOrigem[i] : "";
+  });
+});
+
+el("btn-convsim-mapa-editar").addEventListener("click", () => {
+  convsimMapaResumo.classList.add("hidden");
+  convsimMapaDetalhe.classList.remove("hidden");
+});
+
+convsimInputArquivo.addEventListener("change", async () => {
+  const file = convsimInputArquivo.files[0];
+  if (!file) return;
+  convsimArquivoNome.textContent = "Enviando...";
+  convsimSecaoTrabalho.classList.add("hidden");
+  convsimSecaoMapeamento.classList.add("hidden");
+  convsimSsxOk = false;
+  convsimDuplicadosPorIndice = {};
+  convsimAtualizarPillAuth();
+  try {
+    await carregarConvsimCampos();
+    const formData = new FormData();
+    formData.append("arquivo", file);
+    const r = await fetch("/api/conversor-simcards/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      convsimArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErroConvsim(data.error || "Falha ao enviar arquivo.");
+    }
+    convsimFileId = data.file_id;
+    convsimColunasOrigem = data.colunas;
+    convsimNomeBase = file.name.replace(/\.(xlsx|xls|csv)$/i, "");
+    convsimArquivoNome.textContent = `${file.name} (${data.total_linhas} linha(s))`;
+    renderConvsimMapaCampos();
+    convsimSecaoMapeamento.classList.remove("hidden");
+    btnConvsimMapear.disabled = false;
+  } catch (err) {
+    convsimArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErroConvsim(err.message || String(err));
+  }
+});
+
+btnConvsimMapear.addEventListener("click", async () => {
+  const mapping = {};
+  convsimMapaCampos.querySelectorAll("select").forEach((sel) => {
+    if (sel.value) mapping[sel.dataset.campo] = sel.value;
+  });
+  if (Object.keys(mapping).length === 0) {
+    return mostrarErroConvsim("Mapeie ao menos uma coluna antes de continuar.");
+  }
+  btnConvsimMapear.disabled = true;
+  btnConvsimMapear.textContent = "Aplicando...";
+  try {
+    const r = await fetch("/api/conversor-simcards/mapear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convsimFileId, mapping }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvsim(data.error || "Falha ao aplicar o mapeamento.");
+    convsimRegistros = data.registros;
+    convsimCamposMapeados = convsimCampos.filter((c) => mapping[c.chave]);
+    convsimProblemasPorIndice = {};
+    convsimDuplicadosPorIndice = {};
+    convsimPagina = 1;
+    convsimOrdenacao = null;
+    convsimSecaoTrabalho.classList.remove("hidden");
+    ajustarAlturaConvsimTabelaArea();
+    renderConvsimTabelaCabecalho();
+    renderConvsimTabela();
+    await rodarValidacaoConvsim();
+
+    const n = convsimCamposMapeados.length;
+    convsimMapaResumoTexto.textContent = `${n} campo${n === 1 ? "" : "s"} mapeado${n === 1 ? "" : "s"}.`;
+    convsimMapaDetalhe.classList.add("hidden");
+    convsimMapaResumo.classList.remove("hidden");
+  } catch (err) {
+    mostrarErroConvsim(err.message || String(err));
+  } finally {
+    btnConvsimMapear.disabled = false;
+    btnConvsimMapear.textContent = "Aplicar mapeamento";
+  }
+});
+
+function convsimValorColuna(registro, chave) {
+  if (chave === "indice") return registro.indice;
+  if (chave === "problema") return convsimRegistroTemProblema(registro.indice) ? 1 : 0;
+  return registro.dados[chave];
+}
+
+function ordenarConvsimRegistros(registros) {
+  if (!convsimOrdenacao) return registros;
+  const { chave, direcao } = convsimOrdenacao;
+  return registros.slice().sort((a, b) => {
+    const va = valorOrdenavel(convsimValorColuna(a, chave));
+    const vb = valorOrdenavel(convsimValorColuna(b, chave));
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * direcao;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * direcao;
+  });
+}
+
+function renderConvsimTabelaCabecalho() {
+  convsimTabelaThead.innerHTML = "";
+  const tr = document.createElement("tr");
+
+  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+    const th = document.createElement("th");
+    th.className = "th-ordenavel";
+    th.style.width = `${larguraPadrao}px`;
+    th.textContent = texto;
+    if (convsimOrdenacao && convsimOrdenacao.chave === chave) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = convsimOrdenacao.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = convsimOrdenacao && convsimOrdenacao.chave === chave ? -convsimOrdenacao.direcao : 1;
+      convsimOrdenacao = { chave, direcao };
+      convsimPagina = 1;
+      renderConvsimTabelaCabecalho();
+      renderConvsimTabela();
+    });
+    return th;
+  };
+
+  const thLinha = criarThOrdenavel("Linha", "indice", 52);
+  thLinha.classList.add("convvei-th-linha");
+  tr.appendChild(thLinha);
+  const thProblema = criarThOrdenavel("Prob.", "problema", 40);
+  thProblema.classList.add("convvei-th-problema");
+  tr.appendChild(thProblema);
+
+  convsimCamposMapeados.forEach((campo) => tr.appendChild(criarThOrdenavel(campo.rotulo, campo.chave, 180)));
+
+  const thAcoes = document.createElement("th");
+  thAcoes.style.width = "46px";
+  thAcoes.textContent = "";
+  tr.appendChild(thAcoes);
+
+  convsimTabelaThead.appendChild(tr);
+}
+
+function convsimTotalPaginas() {
+  return Math.max(1, Math.ceil(convsimRegistros.length / Number(convsimTamanhoPagina.value)));
+}
+
+function convsimProblemaCombinado(indice) {
+  const a = convsimProblemasPorIndice[indice];
+  const b = convsimDuplicadosPorIndice[indice];
+  if (!a && !b) return null;
+  return {
+    erros: [...(a ? a.erros : []), ...(b ? b.erros : [])],
+    avisos: [...(a ? a.avisos : []), ...(b ? b.avisos : [])],
+  };
+}
+
+function convsimRegistroTemProblema(indice) {
+  const p = convsimProblemaCombinado(indice);
+  return !!(p && (p.erros.length > 0 || p.avisos.length > 0));
+}
+
+function montarLinhaConvsim(registro) {
+  const tr = document.createElement("tr");
+  tr.dataset.indice = registro.indice;
+  const problema = convsimProblemaCombinado(registro.indice);
+
+  const tdLinha = document.createElement("td");
+  tdLinha.className = "convvei-td-linha";
+  tdLinha.textContent = String(registro.indice);
+  tr.appendChild(tdLinha);
+
+  const tdProblema = document.createElement("td");
+  tdProblema.className = "convvei-td-problema";
+  let icone = "";
+  if (problema && problema.erros.length > 0) {
+    icone = "🔴";
+    tr.classList.add("conversor-edicao-linha-erro");
+  } else if (problema && problema.avisos.length > 0) {
+    icone = "⚠️";
+  } else if (problema) {
+    icone = "✓";
+  }
+  tdProblema.textContent = icone;
+  if (problema) {
+    const msgs = [...problema.erros.map((e) => `⛔ ${e.mensagem}`), ...problema.avisos.map((a) => `⚠️ ${a.mensagem}`)];
+    tr.title = msgs.join("\n");
+    tdProblema.title = tr.title;
+  }
+  tr.appendChild(tdProblema);
+
+  const duplicadosPorCampo = {};
+  if (problema) {
+    const todos = [...problema.erros, ...problema.avisos];
+    todos.filter((p) => p.categoria === "duplicado_planilha").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+    todos.filter((p) => p.categoria === "duplicado_ssx").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+  }
+
+  convsimCamposMapeados.forEach((campo) => {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = registro.dados[campo.chave] || "";
+    const duplicado = duplicadosPorCampo[campo.rotulo];
+    if (duplicado) {
+      input.classList.add(duplicado.categoria === "duplicado_ssx" ? "convcli-campo-duplicado" : "convcli-campo-duplicado-planilha");
+      input.title = duplicado.mensagem;
+    }
+    input.addEventListener("change", async () => {
+      registro.dados[campo.chave] = input.value;
+      try {
+        const r = await fetch("/api/conversor-simcards/editar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: convsimFileId, indice: registro.indice, campo: campo.chave, valor: input.value }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return mostrarErroConvsim(data.error || "Falha ao salvar a edição.");
+        await rodarValidacaoConvsim();
+      } catch (err) {
+        mostrarErroConvsim(err.message || String(err));
+      }
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+
+  const tdAcoes = document.createElement("td");
+  tdAcoes.className = "convcli-td-acoes";
+  const btnExcluir = document.createElement("button");
+  btnExcluir.type = "button";
+  btnExcluir.className = "btn-secondary convcli-btn-excluir-linha";
+  btnExcluir.textContent = "🗑️";
+  btnExcluir.title = "Excluir esta linha";
+  btnExcluir.addEventListener("click", () => excluirLinhaConvsim(registro.indice));
+  tdAcoes.appendChild(btnExcluir);
+  tr.appendChild(tdAcoes);
+
+  return tr;
+}
+
+function renderConvsimTabela() {
+  const tamanho = Number(convsimTamanhoPagina.value);
+  const registrosOrdenados = ordenarConvsimRegistros(convsimRegistros);
+  convsimPagina = Math.min(Math.max(1, convsimPagina), convsimTotalPaginas());
+  const inicio = (convsimPagina - 1) * tamanho;
+  convsimTabelaTbody.innerHTML = "";
+  registrosOrdenados.slice(inicio, inicio + tamanho).forEach((r) => convsimTabelaTbody.appendChild(montarLinhaConvsim(r)));
+  tornarColunasRedimensionaveis(convsimTabelaElemento, CONVSIM_LARGURAS_KEY, { 0: 52, 1: 40 });
+
+  convsimPaginacao.innerHTML = "";
+  const total = convsimTotalPaginas();
+  if (total > 1) {
+    const anterior = document.createElement("button");
+    anterior.type = "button";
+    anterior.className = "btn-secondary";
+    anterior.textContent = "‹ Anterior";
+    anterior.disabled = convsimPagina === 1;
+    anterior.addEventListener("click", () => { convsimPagina--; renderConvsimTabela(); });
+    const info = document.createElement("span");
+    info.textContent = `Página ${convsimPagina} de ${total}`;
+    const proxima = document.createElement("button");
+    proxima.type = "button";
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima ›";
+    proxima.disabled = convsimPagina === total;
+    proxima.addEventListener("click", () => { convsimPagina++; renderConvsimTabela(); });
+    [anterior, info, proxima].forEach((n) => convsimPaginacao.appendChild(n));
+  }
+}
+convsimTamanhoPagina.addEventListener("change", () => { convsimPagina = 1; renderConvsimTabela(); });
+
+// --- EXCLUIR / ADICIONAR LINHA (Conversor de SIM Cards) ---
+async function excluirLinhaConvsim(indice) {
+  if (!convsimFileId) return;
+  if (!confirm(`Excluir a linha ${indice}? Essa ação não pode ser desfeita.`)) return;
+  try {
+    const r = await fetch("/api/conversor-simcards/excluir-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convsimFileId, indice }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvsim(data.error || "Falha ao excluir a linha.");
+    convsimRegistros = convsimRegistros.filter((r2) => r2.indice !== indice);
+    delete convsimDuplicadosPorIndice[indice];
+    await rodarValidacaoConvsim();
+    mostrarInfoConvsim(`Linha ${indice} excluída.`);
+  } catch (err) {
+    mostrarErroConvsim(err.message || String(err));
+  }
+}
+
+el("btn-convsim-adicionar-linha").addEventListener("click", async () => {
+  if (!convsimFileId) return;
+  try {
+    const r = await fetch("/api/conversor-simcards/adicionar-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convsimFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvsim(data.error || "Falha ao adicionar a linha.");
+    convsimRegistros.push(data.registro);
+    convsimOrdenacao = null;
+    renderConvsimTabelaCabecalho();
+    convsimPagina = convsimTotalPaginas();
+    await rodarValidacaoConvsim();
+    mostrarInfoConvsim(`Linha ${data.registro.indice} adicionada — preencha os campos.`);
+  } catch (err) {
+    mostrarErroConvsim(err.message || String(err));
+  }
+});
+
+el("btn-convsim-limpar-vazias").addEventListener("click", async () => {
+  if (!convsimFileId) return;
+  try {
+    const r = await fetch("/api/conversor-simcards/limpar-vazias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convsimFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvsim(data.error || "Falha ao limpar as linhas vazias.");
+    convsimRegistros = convsimRegistros.filter((reg) => Object.values(reg.dados).some((v) => (v || "").trim()));
+    convsimPagina = 1;
+    await rodarValidacaoConvsim();
+    mostrarInfoConvsim(data.removidos ? `${data.removidos} linha(s) vazia(s) removida(s).` : "Nenhuma linha vazia encontrada.");
+  } catch (err) {
+    mostrarErroConvsim(err.message || String(err));
+  }
+});
+
+async function rodarTransformacaoConvsim(acao, params, montarMensagem) {
+  if (!convsimFileId) return;
+  try {
+    const r = await fetch("/api/conversor-simcards/transformar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convsimFileId, acao, params: params || {} }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvsim(data.error || "Falha ao aplicar a transformação.");
+    const porIndice = new Map(data.registros.map((r2) => [r2.indice, r2]));
+    convsimRegistros = convsimRegistros.map((r2) => porIndice.get(r2.indice) || r2);
+    await rodarValidacaoConvsim();
+    mostrarInfoConvsim(montarMensagem ? montarMensagem(data) : `${data.total_alterados} registro(s) alterado(s).`);
+  } catch (err) {
+    mostrarErroConvsim(err.message || String(err));
+  }
+}
+
+el("btn-convsim-limpar-iccid").addEventListener("click", () =>
+  rodarTransformacaoConvsim("limpar_campo", { campo: "iccid" }, (data) => `${data.ajustados} ICCID limpo(s).`));
+el("btn-convsim-ajustar-telefone").addEventListener("click", () => {
+  const dddPadrao = el("convsim-ddd-padrao").value.trim() || "55";
+  rodarTransformacaoConvsim("ajustar_telefone", { ddd_padrao: dddPadrao }, (data) =>
+    `${data.linhas_ajustadas} linha(s) com DDI/DDD do telefone ajustado(s).`);
+});
+
+function ligarBtnConvsimPreencherTodas(idBotao, idInput, campo, rotuloErro) {
+  el(idBotao).addEventListener("click", () => {
+    const valor = el(idInput).value.trim();
+    if (!valor) return mostrarErroConvsim(`Informe ${rotuloErro} a ser preenchido.`);
+    rodarTransformacaoConvsim("preencher_campo", { campo, valor }, (data) =>
+      `${data.preenchidos} linha(s) preenchida(s) com "${valor}".`);
+  });
+}
+ligarBtnConvsimPreencherTodas("btn-convsim-preencher-apn", "convsim-apn-valor", "apn_dominio", "o domínio da APN");
+ligarBtnConvsimPreencherTodas("btn-convsim-preencher-corte", "convsim-corte-valor", "dia_corte", "o dia de corte");
+
+function renderConvsimResumo(data) {
+  convsimResumo.innerHTML = "";
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.n_ok, label: "Válidos" },
+    { valor: data.n_erro, label: "Com erro", clicavel: data.n_erro > 0 },
+  ].forEach(({ valor, label, clicavel }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    tile.appendChild(l);
+    tile.appendChild(v);
+    if (clicavel) {
+      tile.classList.add("stat-tile-clicavel");
+      tile.title = "Ir para o primeiro registro com erro";
+      tile.addEventListener("click", irParaPrimeiroErroConvsim);
+    }
+    tiles.appendChild(tile);
+  });
+  convsimResumo.appendChild(tiles);
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) válidos para importar.`;
+  convsimResumo.appendChild(legenda);
+}
+
+function irParaPrimeiroErroConvsim() {
+  const ordenados = ordenarConvsimRegistros(convsimRegistros);
+  const posicao = ordenados.findIndex((r) => {
+    const p = convsimProblemaCombinado(r.indice);
+    return p && p.erros.length > 0;
+  });
+  if (posicao === -1) return;
+
+  const tamanho = Number(convsimTamanhoPagina.value);
+  convsimPagina = Math.floor(posicao / tamanho) + 1;
+  renderConvsimTabela();
+
+  const indice = ordenados[posicao].indice;
+  const tr = convsimTabelaTbody.querySelector(`tr[data-indice="${indice}"]`);
+  if (!tr) return;
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  tr.classList.add("convcli-linha-destacada");
+  setTimeout(() => tr.classList.remove("convcli-linha-destacada"), 2200);
+}
+
+async function rodarValidacaoConvsim() {
+  if (!convsimFileId) return null;
+  try {
+    const r = await fetch("/api/conversor-simcards/validar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convsimFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvsim(data.error || "Falha ao validar.");
+      return null;
+    }
+    convsimProblemasPorIndice = {};
+    data.problemas.forEach((p) => { convsimProblemasPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvsimResumo(data);
+    renderConvsimTabela();
+    return data;
+  } catch (err) {
+    mostrarErroConvsim(err.message || String(err));
+    return null;
+  }
+}
+el("btn-convsim-validar").addEventListener("click", () => rodarValidacaoConvsim());
+
+// --- VERIFICAR DUPLICIDADE NA SSX (Conversor de SIM Cards, opcional) ---
+const overlayConvsimLogin = el("overlay-convsim-login");
+const selectConvsimCredencial = el("convsim-select-credencial");
+
+function renderSelectConvsimCredenciais() {
+  selectConvsimCredencial.innerHTML = '<option value="">Login salvo...</option>';
+  credenciaisCache.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nome;
+    selectConvsimCredencial.appendChild(opt);
+  });
+}
+
+selectConvsimCredencial.addEventListener("change", () => {
+  const cred = credenciaisCache.find((c) => c.id === selectConvsimCredencial.value);
+  if (!cred) return;
+  el("convsim-login").value = cred.login;
+  el("convsim-senha").value = cred.senha;
+  selectConvsimCredencial.value = "";
+});
+
+let convsimLoginAoEntrar = null;
+
+el("convsim-login-fechar").addEventListener("click", () => {
+  convsimLoginAoEntrar = null;
+  overlayConvsimLogin.classList.add("hidden");
+});
+
+el("form-convsim-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const login = el("convsim-login").value.trim();
+  const senha = el("convsim-senha").value;
+  if (!login || !senha) return;
+  const btn = el("btn-convsim-autenticar");
+  btn.disabled = true;
+  btn.textContent = "Entrando...";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvsim(data.error || "Falha ao autenticar na SSX.");
+      return;
+    }
+    convsimSsxOk = true;
+    convsimSsxLogin = login;
+    convsimSsxBase = extrairNomeBaseDeClaims(data.claims);
+    convsimSsxClaimsRaw = data.claims || null;
+    convsimAtualizarPillAuth();
+    overlayConvsimLogin.classList.add("hidden");
+    el("convsim-senha").value = "";
+    const aoEntrar = convsimLoginAoEntrar;
+    convsimLoginAoEntrar = null;
+    if (aoEntrar) return await aoEntrar();
+    await rodarVerificacaoDuplicidadeConvsim();
+  } catch (err) {
+    mostrarErroConvsim(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Entrar";
+  }
+});
+
+el("btn-convsim-logout-ssx").addEventListener("click", async () => {
+  await fetch("/api/logout-avulso", { method: "POST" });
+  convsimSsxOk = false;
+  convsimSsxLogin = "";
+  convsimSsxBase = "";
+  convsimSsxClaimsRaw = null;
+  convsimAtualizarPillAuth();
+  convsimDuplicadosPorIndice = {};
+  renderConvsimTabela();
+  mostrarInfoConvsim("Sessão da SSX encerrada.");
+});
+
+async function rodarVerificacaoDuplicidadeConvsim() {
+  if (!convsimFileId) return null;
+  const btn = el("btn-convsim-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-simcards/verificar-duplicidade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convsimFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convsimSsxOk = false;
+        convsimAtualizarPillAuth();
+        renderSelectConvsimCredenciais();
+        overlayConvsimLogin.classList.remove("hidden");
+        return null;
+      }
+      mostrarErroConvsim(data.error || "Falha ao verificar duplicidade na SSX.");
+      return null;
+    }
+    convsimDuplicadosPorIndice = {};
+    data.problemas.forEach((p) => { convsimDuplicadosPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvsimTabela();
+    mostrarInfoConvsim(
+      data.total_duplicados
+        ? `${data.total_duplicados} de ${data.total_verificados} registro(s) com ICCID já cadastrado na SSX.`
+        : `Nenhum ICCID duplicado encontrado entre os ${data.total_verificados} registro(s) verificados.`
+    );
+    return data;
+  } catch (err) {
+    mostrarErroConvsim(err.message || String(err));
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar na SSX";
+  }
+}
+
+el("btn-convsim-verificar-ssx").addEventListener("click", () => {
+  if (!convsimFileId) return;
+  if (!convsimSsxOk) {
+    convsimLoginAoEntrar = null;
+    renderSelectConvsimCredenciais();
+    overlayConvsimLogin.classList.remove("hidden");
+    return;
+  }
+  rodarVerificacaoDuplicidadeConvsim();
+});
+
+function baixarConvsimArquivo(modo) {
+  const a = document.createElement("a");
+  a.href = `/api/conversor-simcards/exportar/${convsimFileId}/${modo}`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+const overlayConvsimBaixarErro = el("overlay-convsim-baixar-erro");
+const textoConvsimBaixarErro = el("convsim-baixar-erro-texto");
+let resolverConvsimBaixarErro = null;
+function fecharConvsimBaixarErro(escolha) {
+  overlayConvsimBaixarErro.classList.add("hidden");
+  const resolve = resolverConvsimBaixarErro;
+  resolverConvsimBaixarErro = null;
+  if (resolve) resolve(escolha);
+}
+function confirmarConvsimBaixarErro(nComErro) {
+  const plural = nComErro === 1 ? "SIM card não passou" : "SIM cards não passaram";
+  textoConvsimBaixarErro.textContent =
+    `${nComErro} ${plural} na validação e podem ser rejeitados pelo SSX na importação. Baixe só os válidos, ou inclua os com erro pra corrigir depois.`;
+  overlayConvsimBaixarErro.classList.remove("hidden");
+  return new Promise((resolve) => { resolverConvsimBaixarErro = resolve; });
+}
+el("convsim-baixar-erro-fechar").addEventListener("click", () => fecharConvsimBaixarErro("cancelar"));
+el("btn-convsim-baixar-erro-cancelar").addEventListener("click", () => fecharConvsimBaixarErro("cancelar"));
+el("btn-convsim-baixar-com-erros").addEventListener("click", () => fecharConvsimBaixarErro("com-erros"));
+el("btn-convsim-baixar-sem-erros").addEventListener("click", () => fecharConvsimBaixarErro("sem-erros"));
+
+el("btn-convsim-baixar").addEventListener("click", async () => {
+  if (!convsimFileId) return;
+  const resultado = await rodarValidacaoConvsim();
+  if (!resultado) return;
+  if (resultado.n_erro > 0) {
+    const escolha = await confirmarConvsimBaixarErro(resultado.n_erro);
+    if (escolha === "cancelar") return;
+    baixarConvsimArquivo(escolha === "com-erros" ? "todos" : "validos");
+  } else {
+    baixarConvsimArquivo("todos");
+  }
+});
+
+el("btn-convsim-importar-api").addEventListener("click", () => {
+  if (!convsimFileId) {
+    return mostrarErroConvsim("Carregue e mapeie uma planilha no Conversor de SIM Cards antes.");
+  }
+  if (!convsimSsxOk) {
+    convsimLoginAoEntrar = abrirModalImportDeConvsim;
+    renderSelectConvsimCredenciais();
+    overlayConvsimLogin.classList.remove("hidden");
+    return;
+  }
+  abrirModalImportDeConvsim();
+});
+
+// --- CONVERSOR DE COLABORADORES -> SSX ---
+// Sub-tela "/ferramentas/conversor-colaboradores": mesmo fluxo e mesmo
+// molde das seções acima. Mesmo molde de "CONVERSOR DE RASTREADORES"
+// (export .txt + Importar via API + duplicidade/referências combinadas num
+// só "Verificar na SSX") — vários botões são diretamente análogos aos do
+// Conversor de Clientes (Limpar CPF, Preencher senhas, Preencher pra todas
+// as linhas), ver conversor_colaboradores.py.
+const convcolInputArquivo = el("convcol-input-arquivo");
+const convcolArquivoNome = el("convcol-arquivo-nome");
+const convcolSecaoMapeamento = el("convcol-secao-mapeamento");
+const convcolMapaCampos = el("convcol-mapa-campos");
+const convcolMapaResumo = el("convcol-mapa-resumo");
+const convcolMapaResumoTexto = el("convcol-mapa-resumo-texto");
+const convcolMapaDetalhe = el("convcol-mapa-detalhe");
+const btnConvcolMapear = el("btn-convcol-mapear");
+const convcolSecaoTrabalho = el("convcol-secao-trabalho");
+const convcolResumo = el("convcol-resumo");
+const convcolTabelaThead = el("convcol-tabela-thead");
+const convcolTabelaTbody = el("convcol-tabela-tbody");
+const convcolTabelaElemento = convcolTabelaThead.closest("table");
+const convcolTamanhoPagina = el("convcol-tamanho-pagina");
+const convcolPaginacao = el("convcol-paginacao");
+const convcolTabelaArea = el("convcol-tabela-area");
+const CONVCOL_LARGURAS_KEY = "larguraColunas_convcolColaboradores";
+
+function ajustarAlturaConvcolTabelaArea() {
+  if (!convcolTabelaArea || !elConteudoPrincipal) return;
+  convcolTabelaArea.style.height = `${elConteudoPrincipal.clientHeight - 24}px`;
+}
+if (elConteudoPrincipal && window.ResizeObserver) {
+  new ResizeObserver(ajustarAlturaConvcolTabelaArea).observe(elConteudoPrincipal);
+}
+window.addEventListener("resize", ajustarAlturaConvcolTabelaArea);
+
+let convcolFileId = null;
+let convcolColunasOrigem = [];
+let convcolCampos = [];
+let convcolCamposMapeados = [];
+let convcolRegistros = [];
+let convcolProblemasPorIndice = {};
+let convcolDuplicadosPorIndice = {};
+let convcolNomeBase = "colaboradores";
+let convcolPagina = 1;
+let convcolOrdenacao = null;
+
+let convcolSsxOk = false;
+let convcolSsxLogin = "";
+let convcolSsxBase = "";
+let convcolSsxClaimsRaw = null;
+
+function convcolAtualizarPillAuth() {
+  const pill = el("convcol-status-auth");
+  const btnLogout = el("btn-convcol-logout-ssx");
+  if (convcolSsxOk) {
+    pill.textContent = convcolSsxLogin
+      ? `Autenticado na SSX (${convcolSsxLogin}${convcolSsxBase ? " — " + convcolSsxBase : ""})`
+      : "Autenticado na SSX";
+    pill.title = convcolSsxClaimsRaw ? JSON.stringify(convcolSsxClaimsRaw) : "";
+    pill.className = "status-pill status-on";
+    btnLogout.classList.remove("hidden");
+  } else {
+    pill.textContent = "Não autenticado na SSX";
+    pill.className = "status-pill status-off";
+    btnLogout.classList.add("hidden");
+  }
+}
+
+function limparConvcol() {
+  convcolFileId = null;
+  convcolColunasOrigem = [];
+  convcolCamposMapeados = [];
+  convcolRegistros = [];
+  convcolProblemasPorIndice = {};
+  convcolDuplicadosPorIndice = {};
+  convcolSsxOk = false;
+  convcolSsxLogin = "";
+  convcolSsxBase = "";
+  convcolSsxClaimsRaw = null;
+  convcolAtualizarPillAuth();
+  convcolNomeBase = "colaboradores";
+  convcolPagina = 1;
+  convcolOrdenacao = null;
+  convcolInputArquivo.value = "";
+  convcolArquivoNome.textContent = "Nenhum arquivo selecionado";
+  convcolSecaoMapeamento.classList.add("hidden");
+  convcolSecaoTrabalho.classList.add("hidden");
+  convcolMapaResumo.classList.add("hidden");
+  convcolMapaDetalhe.classList.remove("hidden");
+  convcolMapaCampos.innerHTML = "";
+  convcolResumo.innerHTML = "";
+  convcolTabelaThead.innerHTML = "";
+  convcolTabelaTbody.innerHTML = "";
+  convcolPaginacao.innerHTML = "";
+  btnConvcolMapear.disabled = true;
+}
+limparConvcol();
+
+function mostrarErroConvcol(msg) {
+  convcolResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  convcolResumo.appendChild(p);
+}
+
+function mostrarInfoConvcol(msg) {
+  convcolResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = msg;
+  convcolResumo.appendChild(p);
+}
+
+async function carregarConvcolCampos() {
+  if (convcolCampos.length) return convcolCampos;
+  const r = await fetch("/api/conversor-colaboradores/campos");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "Falha ao carregar os campos da SSX.");
+  convcolCampos = data.campos;
+  return convcolCampos;
+}
+
+function renderConvcolMapaCampos() {
+  convcolMapaCampos.innerHTML = "";
+  convcolCampos.forEach((campo, i) => {
+    const linha = document.createElement("div");
+    linha.className = "convcli-mapa-linha";
+
+    const nome = document.createElement("span");
+    nome.className = "convcli-mapa-nome";
+    const marca = campo.obrigatorio === true ? " *" : campo.obrigatorio === "condicional" ? " (condicional)" : "";
+    nome.textContent = campo.rotulo + marca;
+    nome.title = campo.rotulo + marca;
+
+    const select = document.createElement("select");
+    select.dataset.campo = campo.chave;
+    const optVazio = document.createElement("option");
+    optVazio.value = "";
+    optVazio.textContent = "— não mapear —";
+    select.appendChild(optVazio);
+    convcolColunasOrigem.forEach((col) => {
+      const opt = document.createElement("option");
+      opt.value = col;
+      opt.textContent = col;
+      select.appendChild(opt);
+    });
+    if (convcolColunasOrigem[i] !== undefined) select.value = convcolColunasOrigem[i];
+
+    linha.appendChild(nome);
+    linha.appendChild(select);
+    convcolMapaCampos.appendChild(linha);
+  });
+}
+
+el("btn-convcol-mapear-limpar").addEventListener("click", () => {
+  convcolMapaCampos.querySelectorAll("select").forEach((sel) => { sel.value = ""; });
+});
+
+el("btn-convcol-mapear-auto").addEventListener("click", () => {
+  convcolMapaCampos.querySelectorAll("select").forEach((sel, i) => {
+    sel.value = convcolColunasOrigem[i] !== undefined ? convcolColunasOrigem[i] : "";
+  });
+});
+
+el("btn-convcol-mapa-editar").addEventListener("click", () => {
+  convcolMapaResumo.classList.add("hidden");
+  convcolMapaDetalhe.classList.remove("hidden");
+});
+
+convcolInputArquivo.addEventListener("change", async () => {
+  const file = convcolInputArquivo.files[0];
+  if (!file) return;
+  convcolArquivoNome.textContent = "Enviando...";
+  convcolSecaoTrabalho.classList.add("hidden");
+  convcolSecaoMapeamento.classList.add("hidden");
+  convcolSsxOk = false;
+  convcolDuplicadosPorIndice = {};
+  convcolAtualizarPillAuth();
+  try {
+    await carregarConvcolCampos();
+    const formData = new FormData();
+    formData.append("arquivo", file);
+    const r = await fetch("/api/conversor-colaboradores/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      convcolArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErroConvcol(data.error || "Falha ao enviar arquivo.");
+    }
+    convcolFileId = data.file_id;
+    convcolColunasOrigem = data.colunas;
+    convcolNomeBase = file.name.replace(/\.(xlsx|xls|csv)$/i, "");
+    convcolArquivoNome.textContent = `${file.name} (${data.total_linhas} linha(s))`;
+    renderConvcolMapaCampos();
+    convcolSecaoMapeamento.classList.remove("hidden");
+    btnConvcolMapear.disabled = false;
+  } catch (err) {
+    convcolArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErroConvcol(err.message || String(err));
+  }
+});
+
+btnConvcolMapear.addEventListener("click", async () => {
+  const mapping = {};
+  convcolMapaCampos.querySelectorAll("select").forEach((sel) => {
+    if (sel.value) mapping[sel.dataset.campo] = sel.value;
+  });
+  if (Object.keys(mapping).length === 0) {
+    return mostrarErroConvcol("Mapeie ao menos uma coluna antes de continuar.");
+  }
+  btnConvcolMapear.disabled = true;
+  btnConvcolMapear.textContent = "Aplicando...";
+  try {
+    const r = await fetch("/api/conversor-colaboradores/mapear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcolFileId, mapping }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcol(data.error || "Falha ao aplicar o mapeamento.");
+    convcolRegistros = data.registros;
+    convcolCamposMapeados = convcolCampos.filter((c) => mapping[c.chave]);
+    convcolProblemasPorIndice = {};
+    convcolDuplicadosPorIndice = {};
+    convcolPagina = 1;
+    convcolOrdenacao = null;
+    convcolSecaoTrabalho.classList.remove("hidden");
+    ajustarAlturaConvcolTabelaArea();
+    renderConvcolTabelaCabecalho();
+    renderConvcolTabela();
+    await rodarValidacaoConvcol();
+
+    const n = convcolCamposMapeados.length;
+    convcolMapaResumoTexto.textContent = `${n} campo${n === 1 ? "" : "s"} mapeado${n === 1 ? "" : "s"}.`;
+    convcolMapaDetalhe.classList.add("hidden");
+    convcolMapaResumo.classList.remove("hidden");
+  } catch (err) {
+    mostrarErroConvcol(err.message || String(err));
+  } finally {
+    btnConvcolMapear.disabled = false;
+    btnConvcolMapear.textContent = "Aplicar mapeamento";
+  }
+});
+
+function convcolValorColuna(registro, chave) {
+  if (chave === "indice") return registro.indice;
+  if (chave === "problema") return convcolRegistroTemProblema(registro.indice) ? 1 : 0;
+  return registro.dados[chave];
+}
+
+function ordenarConvcolRegistros(registros) {
+  if (!convcolOrdenacao) return registros;
+  const { chave, direcao } = convcolOrdenacao;
+  return registros.slice().sort((a, b) => {
+    const va = valorOrdenavel(convcolValorColuna(a, chave));
+    const vb = valorOrdenavel(convcolValorColuna(b, chave));
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * direcao;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * direcao;
+  });
+}
+
+function renderConvcolTabelaCabecalho() {
+  convcolTabelaThead.innerHTML = "";
+  const tr = document.createElement("tr");
+
+  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+    const th = document.createElement("th");
+    th.className = "th-ordenavel";
+    th.style.width = `${larguraPadrao}px`;
+    th.textContent = texto;
+    if (convcolOrdenacao && convcolOrdenacao.chave === chave) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = convcolOrdenacao.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = convcolOrdenacao && convcolOrdenacao.chave === chave ? -convcolOrdenacao.direcao : 1;
+      convcolOrdenacao = { chave, direcao };
+      convcolPagina = 1;
+      renderConvcolTabelaCabecalho();
+      renderConvcolTabela();
+    });
+    return th;
+  };
+
+  const thLinha = criarThOrdenavel("Linha", "indice", 52);
+  thLinha.classList.add("convvei-th-linha");
+  tr.appendChild(thLinha);
+  const thProblema = criarThOrdenavel("Prob.", "problema", 40);
+  thProblema.classList.add("convvei-th-problema");
+  tr.appendChild(thProblema);
+
+  convcolCamposMapeados.forEach((campo) => tr.appendChild(criarThOrdenavel(campo.rotulo, campo.chave, 180)));
+
+  const thAcoes = document.createElement("th");
+  thAcoes.style.width = "46px";
+  thAcoes.textContent = "";
+  tr.appendChild(thAcoes);
+
+  convcolTabelaThead.appendChild(tr);
+}
+
+function convcolTotalPaginas() {
+  return Math.max(1, Math.ceil(convcolRegistros.length / Number(convcolTamanhoPagina.value)));
+}
+
+function convcolProblemaCombinado(indice) {
+  const a = convcolProblemasPorIndice[indice];
+  const b = convcolDuplicadosPorIndice[indice];
+  if (!a && !b) return null;
+  return {
+    erros: [...(a ? a.erros : []), ...(b ? b.erros : [])],
+    avisos: [...(a ? a.avisos : []), ...(b ? b.avisos : [])],
+  };
+}
+
+function convcolRegistroTemProblema(indice) {
+  const p = convcolProblemaCombinado(indice);
+  return !!(p && (p.erros.length > 0 || p.avisos.length > 0));
+}
+
+function montarLinhaConvcol(registro) {
+  const tr = document.createElement("tr");
+  tr.dataset.indice = registro.indice;
+  const problema = convcolProblemaCombinado(registro.indice);
+
+  const tdLinha = document.createElement("td");
+  tdLinha.className = "convvei-td-linha";
+  tdLinha.textContent = String(registro.indice);
+  tr.appendChild(tdLinha);
+
+  const tdProblema = document.createElement("td");
+  tdProblema.className = "convvei-td-problema";
+  let icone = "";
+  if (problema && problema.erros.length > 0) {
+    icone = "🔴";
+    tr.classList.add("conversor-edicao-linha-erro");
+  } else if (problema && problema.avisos.length > 0) {
+    icone = "⚠️";
+  } else if (problema) {
+    icone = "✓";
+  }
+  tdProblema.textContent = icone;
+  if (problema) {
+    const msgs = [...problema.erros.map((e) => `⛔ ${e.mensagem}`), ...problema.avisos.map((a) => `⚠️ ${a.mensagem}`)];
+    tr.title = msgs.join("\n");
+    tdProblema.title = tr.title;
+  }
+  tr.appendChild(tdProblema);
+
+  const duplicadosPorCampo = {};
+  if (problema) {
+    const todos = [...problema.erros, ...problema.avisos];
+    todos.filter((p) => p.categoria === "duplicado_planilha").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+    todos.filter((p) => p.categoria === "duplicado_ssx" || p.categoria === "nao_cadastrado_ssx").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+  }
+
+  convcolCamposMapeados.forEach((campo) => {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = registro.dados[campo.chave] || "";
+    const duplicado = duplicadosPorCampo[campo.rotulo];
+    if (duplicado) {
+      input.classList.add((duplicado.categoria === "duplicado_ssx" || duplicado.categoria === "nao_cadastrado_ssx") ? "convcli-campo-duplicado" : "convcli-campo-duplicado-planilha");
+      input.title = duplicado.mensagem;
+    }
+    input.addEventListener("change", async () => {
+      registro.dados[campo.chave] = input.value;
+      try {
+        const r = await fetch("/api/conversor-colaboradores/editar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: convcolFileId, indice: registro.indice, campo: campo.chave, valor: input.value }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return mostrarErroConvcol(data.error || "Falha ao salvar a edição.");
+        await rodarValidacaoConvcol();
+      } catch (err) {
+        mostrarErroConvcol(err.message || String(err));
+      }
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+
+  const tdAcoes = document.createElement("td");
+  tdAcoes.className = "convcli-td-acoes";
+  const btnExcluir = document.createElement("button");
+  btnExcluir.type = "button";
+  btnExcluir.className = "btn-secondary convcli-btn-excluir-linha";
+  btnExcluir.textContent = "🗑️";
+  btnExcluir.title = "Excluir esta linha";
+  btnExcluir.addEventListener("click", () => excluirLinhaConvcol(registro.indice));
+  tdAcoes.appendChild(btnExcluir);
+  tr.appendChild(tdAcoes);
+
+  return tr;
+}
+
+function renderConvcolTabela() {
+  const tamanho = Number(convcolTamanhoPagina.value);
+  const registrosOrdenados = ordenarConvcolRegistros(convcolRegistros);
+  convcolPagina = Math.min(Math.max(1, convcolPagina), convcolTotalPaginas());
+  const inicio = (convcolPagina - 1) * tamanho;
+  convcolTabelaTbody.innerHTML = "";
+  registrosOrdenados.slice(inicio, inicio + tamanho).forEach((r) => convcolTabelaTbody.appendChild(montarLinhaConvcol(r)));
+  tornarColunasRedimensionaveis(convcolTabelaElemento, CONVCOL_LARGURAS_KEY, { 0: 52, 1: 40 });
+
+  convcolPaginacao.innerHTML = "";
+  const total = convcolTotalPaginas();
+  if (total > 1) {
+    const anterior = document.createElement("button");
+    anterior.type = "button";
+    anterior.className = "btn-secondary";
+    anterior.textContent = "‹ Anterior";
+    anterior.disabled = convcolPagina === 1;
+    anterior.addEventListener("click", () => { convcolPagina--; renderConvcolTabela(); });
+    const info = document.createElement("span");
+    info.textContent = `Página ${convcolPagina} de ${total}`;
+    const proxima = document.createElement("button");
+    proxima.type = "button";
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima ›";
+    proxima.disabled = convcolPagina === total;
+    proxima.addEventListener("click", () => { convcolPagina++; renderConvcolTabela(); });
+    [anterior, info, proxima].forEach((n) => convcolPaginacao.appendChild(n));
+  }
+}
+convcolTamanhoPagina.addEventListener("change", () => { convcolPagina = 1; renderConvcolTabela(); });
+
+// --- EXCLUIR / ADICIONAR LINHA (Conversor de Colaboradores) ---
+async function excluirLinhaConvcol(indice) {
+  if (!convcolFileId) return;
+  if (!confirm(`Excluir a linha ${indice}? Essa ação não pode ser desfeita.`)) return;
+  try {
+    const r = await fetch("/api/conversor-colaboradores/excluir-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcolFileId, indice }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcol(data.error || "Falha ao excluir a linha.");
+    convcolRegistros = convcolRegistros.filter((r2) => r2.indice !== indice);
+    delete convcolDuplicadosPorIndice[indice];
+    await rodarValidacaoConvcol();
+    mostrarInfoConvcol(`Linha ${indice} excluída.`);
+  } catch (err) {
+    mostrarErroConvcol(err.message || String(err));
+  }
+}
+
+el("btn-convcol-adicionar-linha").addEventListener("click", async () => {
+  if (!convcolFileId) return;
+  try {
+    const r = await fetch("/api/conversor-colaboradores/adicionar-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcolFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcol(data.error || "Falha ao adicionar a linha.");
+    convcolRegistros.push(data.registro);
+    convcolOrdenacao = null;
+    renderConvcolTabelaCabecalho();
+    convcolPagina = convcolTotalPaginas();
+    await rodarValidacaoConvcol();
+    mostrarInfoConvcol(`Linha ${data.registro.indice} adicionada — preencha os campos.`);
+  } catch (err) {
+    mostrarErroConvcol(err.message || String(err));
+  }
+});
+
+el("btn-convcol-limpar-vazias").addEventListener("click", async () => {
+  if (!convcolFileId) return;
+  try {
+    const r = await fetch("/api/conversor-colaboradores/limpar-vazias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcolFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcol(data.error || "Falha ao limpar as linhas vazias.");
+    convcolRegistros = convcolRegistros.filter((reg) => Object.values(reg.dados).some((v) => (v || "").trim()));
+    convcolPagina = 1;
+    await rodarValidacaoConvcol();
+    mostrarInfoConvcol(data.removidos ? `${data.removidos} linha(s) vazia(s) removida(s).` : "Nenhuma linha vazia encontrada.");
+  } catch (err) {
+    mostrarErroConvcol(err.message || String(err));
+  }
+});
+
+async function rodarTransformacaoConvcol(acao, params, montarMensagem) {
+  if (!convcolFileId) return;
+  try {
+    const r = await fetch("/api/conversor-colaboradores/transformar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcolFileId, acao, params: params || {} }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvcol(data.error || "Falha ao aplicar a transformação.");
+    const porIndice = new Map(data.registros.map((r2) => [r2.indice, r2]));
+    convcolRegistros = convcolRegistros.map((r2) => porIndice.get(r2.indice) || r2);
+    await rodarValidacaoConvcol();
+    mostrarInfoConvcol(montarMensagem ? montarMensagem(data) : `${data.total_alterados} registro(s) alterado(s).`);
+  } catch (err) {
+    mostrarErroConvcol(err.message || String(err));
+  }
+}
+
+// Mesma ideia de conversor_clientes.limpar_cpf_cnpj (botão "Limpar
+// CPF/CNPJ"), mas só CPF — backend não devolve contagem própria, mensagem
+// padrão de rodarTransformacaoConvcol ("N registro(s) alterado(s).") já
+// cobre, mesmo padrão de btn-convcli-limpar-docs.
+el("btn-convcol-limpar-cpf").addEventListener("click", () => rodarTransformacaoConvcol("limpar_cpf"));
+
+el("btn-convcol-ajustar-telefone").addEventListener("click", () => {
+  const dddPadrao = el("convcol-ddd-padrao").value.trim() || "55";
+  rodarTransformacaoConvcol("ajustar_telefone", { ddd_padrao: dddPadrao }, (data) =>
+    `${data.linhas_ajustadas} linha(s) com DDI/DDD/Celular ajustado(s).`);
+});
+
+// Mesma ideia de conversor_clientes.preencher_senha (botão "Preencher
+// senhas"): só preenche quem está vazio, a menos que "Sobrescrever" esteja
+// marcado.
+el("btn-convcol-preencher-senhas").addEventListener("click", () => {
+  const senha = el("convcol-senha-padrao").value;
+  const sobrescrever = el("convcol-senha-sobrescrever").checked;
+  if (!senha) return mostrarErroConvcol("Informe a senha a ser preenchida.");
+  rodarTransformacaoConvcol("preencher_senhas", { senha, sobrescrever }, (data) =>
+    `${data.total_alterados} senha(s) preenchida(s).`);
+});
+
+// "Preencher pra todas as linhas" — mesmo handler genérico (acao
+// "preencher_campo") reaproveitado pelos 3 botões, igual
+// ligarBtnConvrstPreencherTodas.
+function ligarBtnConvcolPreencherTodas(idBotao, idInput, campo, rotuloErro) {
+  el(idBotao).addEventListener("click", () => {
+    const valor = el(idInput).value.trim();
+    if (!valor) return mostrarErroConvcol(`Informe ${rotuloErro} a ser preenchido.`);
+    rodarTransformacaoConvcol("preencher_campo", { campo, valor }, (data) =>
+      `${data.preenchidos} linha(s) preenchida(s) com "${valor}".`);
+  });
+}
+ligarBtnConvcolPreencherTodas("btn-convcol-preencher-cargo", "convcol-cargo-valor", "cargo", "o cargo");
+ligarBtnConvcolPreencherTodas("btn-convcol-preencher-perfil", "convcol-perfil-acesso-valor", "perfil_acesso", "o perfil de acesso");
+ligarBtnConvcolPreencherTodas("btn-convcol-preencher-uo", "convcol-uo-valor", "unidade_organizacional", "a unidade organizacional");
+
+function renderConvcolResumo(data) {
+  convcolResumo.innerHTML = "";
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.n_ok, label: "Válidos" },
+    { valor: data.n_erro, label: "Com erro", clicavel: data.n_erro > 0 },
+  ].forEach(({ valor, label, clicavel }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    tile.appendChild(l);
+    tile.appendChild(v);
+    if (clicavel) {
+      tile.classList.add("stat-tile-clicavel");
+      tile.title = "Ir para o primeiro registro com erro";
+      tile.addEventListener("click", irParaPrimeiroErroConvcol);
+    }
+    tiles.appendChild(tile);
+  });
+  convcolResumo.appendChild(tiles);
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) válidos para importar.`;
+  convcolResumo.appendChild(legenda);
+}
+
+function irParaPrimeiroErroConvcol() {
+  const ordenados = ordenarConvcolRegistros(convcolRegistros);
+  const posicao = ordenados.findIndex((r) => {
+    const p = convcolProblemaCombinado(r.indice);
+    return p && p.erros.length > 0;
+  });
+  if (posicao === -1) return;
+
+  const tamanho = Number(convcolTamanhoPagina.value);
+  convcolPagina = Math.floor(posicao / tamanho) + 1;
+  renderConvcolTabela();
+
+  const indice = ordenados[posicao].indice;
+  const tr = convcolTabelaTbody.querySelector(`tr[data-indice="${indice}"]`);
+  if (!tr) return;
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  tr.classList.add("convcli-linha-destacada");
+  setTimeout(() => tr.classList.remove("convcli-linha-destacada"), 2200);
+}
+
+async function rodarValidacaoConvcol() {
+  if (!convcolFileId) return null;
+  try {
+    const r = await fetch("/api/conversor-colaboradores/validar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcolFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvcol(data.error || "Falha ao validar.");
+      return null;
+    }
+    convcolProblemasPorIndice = {};
+    data.problemas.forEach((p) => { convcolProblemasPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvcolResumo(data);
+    renderConvcolTabela();
+    return data;
+  } catch (err) {
+    mostrarErroConvcol(err.message || String(err));
+    return null;
+  }
+}
+el("btn-convcol-validar").addEventListener("click", () => rodarValidacaoConvcol());
+
+// --- VERIFICAR DUPLICIDADE/REFERÊNCIAS NA SSX (Conversor de Colaboradores, opcional) ---
+const overlayConvcolLogin = el("overlay-convcol-login");
+const selectConvcolCredencial = el("convcol-select-credencial");
+
+function renderSelectConvcolCredenciais() {
+  selectConvcolCredencial.innerHTML = '<option value="">Login salvo...</option>';
+  credenciaisCache.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nome;
+    selectConvcolCredencial.appendChild(opt);
+  });
+}
+
+selectConvcolCredencial.addEventListener("change", () => {
+  const cred = credenciaisCache.find((c) => c.id === selectConvcolCredencial.value);
+  if (!cred) return;
+  el("convcol-login").value = cred.login;
+  el("convcol-senha").value = cred.senha;
+  selectConvcolCredencial.value = "";
+});
+
+let convcolLoginAoEntrar = null;
+
+el("convcol-login-fechar").addEventListener("click", () => {
+  convcolLoginAoEntrar = null;
+  overlayConvcolLogin.classList.add("hidden");
+});
+
+el("form-convcol-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const login = el("convcol-login").value.trim();
+  const senha = el("convcol-senha").value;
+  if (!login || !senha) return;
+  const btn = el("btn-convcol-autenticar");
+  btn.disabled = true;
+  btn.textContent = "Entrando...";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvcol(data.error || "Falha ao autenticar na SSX.");
+      return;
+    }
+    convcolSsxOk = true;
+    convcolSsxLogin = login;
+    convcolSsxBase = extrairNomeBaseDeClaims(data.claims);
+    convcolSsxClaimsRaw = data.claims || null;
+    convcolAtualizarPillAuth();
+    overlayConvcolLogin.classList.add("hidden");
+    el("convcol-senha").value = "";
+    const aoEntrar = convcolLoginAoEntrar;
+    convcolLoginAoEntrar = null;
+    if (aoEntrar) return await aoEntrar();
+    await rodarVerificacaoDuplicidadeConvcol();
+  } catch (err) {
+    mostrarErroConvcol(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Entrar";
+  }
+});
+
+el("btn-convcol-logout-ssx").addEventListener("click", async () => {
+  await fetch("/api/logout-avulso", { method: "POST" });
+  convcolSsxOk = false;
+  convcolSsxLogin = "";
+  convcolSsxBase = "";
+  convcolSsxClaimsRaw = null;
+  convcolAtualizarPillAuth();
+  convcolDuplicadosPorIndice = {};
+  renderConvcolTabela();
+  mostrarInfoConvcol("Sessão da SSX encerrada.");
+});
+
+async function rodarVerificacaoDuplicidadeConvcol() {
+  if (!convcolFileId) return null;
+  const btn = el("btn-convcol-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-colaboradores/verificar-duplicidade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convcolFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convcolSsxOk = false;
+        convcolAtualizarPillAuth();
+        renderSelectConvcolCredenciais();
+        overlayConvcolLogin.classList.remove("hidden");
+        return null;
+      }
+      mostrarErroConvcol(data.error || "Falha ao verificar na SSX.");
+      return null;
+    }
+    convcolDuplicadosPorIndice = {};
+    data.problemas.forEach((p) => { convcolDuplicadosPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvcolTabela();
+    mostrarInfoConvcol(
+      data.total_duplicados
+        ? `${data.total_duplicados} de ${data.total_verificados} registro(s) com possível problema na SSX (duplicata de código/CPF/login, ou Unidade organizacional/Perfil de acesso não cadastrado).`
+        : `Nenhum problema encontrado entre os ${data.total_verificados} registro(s) verificados (duplicata e referências na SSX).`
+    );
+    return data;
+  } catch (err) {
+    mostrarErroConvcol(err.message || String(err));
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar na SSX";
+  }
+}
+
+el("btn-convcol-verificar-ssx").addEventListener("click", () => {
+  if (!convcolFileId) return;
+  if (!convcolSsxOk) {
+    convcolLoginAoEntrar = null;
+    renderSelectConvcolCredenciais();
+    overlayConvcolLogin.classList.remove("hidden");
+    return;
+  }
+  rodarVerificacaoDuplicidadeConvcol();
+});
+
+function baixarConvcolArquivo(modo) {
+  const a = document.createElement("a");
+  a.href = `/api/conversor-colaboradores/exportar/${convcolFileId}/${modo}`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+const overlayConvcolBaixarErro = el("overlay-convcol-baixar-erro");
+const textoConvcolBaixarErro = el("convcol-baixar-erro-texto");
+let resolverConvcolBaixarErro = null;
+function fecharConvcolBaixarErro(escolha) {
+  overlayConvcolBaixarErro.classList.add("hidden");
+  const resolve = resolverConvcolBaixarErro;
+  resolverConvcolBaixarErro = null;
+  if (resolve) resolve(escolha);
+}
+function confirmarConvcolBaixarErro(nComErro) {
+  const plural = nComErro === 1 ? "colaborador não passou" : "colaboradores não passaram";
+  textoConvcolBaixarErro.textContent =
+    `${nComErro} ${plural} na validação e podem ser rejeitados pelo SSX na importação. Baixe só os válidos, ou inclua os com erro pra corrigir depois.`;
+  overlayConvcolBaixarErro.classList.remove("hidden");
+  return new Promise((resolve) => { resolverConvcolBaixarErro = resolve; });
+}
+el("convcol-baixar-erro-fechar").addEventListener("click", () => fecharConvcolBaixarErro("cancelar"));
+el("btn-convcol-baixar-erro-cancelar").addEventListener("click", () => fecharConvcolBaixarErro("cancelar"));
+el("btn-convcol-baixar-com-erros").addEventListener("click", () => fecharConvcolBaixarErro("com-erros"));
+el("btn-convcol-baixar-sem-erros").addEventListener("click", () => fecharConvcolBaixarErro("sem-erros"));
+
+el("btn-convcol-baixar").addEventListener("click", async () => {
+  if (!convcolFileId) return;
+  const resultado = await rodarValidacaoConvcol();
+  if (!resultado) return;
+  if (resultado.n_erro > 0) {
+    const escolha = await confirmarConvcolBaixarErro(resultado.n_erro);
+    if (escolha === "cancelar") return;
+    baixarConvcolArquivo(escolha === "com-erros" ? "todos" : "validos");
+  } else {
+    baixarConvcolArquivo("todos");
+  }
+});
+
+el("btn-convcol-importar-api").addEventListener("click", () => {
+  if (!convcolFileId) {
+    return mostrarErroConvcol("Carregue e mapeie uma planilha no Conversor de Colaboradores antes.");
+  }
+  if (!convcolSsxOk) {
+    convcolLoginAoEntrar = abrirModalImportDeConvcol;
+    renderSelectConvcolCredenciais();
+    overlayConvcolLogin.classList.remove("hidden");
+    return;
+  }
+  abrirModalImportDeConvcol();
+});
+
+// --- OPERAÇÕES EM MASSA (Atalhos -> SSX) ---
+// Sub-tela "/ferramentas/atalhos": ainda "em construção" (os 3 botões de
+// ação continuam disabled), mas já com o login na SSX pronto, no mesmo
+// padrão dos Conversores — flag de autenticação PRÓPRIA desta tela (nunca
+// estado.autenticado de outra tela, ver gotcha nº1 do Conversor de
+// Clientes), reseta sempre que a pessoa entra nesta tela de novo (mesma
+// ideia de limparConvcli/limparConvcol, chamada no clique do card).
+let atalhosSsxOk = false;
+let atalhosSsxLogin = "";
+let atalhosSsxBase = "";
+let atalhosSsxClaimsRaw = null;
+let atalhosExclusaoTipoAtual = "cliente";
+let atalhosExclusaoRegistros = [];
+let atalhosExclusaoSelecionados = new Set(); // códigos (únicos entre elegíveis)
+let atalhosExclusaoOrdenacao = null; // {chave, direcao} | null
+let atalhosExclusaoPollTimer = null;
+
+function atalhosAtualizarPillAuth() {
+  const pill = el("atalhos-status-auth");
+  const btnLogout = el("btn-atalhos-logout-ssx");
+  if (atalhosSsxOk) {
+    pill.textContent = atalhosSsxLogin
+      ? `Autenticado na SSX (${atalhosSsxLogin}${atalhosSsxBase ? " — " + atalhosSsxBase : ""})`
+      : "Autenticado na SSX";
+    pill.title = atalhosSsxClaimsRaw ? JSON.stringify(atalhosSsxClaimsRaw) : "";
+    pill.className = "status-pill status-on";
+    btnLogout.classList.remove("hidden");
+  } else {
+    pill.textContent = "Não autenticado na SSX";
+    pill.className = "status-pill status-off";
+    btnLogout.classList.add("hidden");
+  }
+}
+
+function limparAtalhos() {
+  atalhosSsxOk = false;
+  atalhosSsxLogin = "";
+  atalhosSsxBase = "";
+  atalhosSsxClaimsRaw = null;
+  atalhosAtualizarPillAuth();
+  el("atalhos-exclusao-painel").classList.add("hidden");
+  el("btn-atalhos-exclusao-massa").classList.remove("atalhos-operacao-card-ativo");
+  atalhosExclusaoTipoAtual = "cliente";
+  atalhosExclusaoRegistros = [];
+  atalhosExclusaoSelecionados = new Set();
+  atalhosExclusaoOrdenacao = null;
+  const radioCliente = document.querySelector('input[name="atalhos-exclusao-tipo"][value="cliente"]');
+  if (radioCliente) radioCliente.checked = true;
+  const resultadoEl = el("atalhos-exclusao-resultado");
+  if (resultadoEl) resultadoEl.innerHTML = '<p class="placeholder">Selecione um tipo de cadastro acima pra listar os registros da SSX.</p>';
+  if (atalhosExclusaoPollTimer) {
+    clearInterval(atalhosExclusaoPollTimer);
+    atalhosExclusaoPollTimer = null;
+  }
+  el("overlay-atalhos-excluir").classList.add("hidden");
+}
+limparAtalhos();
+
+const overlayAtalhosLogin = el("overlay-atalhos-login");
+const selectAtalhosCredencial = el("atalhos-select-credencial");
+
+function renderSelectAtalhosCredenciais() {
+  selectAtalhosCredencial.innerHTML = '<option value="">Login salvo...</option>';
+  credenciaisCache.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nome;
+    selectAtalhosCredencial.appendChild(opt);
+  });
+}
+
+selectAtalhosCredencial.addEventListener("change", () => {
+  const cred = credenciaisCache.find((c) => c.id === selectAtalhosCredencial.value);
+  if (!cred) return;
+  el("atalhos-login").value = cred.login;
+  el("atalhos-senha").value = cred.senha;
+  selectAtalhosCredencial.value = "";
+});
+
+// Callback setado antes de abrir o login, executado 1x depois de autenticar
+// e resetado pra null em todo caminho que fecha/reabre o modal — mesmo
+// padrão de convcliLoginAoEntrar (ver gotcha nº3 do Conversor de Clientes).
+// Ainda sem nenhum botão de ação ligado (os 3 continuam disabled), mas já
+// preparado pra quando entrarem em funcionamento.
+let atalhosLoginAoEntrar = null;
+
+el("atalhos-login-fechar").addEventListener("click", () => {
+  atalhosLoginAoEntrar = null;
+  overlayAtalhosLogin.classList.add("hidden");
+});
+
+el("form-atalhos-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const login = el("atalhos-login").value.trim();
+  const senha = el("atalhos-senha").value;
+  if (!login || !senha) return;
+  const btn = el("btn-atalhos-autenticar");
+  btn.disabled = true;
+  btn.textContent = "Entrando...";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      alert(data.error || "Falha ao autenticar na SSX.");
+      return;
+    }
+    atalhosSsxOk = true;
+    atalhosSsxLogin = login;
+    atalhosSsxBase = extrairNomeBaseDeClaims(data.claims);
+    atalhosSsxClaimsRaw = data.claims || null;
+    atalhosAtualizarPillAuth();
+    overlayAtalhosLogin.classList.add("hidden");
+    el("atalhos-senha").value = "";
+    const aoEntrar = atalhosLoginAoEntrar;
+    atalhosLoginAoEntrar = null;
+    if (aoEntrar) await aoEntrar();
+  } catch (err) {
+    alert(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Entrar";
+  }
+});
+
+el("btn-atalhos-logout-ssx").addEventListener("click", async () => {
+  await fetch("/api/logout-avulso", { method: "POST" });
+  atalhosSsxOk = false;
+  atalhosSsxLogin = "";
+  atalhosSsxBase = "";
+  atalhosSsxClaimsRaw = null;
+  atalhosAtualizarPillAuth();
+});
+
+el("btn-atalhos-verificar-ssx").addEventListener("click", () => {
+  if (atalhosSsxOk) return;
+  atalhosLoginAoEntrar = null;
+  renderSelectAtalhosCredenciais();
+  overlayAtalhosLogin.classList.remove("hidden");
+});
+
+// Único dos 3 botões de operação já clicável — Associação/Desassociação
+// continuam disabled ("Ainda não implementado"). "Excluir selecionados"
+// também continua disabled de propósito: listar/selecionar já funciona de
+// verdade (bate na SSX com o login desta tela), mas a exclusão em si é uma
+// ação destrutiva e irreversível — fica pra um pedido explícito à parte.
+const atalhosExclusaoPainel = el("atalhos-exclusao-painel");
+const atalhosExclusaoResultado = el("atalhos-exclusao-resultado");
+
+el("btn-atalhos-exclusao-massa").addEventListener("click", () => {
+  const visivel = !atalhosExclusaoPainel.classList.contains("hidden");
+  atalhosExclusaoPainel.classList.toggle("hidden", visivel);
+  el("btn-atalhos-exclusao-massa").classList.toggle("atalhos-operacao-card-ativo", !visivel);
+  if (!visivel) carregarAtalhosExclusao(atalhosExclusaoTipoAtual);
+});
+
+document.querySelectorAll('input[name="atalhos-exclusao-tipo"]').forEach((input) => {
+  input.addEventListener("change", () => {
+    atalhosExclusaoTipoAtual = input.value;
+    carregarAtalhosExclusao(atalhosExclusaoTipoAtual);
+  });
+});
+
+function mostrarInfoAtalhosExclusao(msg) {
+  atalhosExclusaoResultado.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = msg;
+  atalhosExclusaoResultado.appendChild(p);
+}
+
+function mostrarErroAtalhosExclusao(msg) {
+  atalhosExclusaoResultado.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  atalhosExclusaoResultado.appendChild(p);
+}
+
+async function carregarAtalhosExclusao(tipo) {
+  // "Áreas" não tem endpoint de consulta (List) na SSX — nem tenta bater na
+  // API, mostra o aviso na hora (ver conversor_areas.py pro mesmo limite).
+  if (tipo === "area") {
+    atalhosExclusaoRegistros = [];
+    atalhosExclusaoSelecionados = new Set();
+    return mostrarInfoAtalhosExclusao(
+      "Não é possível listar Áreas — a SSX não tem endpoint de consulta (List) pra esse cadastro, só Insert/Update/Delete."
+    );
+  }
+  if (!atalhosSsxOk) {
+    atalhosLoginAoEntrar = () => carregarAtalhosExclusao(tipo);
+    renderSelectAtalhosCredenciais();
+    overlayAtalhosLogin.classList.remove("hidden");
+    return;
+  }
+  mostrarInfoAtalhosExclusao("Carregando...");
+  try {
+    const r = await fetch(`/api/atalhos/listar/${tipo}`, { method: "POST" });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        atalhosSsxOk = false;
+        atalhosAtualizarPillAuth();
+        atalhosLoginAoEntrar = () => carregarAtalhosExclusao(tipo);
+        renderSelectAtalhosCredenciais();
+        overlayAtalhosLogin.classList.remove("hidden");
+        return;
+      }
+      return mostrarErroAtalhosExclusao(data.error || "Falha ao listar os registros.");
+    }
+    atalhosExclusaoRegistros = data.registros;
+    atalhosExclusaoSelecionados = new Set();
+    atalhosExclusaoOrdenacao = null;
+    renderAtalhosExclusaoResultado();
+  } catch (err) {
+    mostrarErroAtalhosExclusao(err.message || String(err));
+  }
+}
+
+function renderAtalhosExclusaoResultado() {
+  atalhosExclusaoResultado.innerHTML = "";
+
+  if (atalhosExclusaoRegistros.length === 0) {
+    return mostrarInfoAtalhosExclusao("Nenhum registro encontrado na SSX pra esse tipo de cadastro.");
+  }
+
+  const elegiveis = atalhosExclusaoRegistros.filter((r) => r.elegivel);
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "convcli-toolbar-validar";
+
+  const btnSelecionar = document.createElement("button");
+  btnSelecionar.type = "button";
+  btnSelecionar.className = "btn-secondary";
+  btnSelecionar.textContent = "Selecionar elegíveis";
+  btnSelecionar.addEventListener("click", () => {
+    atalhosExclusaoSelecionados = new Set(elegiveis.map((r) => r.codigo));
+    renderAtalhosExclusaoResultado();
+  });
+  toolbar.appendChild(btnSelecionar);
+
+  const btnDesmarcar = document.createElement("button");
+  btnDesmarcar.type = "button";
+  btnDesmarcar.className = "btn-secondary";
+  btnDesmarcar.textContent = "Desmarcar todos";
+  btnDesmarcar.addEventListener("click", () => {
+    atalhosExclusaoSelecionados = new Set();
+    renderAtalhosExclusaoResultado();
+  });
+  toolbar.appendChild(btnDesmarcar);
+
+  const contador = document.createElement("span");
+  contador.className = "status-pill " + (atalhosExclusaoSelecionados.size > 0 ? "status-on" : "status-off");
+  contador.textContent = `${atalhosExclusaoSelecionados.size} selecionado(s)`;
+  toolbar.appendChild(contador);
+
+  atalhosExclusaoResultado.appendChild(toolbar);
+
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${atalhosExclusaoRegistros.length} registro(s) — ${elegiveis.length} elegível(eis), `
+    + `${atalhosExclusaoRegistros.length - elegiveis.length} sem código de integração (não podem ser excluído(s) por esta operação).`;
+  atalhosExclusaoResultado.appendChild(legenda);
+
+  // Tabela com altura fixa e rolagem (não ocupa a tela inteira) — mesmo
+  // padrão visual e de redimensão de coluna das planilhas dos Conversores
+  // (.convcli-tabela/tornarColunasRedimensionaveis), só com um teto de
+  // altura (.atalhos-exclusao-tabela-wrap) já que aqui é só mais um bloco
+  // da página, não a tela toda.
+  const wrap = document.createElement("div");
+  wrap.className = "convcli-tabela-wrap atalhos-exclusao-tabela-wrap";
+  const table = document.createElement("table");
+  table.className = "tabela-saida convcli-tabela";
+
+  const thead = document.createElement("thead");
+  const trCabecalho = document.createElement("tr");
+  const thCheck = document.createElement("th");
+  thCheck.style.width = "36px";
+  trCabecalho.appendChild(thCheck);
+
+  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+    const th = document.createElement("th");
+    th.className = "th-ordenavel";
+    th.style.width = `${larguraPadrao}px`;
+    th.textContent = texto;
+    if (atalhosExclusaoOrdenacao && atalhosExclusaoOrdenacao.chave === chave) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = atalhosExclusaoOrdenacao.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = atalhosExclusaoOrdenacao && atalhosExclusaoOrdenacao.chave === chave ? -atalhosExclusaoOrdenacao.direcao : 1;
+      atalhosExclusaoOrdenacao = { chave, direcao };
+      renderAtalhosExclusaoResultado();
+    });
+    return th;
+  };
+  trCabecalho.appendChild(criarThOrdenavel("Cadastro", "nome", 260));
+  trCabecalho.appendChild(criarThOrdenavel("Código", "codigo", 200));
+  thead.appendChild(trCabecalho);
+  table.appendChild(thead);
+
+  const registrosOrdenados = atalhosExclusaoOrdenacao
+    ? ordenarLinhas(atalhosExclusaoRegistros, atalhosExclusaoOrdenacao.chave, atalhosExclusaoOrdenacao.direcao)
+    : atalhosExclusaoRegistros;
+
+  const tbody = document.createElement("tbody");
+  registrosOrdenados.forEach((registro) => {
+    const tr = document.createElement("tr");
+
+    const tdCheck = document.createElement("td");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.disabled = !registro.elegivel;
+    checkbox.checked = atalhosExclusaoSelecionados.has(registro.codigo);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) atalhosExclusaoSelecionados.add(registro.codigo);
+      else atalhosExclusaoSelecionados.delete(registro.codigo);
+      renderAtalhosExclusaoResultado();
+    });
+    tdCheck.appendChild(checkbox);
+    tr.appendChild(tdCheck);
+
+    const tdNome = document.createElement("td");
+    tdNome.textContent = registro.nome;
+    tr.appendChild(tdNome);
+
+    const tdCodigo = document.createElement("td");
+    if (registro.elegivel) {
+      tdCodigo.textContent = registro.codigo;
+    } else {
+      tdCodigo.textContent = "⚠️ Sem código de integração";
+      tdCodigo.title = "Não pode ser excluído por esta operação: a SSX exige código de integração pra excluir.";
+      tdCodigo.style.color = "#b45309";
+    }
+    tr.appendChild(tdCodigo);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  atalhosExclusaoResultado.appendChild(wrap);
+  tornarColunasRedimensionaveis(table, "larguraColunas_atalhosExclusao", { 0: 36 });
+
+  const toolbarInferior = document.createElement("div");
+  toolbarInferior.className = "convcli-toolbar-validar atalhos-exclusao-toolbar-inferior";
+  const btnExcluir = document.createElement("button");
+  btnExcluir.type = "button";
+  btnExcluir.className = "btn-aviso-risco";
+  btnExcluir.textContent = `Excluir selecionados (${atalhosExclusaoSelecionados.size})`;
+  btnExcluir.disabled = atalhosExclusaoSelecionados.size === 0;
+  btnExcluir.addEventListener("click", () => abrirModalAtalhosExcluir());
+  toolbarInferior.appendChild(btnExcluir);
+  atalhosExclusaoResultado.appendChild(toolbarInferior);
+}
+
+// --- EXECUTAR EXCLUSÃO EM MASSA (Atalhos) ---
+// Modal de confirmação com resumo de quantos registros serão excluídos —
+// o progresso e o log da API aparecem dentro desse MESMO modal depois que
+// a pessoa confirma (não mais inline na página). Mesmo padrão de job/
+// thread/polling de iniciarPollingDeletarVeiculos (Área de Importação):
+// barra de progresso + log linha a linha, um código que falha não trava
+// os demais.
+const overlayAtalhosExcluir = el("overlay-atalhos-excluir");
+const atalhosExcluirResumoTexto = el("atalhos-excluir-resumo-texto");
+const atalhosExcluirProgresso = el("atalhos-excluir-progresso");
+const atalhosExcluirBar = el("atalhos-excluir-bar");
+const atalhosExcluirStatusEl = el("atalhos-excluir-status");
+const atalhosExcluirPct = el("atalhos-excluir-pct");
+const atalhosExcluirLog = el("atalhos-excluir-log");
+const btnAtalhosExcluirConfirmar = el("btn-atalhos-excluir-confirmar");
+const btnAtalhosExcluirCancelar = el("btn-atalhos-excluir-cancelar");
+let atalhosExclusaoLogsMostrados = 0;
+
+const ATALHOS_ROTULO_TIPO = { cliente: "cliente(s)", veiculo: "veículo(s)", rastreador: "rastreador(es)", simcard: "SIM card(s)" };
+
+function abrirModalAtalhosExcluir() {
+  const codigos = Array.from(atalhosExclusaoSelecionados);
+  if (codigos.length === 0) return;
+  const rotulo = ATALHOS_ROTULO_TIPO[atalhosExclusaoTipoAtual] || "registro(s)";
+  atalhosExcluirResumoTexto.textContent =
+    `Isso vai excluir permanentemente ${codigos.length} ${rotulo} da SSX. Essa ação NÃO pode ser desfeita.`;
+  atalhosExcluirProgresso.classList.add("hidden");
+  atalhosExcluirLog.innerHTML = "";
+  btnAtalhosExcluirConfirmar.classList.remove("hidden");
+  btnAtalhosExcluirConfirmar.disabled = false;
+  btnAtalhosExcluirConfirmar.textContent = "Excluir";
+  btnAtalhosExcluirCancelar.classList.remove("hidden");
+  overlayAtalhosExcluir.classList.remove("hidden");
+}
+
+function fecharModalAtalhosExcluir() {
+  overlayAtalhosExcluir.classList.add("hidden");
+}
+el("atalhos-excluir-fechar-x").addEventListener("click", fecharModalAtalhosExcluir);
+btnAtalhosExcluirCancelar.addEventListener("click", fecharModalAtalhosExcluir);
+
+function pararPollingAtalhosExclusao() {
+  if (atalhosExclusaoPollTimer) {
+    clearInterval(atalhosExclusaoPollTimer);
+    atalhosExclusaoPollTimer = null;
+  }
+}
+
+function iniciarPollingAtalhosExclusao(jobId) {
+  atalhosExclusaoPollTimer = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/atalhos/excluir/status/${jobId}`);
+      const job = await parseJsonResponse(r);
+      if (!job.ok) {
+        pararPollingAtalhosExclusao();
+        return alert(`Erro ao consultar andamento: ${job.error || "falha desconhecida"}`);
+      }
+
+      const pct = job.total ? Math.min(Math.round((job.atual / job.total) * 100), 100) : 0;
+      atalhosExcluirBar.style.width = pct + "%";
+      atalhosExcluirPct.textContent = pct + "%";
+      atalhosExcluirStatusEl.textContent = `${job.atual} de ${job.total} (sucessos: ${job.sucessos}, erros: ${job.erros})`;
+
+      for (let i = atalhosExclusaoLogsMostrados; i < job.logs.length; i++) {
+        const div = document.createElement("div");
+        div.className = "log-linha";
+        div.textContent = job.logs[i];
+        atalhosExcluirLog.appendChild(div);
+      }
+      atalhosExclusaoLogsMostrados = job.logs.length;
+
+      if (job.status === "concluido") {
+        pararPollingAtalhosExclusao();
+        const div = document.createElement("div");
+        div.className = "resumo-final";
+        div.textContent = `Concluído! Excluídos: ${job.sucessos} | Erros: ${job.erros}`;
+        atalhosExcluirLog.appendChild(div);
+        btnAtalhosExcluirConfirmar.classList.add("hidden");
+        btnAtalhosExcluirCancelar.textContent = "Fechar";
+        btnAtalhosExcluirCancelar.disabled = false;
+        // Recarrega a lista — os excluídos com sucesso somem dela.
+        carregarAtalhosExclusao(atalhosExclusaoTipoAtual);
+      }
+    } catch (err) {
+      pararPollingAtalhosExclusao();
+      alert(`Erro ao consultar andamento: ${String(err)}`);
+    }
+  }, 1500);
+}
+
+btnAtalhosExcluirConfirmar.addEventListener("click", async () => {
+  const codigos = Array.from(atalhosExclusaoSelecionados);
+  if (codigos.length === 0) return;
+
+  btnAtalhosExcluirConfirmar.disabled = true;
+  btnAtalhosExcluirCancelar.classList.add("hidden");
+  atalhosExcluirProgresso.classList.remove("hidden");
+  atalhosExcluirBar.style.width = "0%";
+  atalhosExcluirPct.textContent = "0%";
+  atalhosExcluirStatusEl.textContent = "Iniciando...";
+  atalhosExcluirLog.innerHTML = "";
+  atalhosExclusaoLogsMostrados = 0;
+
+  try {
+    const r = await fetch("/api/atalhos/excluir/executar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tipo: atalhosExclusaoTipoAtual, codigos }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) throw new Error(data.error || "Falha ao iniciar a exclusão em massa.");
+    btnAtalhosExcluirConfirmar.classList.add("hidden");
+    iniciarPollingAtalhosExclusao(data.job_id);
+  } catch (err) {
+    atalhosExcluirProgresso.classList.add("hidden");
+    btnAtalhosExcluirConfirmar.classList.remove("hidden");
+    btnAtalhosExcluirConfirmar.disabled = false;
+    btnAtalhosExcluirCancelar.classList.remove("hidden");
+    alert(`Erro: ${String(err)}`);
+  }
+});
+
+// --- CONVERSOR DE UNIDADES ORGANIZACIONAIS -> SSX ---
+// Sub-tela "/ferramentas/conversor-uo": mesmo fluxo e mesmo molde das
+// seções acima. ÚNICO conversor sem "Baixar arquivo" — a SSX não tem
+// layout de arquivo pra Unidade Organizacional (só
+// `OrganizationalUnit/Insert`, confirmado no Swagger) — por isso não há
+// overlay de "baixar com erro" nem função de exportar aqui, diferente de
+// todos os outros 4 (ver conversor_uo.py).
+const convuoInputArquivo = el("convuo-input-arquivo");
+const convuoArquivoNome = el("convuo-arquivo-nome");
+const convuoSecaoMapeamento = el("convuo-secao-mapeamento");
+const convuoMapaCampos = el("convuo-mapa-campos");
+const convuoMapaResumo = el("convuo-mapa-resumo");
+const convuoMapaResumoTexto = el("convuo-mapa-resumo-texto");
+const convuoMapaDetalhe = el("convuo-mapa-detalhe");
+const btnConvuoMapear = el("btn-convuo-mapear");
+const convuoSecaoTrabalho = el("convuo-secao-trabalho");
+const convuoResumo = el("convuo-resumo");
+const convuoTabelaThead = el("convuo-tabela-thead");
+const convuoTabelaTbody = el("convuo-tabela-tbody");
+const convuoTabelaElemento = convuoTabelaThead.closest("table");
+const convuoTamanhoPagina = el("convuo-tamanho-pagina");
+const convuoPaginacao = el("convuo-paginacao");
+const convuoTabelaArea = el("convuo-tabela-area");
+const CONVUO_LARGURAS_KEY = "larguraColunas_convuoUnidadesOrganizacionais";
+
+function ajustarAlturaConvuoTabelaArea() {
+  if (!convuoTabelaArea || !elConteudoPrincipal) return;
+  convuoTabelaArea.style.height = `${elConteudoPrincipal.clientHeight - 24}px`;
+}
+if (elConteudoPrincipal && window.ResizeObserver) {
+  new ResizeObserver(ajustarAlturaConvuoTabelaArea).observe(elConteudoPrincipal);
+}
+window.addEventListener("resize", ajustarAlturaConvuoTabelaArea);
+
+let convuoFileId = null;
+let convuoColunasOrigem = [];
+let convuoCampos = [];
+let convuoCamposMapeados = [];
+let convuoRegistros = [];
+let convuoProblemasPorIndice = {};
+let convuoDuplicadosPorIndice = {};
+let convuoNomeBase = "unidades_organizacionais";
+let convuoPagina = 1;
+let convuoOrdenacao = null;
+
+let convuoSsxOk = false;
+let convuoSsxLogin = "";
+let convuoSsxBase = "";
+let convuoSsxClaimsRaw = null;
+
+function convuoAtualizarPillAuth() {
+  const pill = el("convuo-status-auth");
+  const btnLogout = el("btn-convuo-logout-ssx");
+  if (convuoSsxOk) {
+    pill.textContent = convuoSsxLogin
+      ? `Autenticado na SSX (${convuoSsxLogin}${convuoSsxBase ? " — " + convuoSsxBase : ""})`
+      : "Autenticado na SSX";
+    pill.title = convuoSsxClaimsRaw ? JSON.stringify(convuoSsxClaimsRaw) : "";
+    pill.className = "status-pill status-on";
+    btnLogout.classList.remove("hidden");
+  } else {
+    pill.textContent = "Não autenticado na SSX";
+    pill.className = "status-pill status-off";
+    btnLogout.classList.add("hidden");
+  }
+}
+
+function limparConvuo() {
+  convuoFileId = null;
+  convuoColunasOrigem = [];
+  convuoCamposMapeados = [];
+  convuoRegistros = [];
+  convuoProblemasPorIndice = {};
+  convuoDuplicadosPorIndice = {};
+  convuoSsxOk = false;
+  convuoSsxLogin = "";
+  convuoSsxBase = "";
+  convuoSsxClaimsRaw = null;
+  convuoAtualizarPillAuth();
+  convuoNomeBase = "unidades_organizacionais";
+  convuoPagina = 1;
+  convuoOrdenacao = null;
+  convuoInputArquivo.value = "";
+  convuoArquivoNome.textContent = "Nenhum arquivo selecionado";
+  convuoSecaoMapeamento.classList.add("hidden");
+  convuoSecaoTrabalho.classList.add("hidden");
+  convuoMapaResumo.classList.add("hidden");
+  convuoMapaDetalhe.classList.remove("hidden");
+  convuoMapaCampos.innerHTML = "";
+  convuoResumo.innerHTML = "";
+  convuoTabelaThead.innerHTML = "";
+  convuoTabelaTbody.innerHTML = "";
+  convuoPaginacao.innerHTML = "";
+  btnConvuoMapear.disabled = true;
+}
+limparConvuo();
+
+function mostrarErroConvuo(msg) {
+  convuoResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  convuoResumo.appendChild(p);
+}
+
+function mostrarInfoConvuo(msg) {
+  convuoResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = msg;
+  convuoResumo.appendChild(p);
+}
+
+async function carregarConvuoCampos() {
+  if (convuoCampos.length) return convuoCampos;
+  const r = await fetch("/api/conversor-uo/campos");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "Falha ao carregar os campos da SSX.");
+  convuoCampos = data.campos;
+  return convuoCampos;
+}
+
+function renderConvuoMapaCampos() {
+  convuoMapaCampos.innerHTML = "";
+  convuoCampos.forEach((campo, i) => {
+    const linha = document.createElement("div");
+    linha.className = "convcli-mapa-linha";
+
+    const nome = document.createElement("span");
+    nome.className = "convcli-mapa-nome";
+    const marca = campo.obrigatorio === true ? " *" : campo.obrigatorio === "condicional" ? " (condicional)" : "";
+    nome.textContent = campo.rotulo + marca;
+    nome.title = campo.rotulo + marca;
+
+    const select = document.createElement("select");
+    select.dataset.campo = campo.chave;
+    const optVazio = document.createElement("option");
+    optVazio.value = "";
+    optVazio.textContent = "— não mapear —";
+    select.appendChild(optVazio);
+    convuoColunasOrigem.forEach((col) => {
+      const opt = document.createElement("option");
+      opt.value = col;
+      opt.textContent = col;
+      select.appendChild(opt);
+    });
+    if (convuoColunasOrigem[i] !== undefined) select.value = convuoColunasOrigem[i];
+
+    linha.appendChild(nome);
+    linha.appendChild(select);
+    convuoMapaCampos.appendChild(linha);
+  });
+}
+
+el("btn-convuo-mapear-limpar").addEventListener("click", () => {
+  convuoMapaCampos.querySelectorAll("select").forEach((sel) => { sel.value = ""; });
+});
+
+el("btn-convuo-mapear-auto").addEventListener("click", () => {
+  convuoMapaCampos.querySelectorAll("select").forEach((sel, i) => {
+    sel.value = convuoColunasOrigem[i] !== undefined ? convuoColunasOrigem[i] : "";
+  });
+});
+
+el("btn-convuo-mapa-editar").addEventListener("click", () => {
+  convuoMapaResumo.classList.add("hidden");
+  convuoMapaDetalhe.classList.remove("hidden");
+});
+
+convuoInputArquivo.addEventListener("change", async () => {
+  const file = convuoInputArquivo.files[0];
+  if (!file) return;
+  convuoArquivoNome.textContent = "Enviando...";
+  convuoSecaoTrabalho.classList.add("hidden");
+  convuoSecaoMapeamento.classList.add("hidden");
+  convuoSsxOk = false;
+  convuoDuplicadosPorIndice = {};
+  convuoAtualizarPillAuth();
+  try {
+    await carregarConvuoCampos();
+    const formData = new FormData();
+    formData.append("arquivo", file);
+    const r = await fetch("/api/conversor-uo/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      convuoArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErroConvuo(data.error || "Falha ao enviar arquivo.");
+    }
+    convuoFileId = data.file_id;
+    convuoColunasOrigem = data.colunas;
+    convuoNomeBase = file.name.replace(/\.(xlsx|xls|csv)$/i, "");
+    convuoArquivoNome.textContent = `${file.name} (${data.total_linhas} linha(s))`;
+    renderConvuoMapaCampos();
+    convuoSecaoMapeamento.classList.remove("hidden");
+    btnConvuoMapear.disabled = false;
+  } catch (err) {
+    convuoArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErroConvuo(err.message || String(err));
+  }
+});
+
+btnConvuoMapear.addEventListener("click", async () => {
+  const mapping = {};
+  convuoMapaCampos.querySelectorAll("select").forEach((sel) => {
+    if (sel.value) mapping[sel.dataset.campo] = sel.value;
+  });
+  if (Object.keys(mapping).length === 0) {
+    return mostrarErroConvuo("Mapeie ao menos uma coluna antes de continuar.");
+  }
+  btnConvuoMapear.disabled = true;
+  btnConvuoMapear.textContent = "Aplicando...";
+  try {
+    const r = await fetch("/api/conversor-uo/mapear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convuoFileId, mapping }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvuo(data.error || "Falha ao aplicar o mapeamento.");
+    convuoRegistros = data.registros;
+    convuoCamposMapeados = convuoCampos.filter((c) => mapping[c.chave]);
+    convuoProblemasPorIndice = {};
+    convuoDuplicadosPorIndice = {};
+    convuoPagina = 1;
+    convuoOrdenacao = null;
+    convuoSecaoTrabalho.classList.remove("hidden");
+    ajustarAlturaConvuoTabelaArea();
+    renderConvuoTabelaCabecalho();
+    renderConvuoTabela();
+    await rodarValidacaoConvuo();
+
+    const n = convuoCamposMapeados.length;
+    convuoMapaResumoTexto.textContent = `${n} campo${n === 1 ? "" : "s"} mapeado${n === 1 ? "" : "s"}.`;
+    convuoMapaDetalhe.classList.add("hidden");
+    convuoMapaResumo.classList.remove("hidden");
+  } catch (err) {
+    mostrarErroConvuo(err.message || String(err));
+  } finally {
+    btnConvuoMapear.disabled = false;
+    btnConvuoMapear.textContent = "Aplicar mapeamento";
+  }
+});
+
+function convuoValorColuna(registro, chave) {
+  if (chave === "indice") return registro.indice;
+  if (chave === "problema") return convuoRegistroTemProblema(registro.indice) ? 1 : 0;
+  return registro.dados[chave];
+}
+
+function ordenarConvuoRegistros(registros) {
+  if (!convuoOrdenacao) return registros;
+  const { chave, direcao } = convuoOrdenacao;
+  return registros.slice().sort((a, b) => {
+    const va = valorOrdenavel(convuoValorColuna(a, chave));
+    const vb = valorOrdenavel(convuoValorColuna(b, chave));
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * direcao;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * direcao;
+  });
+}
+
+function renderConvuoTabelaCabecalho() {
+  convuoTabelaThead.innerHTML = "";
+  const tr = document.createElement("tr");
+
+  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+    const th = document.createElement("th");
+    th.className = "th-ordenavel";
+    th.style.width = `${larguraPadrao}px`;
+    th.textContent = texto;
+    if (convuoOrdenacao && convuoOrdenacao.chave === chave) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = convuoOrdenacao.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = convuoOrdenacao && convuoOrdenacao.chave === chave ? -convuoOrdenacao.direcao : 1;
+      convuoOrdenacao = { chave, direcao };
+      convuoPagina = 1;
+      renderConvuoTabelaCabecalho();
+      renderConvuoTabela();
+    });
+    return th;
+  };
+
+  const thLinha = criarThOrdenavel("Linha", "indice", 52);
+  thLinha.classList.add("convvei-th-linha");
+  tr.appendChild(thLinha);
+  const thProblema = criarThOrdenavel("Prob.", "problema", 40);
+  thProblema.classList.add("convvei-th-problema");
+  tr.appendChild(thProblema);
+
+  convuoCamposMapeados.forEach((campo) => tr.appendChild(criarThOrdenavel(campo.rotulo, campo.chave, 180)));
+
+  const thAcoes = document.createElement("th");
+  thAcoes.style.width = "46px";
+  thAcoes.textContent = "";
+  tr.appendChild(thAcoes);
+
+  convuoTabelaThead.appendChild(tr);
+}
+
+function convuoTotalPaginas() {
+  return Math.max(1, Math.ceil(convuoRegistros.length / Number(convuoTamanhoPagina.value)));
+}
+
+function convuoProblemaCombinado(indice) {
+  const a = convuoProblemasPorIndice[indice];
+  const b = convuoDuplicadosPorIndice[indice];
+  if (!a && !b) return null;
+  return {
+    erros: [...(a ? a.erros : []), ...(b ? b.erros : [])],
+    avisos: [...(a ? a.avisos : []), ...(b ? b.avisos : [])],
+  };
+}
+
+function convuoRegistroTemProblema(indice) {
+  const p = convuoProblemaCombinado(indice);
+  return !!(p && (p.erros.length > 0 || p.avisos.length > 0));
+}
+
+function montarLinhaConvuo(registro) {
+  const tr = document.createElement("tr");
+  tr.dataset.indice = registro.indice;
+  const problema = convuoProblemaCombinado(registro.indice);
+
+  const tdLinha = document.createElement("td");
+  tdLinha.className = "convvei-td-linha";
+  tdLinha.textContent = String(registro.indice);
+  tr.appendChild(tdLinha);
+
+  const tdProblema = document.createElement("td");
+  tdProblema.className = "convvei-td-problema";
+  let icone = "";
+  if (problema && problema.erros.length > 0) {
+    icone = "🔴";
+    tr.classList.add("conversor-edicao-linha-erro");
+  } else if (problema && problema.avisos.length > 0) {
+    icone = "⚠️";
+  } else if (problema) {
+    icone = "✓";
+  }
+  tdProblema.textContent = icone;
+  if (problema) {
+    const msgs = [...problema.erros.map((e) => `⛔ ${e.mensagem}`), ...problema.avisos.map((a) => `⚠️ ${a.mensagem}`)];
+    tr.title = msgs.join("\n");
+    tdProblema.title = tr.title;
+  }
+  tr.appendChild(tdProblema);
+
+  const duplicadosPorCampo = {};
+  if (problema) {
+    const todos = [...problema.erros, ...problema.avisos];
+    todos.filter((p) => p.categoria === "duplicado_planilha").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+    todos.filter((p) => p.categoria === "duplicado_ssx").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+  }
+
+  convuoCamposMapeados.forEach((campo) => {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = registro.dados[campo.chave] || "";
+    const duplicado = duplicadosPorCampo[campo.rotulo];
+    if (duplicado) {
+      input.classList.add(duplicado.categoria === "duplicado_ssx" ? "convcli-campo-duplicado" : "convcli-campo-duplicado-planilha");
+      input.title = duplicado.mensagem;
+    }
+    input.addEventListener("change", async () => {
+      registro.dados[campo.chave] = input.value;
+      try {
+        const r = await fetch("/api/conversor-uo/editar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: convuoFileId, indice: registro.indice, campo: campo.chave, valor: input.value }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return mostrarErroConvuo(data.error || "Falha ao salvar a edição.");
+        await rodarValidacaoConvuo();
+      } catch (err) {
+        mostrarErroConvuo(err.message || String(err));
+      }
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+
+  const tdAcoes = document.createElement("td");
+  tdAcoes.className = "convcli-td-acoes";
+  const btnExcluir = document.createElement("button");
+  btnExcluir.type = "button";
+  btnExcluir.className = "btn-secondary convcli-btn-excluir-linha";
+  btnExcluir.textContent = "🗑️";
+  btnExcluir.title = "Excluir esta linha";
+  btnExcluir.addEventListener("click", () => excluirLinhaConvuo(registro.indice));
+  tdAcoes.appendChild(btnExcluir);
+  tr.appendChild(tdAcoes);
+
+  return tr;
+}
+
+function renderConvuoTabela() {
+  const tamanho = Number(convuoTamanhoPagina.value);
+  const registrosOrdenados = ordenarConvuoRegistros(convuoRegistros);
+  convuoPagina = Math.min(Math.max(1, convuoPagina), convuoTotalPaginas());
+  const inicio = (convuoPagina - 1) * tamanho;
+  convuoTabelaTbody.innerHTML = "";
+  registrosOrdenados.slice(inicio, inicio + tamanho).forEach((r) => convuoTabelaTbody.appendChild(montarLinhaConvuo(r)));
+  tornarColunasRedimensionaveis(convuoTabelaElemento, CONVUO_LARGURAS_KEY, { 0: 52, 1: 40 });
+
+  convuoPaginacao.innerHTML = "";
+  const total = convuoTotalPaginas();
+  if (total > 1) {
+    const anterior = document.createElement("button");
+    anterior.type = "button";
+    anterior.className = "btn-secondary";
+    anterior.textContent = "‹ Anterior";
+    anterior.disabled = convuoPagina === 1;
+    anterior.addEventListener("click", () => { convuoPagina--; renderConvuoTabela(); });
+    const info = document.createElement("span");
+    info.textContent = `Página ${convuoPagina} de ${total}`;
+    const proxima = document.createElement("button");
+    proxima.type = "button";
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima ›";
+    proxima.disabled = convuoPagina === total;
+    proxima.addEventListener("click", () => { convuoPagina++; renderConvuoTabela(); });
+    [anterior, info, proxima].forEach((n) => convuoPaginacao.appendChild(n));
+  }
+}
+convuoTamanhoPagina.addEventListener("change", () => { convuoPagina = 1; renderConvuoTabela(); });
+
+// --- EXCLUIR / ADICIONAR LINHA (Conversor de Unidades Organizacionais) ---
+async function excluirLinhaConvuo(indice) {
+  if (!convuoFileId) return;
+  if (!confirm(`Excluir a linha ${indice}? Essa ação não pode ser desfeita.`)) return;
+  try {
+    const r = await fetch("/api/conversor-uo/excluir-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convuoFileId, indice }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvuo(data.error || "Falha ao excluir a linha.");
+    convuoRegistros = convuoRegistros.filter((r2) => r2.indice !== indice);
+    delete convuoDuplicadosPorIndice[indice];
+    await rodarValidacaoConvuo();
+    mostrarInfoConvuo(`Linha ${indice} excluída.`);
+  } catch (err) {
+    mostrarErroConvuo(err.message || String(err));
+  }
+}
+
+el("btn-convuo-adicionar-linha").addEventListener("click", async () => {
+  if (!convuoFileId) return;
+  try {
+    const r = await fetch("/api/conversor-uo/adicionar-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convuoFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvuo(data.error || "Falha ao adicionar a linha.");
+    convuoRegistros.push(data.registro);
+    convuoOrdenacao = null;
+    renderConvuoTabelaCabecalho();
+    convuoPagina = convuoTotalPaginas();
+    await rodarValidacaoConvuo();
+    mostrarInfoConvuo(`Linha ${data.registro.indice} adicionada — preencha os campos.`);
+  } catch (err) {
+    mostrarErroConvuo(err.message || String(err));
+  }
+});
+
+el("btn-convuo-limpar-vazias").addEventListener("click", async () => {
+  if (!convuoFileId) return;
+  try {
+    const r = await fetch("/api/conversor-uo/limpar-vazias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convuoFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvuo(data.error || "Falha ao limpar as linhas vazias.");
+    convuoRegistros = convuoRegistros.filter((reg) => Object.values(reg.dados).some((v) => (v || "").trim()));
+    convuoPagina = 1;
+    await rodarValidacaoConvuo();
+    mostrarInfoConvuo(data.removidos ? `${data.removidos} linha(s) vazia(s) removida(s).` : "Nenhuma linha vazia encontrada.");
+  } catch (err) {
+    mostrarErroConvuo(err.message || String(err));
+  }
+});
+
+async function rodarTransformacaoConvuo(acao, params, montarMensagem) {
+  if (!convuoFileId) return;
+  try {
+    const r = await fetch("/api/conversor-uo/transformar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convuoFileId, acao, params: params || {} }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvuo(data.error || "Falha ao aplicar a transformação.");
+    const porIndice = new Map(data.registros.map((r2) => [r2.indice, r2]));
+    convuoRegistros = convuoRegistros.map((r2) => porIndice.get(r2.indice) || r2);
+    await rodarValidacaoConvuo();
+    mostrarInfoConvuo(montarMensagem ? montarMensagem(data) : `${data.total_alterados} registro(s) alterado(s).`);
+  } catch (err) {
+    mostrarErroConvuo(err.message || String(err));
+  }
+}
+
+function ligarBtnConvuoPreencherTodas(idBotao, idInput, campo, rotuloErro) {
+  el(idBotao).addEventListener("click", () => {
+    const valor = el(idInput).value.trim();
+    if (!valor) return mostrarErroConvuo(`Informe ${rotuloErro} a ser preenchido.`);
+    rodarTransformacaoConvuo("preencher_campo", { campo, valor }, (data) =>
+      `${data.preenchidos} linha(s) preenchida(s) com "${valor}".`);
+  });
+}
+ligarBtnConvuoPreencherTodas("btn-convuo-preencher-tipo", "convuo-tipo-valor", "tipo", "o tipo da Unidade Organizacional");
+ligarBtnConvuoPreencherTodas("btn-convuo-preencher-cliente", "convuo-cliente-valor", "codigo_integracao_cliente", "o código de integração do cliente");
+ligarBtnConvuoPreencherTodas("btn-convuo-preencher-pai", "convuo-pai-valor", "unidade_pai", "o código da Unidade Organizacional pai");
+
+function renderConvuoResumo(data) {
+  convuoResumo.innerHTML = "";
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.n_ok, label: "Válidos" },
+    { valor: data.n_erro, label: "Com erro", clicavel: data.n_erro > 0 },
+  ].forEach(({ valor, label, clicavel }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    tile.appendChild(l);
+    tile.appendChild(v);
+    if (clicavel) {
+      tile.classList.add("stat-tile-clicavel");
+      tile.title = "Ir para o primeiro registro com erro";
+      tile.addEventListener("click", irParaPrimeiroErroConvuo);
+    }
+    tiles.appendChild(tile);
+  });
+  convuoResumo.appendChild(tiles);
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) válidos para importar.`;
+  convuoResumo.appendChild(legenda);
+}
+
+function irParaPrimeiroErroConvuo() {
+  const ordenados = ordenarConvuoRegistros(convuoRegistros);
+  const posicao = ordenados.findIndex((r) => {
+    const p = convuoProblemaCombinado(r.indice);
+    return p && p.erros.length > 0;
+  });
+  if (posicao === -1) return;
+
+  const tamanho = Number(convuoTamanhoPagina.value);
+  convuoPagina = Math.floor(posicao / tamanho) + 1;
+  renderConvuoTabela();
+
+  const indice = ordenados[posicao].indice;
+  const tr = convuoTabelaTbody.querySelector(`tr[data-indice="${indice}"]`);
+  if (!tr) return;
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  tr.classList.add("convcli-linha-destacada");
+  setTimeout(() => tr.classList.remove("convcli-linha-destacada"), 2200);
+}
+
+async function rodarValidacaoConvuo() {
+  if (!convuoFileId) return null;
+  try {
+    const r = await fetch("/api/conversor-uo/validar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convuoFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvuo(data.error || "Falha ao validar.");
+      return null;
+    }
+    convuoProblemasPorIndice = {};
+    data.problemas.forEach((p) => { convuoProblemasPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvuoResumo(data);
+    renderConvuoTabela();
+    return data;
+  } catch (err) {
+    mostrarErroConvuo(err.message || String(err));
+    return null;
+  }
+}
+el("btn-convuo-validar").addEventListener("click", () => rodarValidacaoConvuo());
+
+// --- VERIFICAR DUPLICIDADE/REFERÊNCIAS NA SSX (Conversor de Unidades Organizacionais, opcional) ---
+const overlayConvuoLogin = el("overlay-convuo-login");
+const selectConvuoCredencial = el("convuo-select-credencial");
+
+function renderSelectConvuoCredenciais() {
+  selectConvuoCredencial.innerHTML = '<option value="">Login salvo...</option>';
+  credenciaisCache.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nome;
+    selectConvuoCredencial.appendChild(opt);
+  });
+}
+
+selectConvuoCredencial.addEventListener("change", () => {
+  const cred = credenciaisCache.find((c) => c.id === selectConvuoCredencial.value);
+  if (!cred) return;
+  el("convuo-login").value = cred.login;
+  el("convuo-senha").value = cred.senha;
+  selectConvuoCredencial.value = "";
+});
+
+let convuoLoginAoEntrar = null;
+
+el("convuo-login-fechar").addEventListener("click", () => {
+  convuoLoginAoEntrar = null;
+  overlayConvuoLogin.classList.add("hidden");
+});
+
+el("form-convuo-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const login = el("convuo-login").value.trim();
+  const senha = el("convuo-senha").value;
+  if (!login || !senha) return;
+  const btn = el("btn-convuo-autenticar");
+  btn.disabled = true;
+  btn.textContent = "Entrando...";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvuo(data.error || "Falha ao autenticar na SSX.");
+      return;
+    }
+    convuoSsxOk = true;
+    convuoSsxLogin = login;
+    convuoSsxBase = extrairNomeBaseDeClaims(data.claims);
+    convuoSsxClaimsRaw = data.claims || null;
+    convuoAtualizarPillAuth();
+    overlayConvuoLogin.classList.add("hidden");
+    el("convuo-senha").value = "";
+    const aoEntrar = convuoLoginAoEntrar;
+    convuoLoginAoEntrar = null;
+    if (aoEntrar) return await aoEntrar();
+    await rodarVerificacaoDuplicidadeConvuo();
+  } catch (err) {
+    mostrarErroConvuo(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Entrar";
+  }
+});
+
+el("btn-convuo-logout-ssx").addEventListener("click", async () => {
+  await fetch("/api/logout-avulso", { method: "POST" });
+  convuoSsxOk = false;
+  convuoSsxLogin = "";
+  convuoSsxBase = "";
+  convuoSsxClaimsRaw = null;
+  convuoAtualizarPillAuth();
+  convuoDuplicadosPorIndice = {};
+  renderConvuoTabela();
+  mostrarInfoConvuo("Sessão da SSX encerrada.");
+});
+
+async function rodarVerificacaoDuplicidadeConvuo() {
+  if (!convuoFileId) return null;
+  const btn = el("btn-convuo-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-uo/verificar-duplicidade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convuoFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convuoSsxOk = false;
+        convuoAtualizarPillAuth();
+        renderSelectConvuoCredenciais();
+        overlayConvuoLogin.classList.remove("hidden");
+        return null;
+      }
+      mostrarErroConvuo(data.error || "Falha ao verificar na SSX.");
+      return null;
+    }
+    convuoDuplicadosPorIndice = {};
+    data.problemas.forEach((p) => { convuoDuplicadosPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvuoTabela();
+    mostrarInfoConvuo(
+      data.total_duplicados
+        ? `${data.total_duplicados} de ${data.total_verificados} registro(s) com algum alerta (código já cadastrado, ou Unidade pai/Cliente não encontrados na SSX).`
+        : `Nenhum alerta encontrado entre os ${data.total_verificados} registro(s) verificados.`
+    );
+    return data;
+  } catch (err) {
+    mostrarErroConvuo(err.message || String(err));
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar na SSX";
+  }
+}
+
+el("btn-convuo-verificar-ssx").addEventListener("click", () => {
+  if (!convuoFileId) return;
+  if (!convuoSsxOk) {
+    convuoLoginAoEntrar = null;
+    renderSelectConvuoCredenciais();
+    overlayConvuoLogin.classList.remove("hidden");
+    return;
+  }
+  rodarVerificacaoDuplicidadeConvuo();
+});
+
+el("btn-convuo-importar-api").addEventListener("click", () => {
+  if (!convuoFileId) {
+    return mostrarErroConvuo("Carregue e mapeie uma planilha no Conversor de Unidades Organizacionais antes.");
+  }
+  if (!convuoSsxOk) {
+    convuoLoginAoEntrar = abrirModalImportDeConvuo;
+    renderSelectConvuoCredenciais();
+    overlayConvuoLogin.classList.remove("hidden");
+    return;
+  }
+  abrirModalImportDeConvuo();
+});
+
+// --- CONVERSOR DE ÁREAS -> SSX ---
+// Sub-tela "/ferramentas/conversor-areas": mesmo fluxo e mesmo molde das
+// seções acima — caminho "via planilha" da importação de Áreas/Rotas/
+// Pontos (complementa o Conversor KML -> SSX, 100% client-side, que cobre
+// o caminho "via arquivo de mapa"). Não existe "Geography/List" no Swagger
+// (só Insert/Update/Delete/ListCategories/ListGroups) — por isso
+// "Verificar na SSX" só confere Categoria/Grupo (verificar_referencias_ssx),
+// nunca duplicidade de área de verdade, e tem um botão extra
+// "Categorias/Grupos" (mesmo padrão do botão "Templates" do Conversor de
+// Rastreadores) pra conferir em lote o que falta cadastrar.
+const convareInputArquivo = el("convare-input-arquivo");
+const convareArquivoNome = el("convare-arquivo-nome");
+const convareSecaoMapeamento = el("convare-secao-mapeamento");
+const convareMapaCampos = el("convare-mapa-campos");
+const convareMapaResumo = el("convare-mapa-resumo");
+const convareMapaResumoTexto = el("convare-mapa-resumo-texto");
+const convareMapaDetalhe = el("convare-mapa-detalhe");
+const btnConvareMapear = el("btn-convare-mapear");
+const convareSecaoTrabalho = el("convare-secao-trabalho");
+const convareResumo = el("convare-resumo");
+const convareTabelaThead = el("convare-tabela-thead");
+const convareTabelaTbody = el("convare-tabela-tbody");
+const convareTabelaElemento = convareTabelaThead.closest("table");
+const convareTamanhoPagina = el("convare-tamanho-pagina");
+const convarePaginacao = el("convare-paginacao");
+const convareTabelaArea = el("convare-tabela-area");
+const CONVARE_LARGURAS_KEY = "larguraColunas_convareAreas";
+
+function ajustarAlturaConvareTabelaArea() {
+  if (!convareTabelaArea || !elConteudoPrincipal) return;
+  convareTabelaArea.style.height = `${elConteudoPrincipal.clientHeight - 24}px`;
+}
+if (elConteudoPrincipal && window.ResizeObserver) {
+  new ResizeObserver(ajustarAlturaConvareTabelaArea).observe(elConteudoPrincipal);
+}
+window.addEventListener("resize", ajustarAlturaConvareTabelaArea);
+
+let convareFileId = null;
+let convareColunasOrigem = [];
+let convareCampos = [];
+let convareCamposMapeados = [];
+let convareRegistros = [];
+let convareProblemasPorIndice = {};
+let convareReferenciasPorIndice = {};
+let convareNomeBase = "areas";
+let convarePagina = 1;
+let convareOrdenacao = null;
+
+let convareSsxOk = false;
+let convareSsxLogin = "";
+let convareSsxBase = "";
+let convareSsxClaimsRaw = null;
+
+function convareAtualizarPillAuth() {
+  const pill = el("convare-status-auth");
+  const btnLogout = el("btn-convare-logout-ssx");
+  if (convareSsxOk) {
+    pill.textContent = convareSsxLogin
+      ? `Autenticado na SSX (${convareSsxLogin}${convareSsxBase ? " — " + convareSsxBase : ""})`
+      : "Autenticado na SSX";
+    pill.title = convareSsxClaimsRaw ? JSON.stringify(convareSsxClaimsRaw) : "";
+    pill.className = "status-pill status-on";
+    btnLogout.classList.remove("hidden");
+  } else {
+    pill.textContent = "Não autenticado na SSX";
+    pill.className = "status-pill status-off";
+    btnLogout.classList.add("hidden");
+  }
+}
+
+function limparConvare() {
+  convareFileId = null;
+  convareColunasOrigem = [];
+  convareCamposMapeados = [];
+  convareRegistros = [];
+  convareProblemasPorIndice = {};
+  convareReferenciasPorIndice = {};
+  convareSsxOk = false;
+  convareSsxLogin = "";
+  convareSsxBase = "";
+  convareSsxClaimsRaw = null;
+  convareAtualizarPillAuth();
+  convareNomeBase = "areas";
+  convarePagina = 1;
+  convareOrdenacao = null;
+  convareInputArquivo.value = "";
+  convareArquivoNome.textContent = "Nenhum arquivo selecionado";
+  convareSecaoMapeamento.classList.add("hidden");
+  convareSecaoTrabalho.classList.add("hidden");
+  convareMapaResumo.classList.add("hidden");
+  convareMapaDetalhe.classList.remove("hidden");
+  convareMapaCampos.innerHTML = "";
+  convareResumo.innerHTML = "";
+  convareTabelaThead.innerHTML = "";
+  convareTabelaTbody.innerHTML = "";
+  convarePaginacao.innerHTML = "";
+  btnConvareMapear.disabled = true;
+}
+limparConvare();
+
+function mostrarErroConvare(msg) {
+  convareResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.style.color = "#b91c1c";
+  p.textContent = "Erro: " + msg;
+  convareResumo.appendChild(p);
+}
+
+function mostrarInfoConvare(msg) {
+  convareResumo.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = msg;
+  convareResumo.appendChild(p);
+}
+
+async function carregarConvareCampos() {
+  if (convareCampos.length) return convareCampos;
+  const r = await fetch("/api/conversor-areas/campos");
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "Falha ao carregar os campos da SSX.");
+  convareCampos = data.campos;
+  return convareCampos;
+}
+
+function renderConvareMapaCampos() {
+  convareMapaCampos.innerHTML = "";
+  convareCampos.forEach((campo, i) => {
+    const linha = document.createElement("div");
+    linha.className = "convcli-mapa-linha";
+
+    const nome = document.createElement("span");
+    nome.className = "convcli-mapa-nome";
+    const marca = campo.obrigatorio === true ? " *" : campo.obrigatorio === "condicional" ? " (condicional)" : "";
+    nome.textContent = campo.rotulo + marca;
+    nome.title = campo.rotulo + marca;
+
+    const select = document.createElement("select");
+    select.dataset.campo = campo.chave;
+    const optVazio = document.createElement("option");
+    optVazio.value = "";
+    optVazio.textContent = "— não mapear —";
+    select.appendChild(optVazio);
+    convareColunasOrigem.forEach((col) => {
+      const opt = document.createElement("option");
+      opt.value = col;
+      opt.textContent = col;
+      select.appendChild(opt);
+    });
+    if (convareColunasOrigem[i] !== undefined) select.value = convareColunasOrigem[i];
+
+    linha.appendChild(nome);
+    linha.appendChild(select);
+    convareMapaCampos.appendChild(linha);
+  });
+}
+
+el("btn-convare-mapear-limpar").addEventListener("click", () => {
+  convareMapaCampos.querySelectorAll("select").forEach((sel) => { sel.value = ""; });
+});
+
+el("btn-convare-mapear-auto").addEventListener("click", () => {
+  convareMapaCampos.querySelectorAll("select").forEach((sel, i) => {
+    sel.value = convareColunasOrigem[i] !== undefined ? convareColunasOrigem[i] : "";
+  });
+});
+
+el("btn-convare-mapa-editar").addEventListener("click", () => {
+  convareMapaResumo.classList.add("hidden");
+  convareMapaDetalhe.classList.remove("hidden");
+});
+
+convareInputArquivo.addEventListener("change", async () => {
+  const file = convareInputArquivo.files[0];
+  if (!file) return;
+  convareArquivoNome.textContent = "Enviando...";
+  convareSecaoTrabalho.classList.add("hidden");
+  convareSecaoMapeamento.classList.add("hidden");
+  convareSsxOk = false;
+  convareReferenciasPorIndice = {};
+  convareAtualizarPillAuth();
+  try {
+    await carregarConvareCampos();
+    const formData = new FormData();
+    formData.append("arquivo", file);
+    const r = await fetch("/api/conversor-areas/upload", { method: "POST", body: formData });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      convareArquivoNome.textContent = "Nenhum arquivo selecionado";
+      return mostrarErroConvare(data.error || "Falha ao enviar arquivo.");
+    }
+    convareFileId = data.file_id;
+    convareColunasOrigem = data.colunas;
+    convareNomeBase = file.name.replace(/\.(xlsx|xls|csv)$/i, "");
+    convareArquivoNome.textContent = `${file.name} (${data.total_linhas} linha(s))`;
+    renderConvareMapaCampos();
+    convareSecaoMapeamento.classList.remove("hidden");
+    btnConvareMapear.disabled = false;
+  } catch (err) {
+    convareArquivoNome.textContent = "Nenhum arquivo selecionado";
+    mostrarErroConvare(err.message || String(err));
+  }
+});
+
+btnConvareMapear.addEventListener("click", async () => {
+  const mapping = {};
+  convareMapaCampos.querySelectorAll("select").forEach((sel) => {
+    if (sel.value) mapping[sel.dataset.campo] = sel.value;
+  });
+  if (Object.keys(mapping).length === 0) {
+    return mostrarErroConvare("Mapeie ao menos uma coluna antes de continuar.");
+  }
+  btnConvareMapear.disabled = true;
+  btnConvareMapear.textContent = "Aplicando...";
+  try {
+    const r = await fetch("/api/conversor-areas/mapear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId, mapping }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvare(data.error || "Falha ao aplicar o mapeamento.");
+    convareRegistros = data.registros;
+    convareCamposMapeados = convareCampos.filter((c) => mapping[c.chave]);
+    convareProblemasPorIndice = {};
+    convareReferenciasPorIndice = {};
+    convarePagina = 1;
+    convareOrdenacao = null;
+    convareSecaoTrabalho.classList.remove("hidden");
+    ajustarAlturaConvareTabelaArea();
+    renderConvareTabelaCabecalho();
+    renderConvareTabela();
+    await rodarValidacaoConvare();
+
+    const n = convareCamposMapeados.length;
+    convareMapaResumoTexto.textContent = `${n} campo${n === 1 ? "" : "s"} mapeado${n === 1 ? "" : "s"}.`;
+    convareMapaDetalhe.classList.add("hidden");
+    convareMapaResumo.classList.remove("hidden");
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+  } finally {
+    btnConvareMapear.disabled = false;
+    btnConvareMapear.textContent = "Aplicar mapeamento";
+  }
+});
+
+function convareValorColuna(registro, chave) {
+  if (chave === "indice") return registro.indice;
+  if (chave === "problema") return convareRegistroTemProblema(registro.indice) ? 1 : 0;
+  return registro.dados[chave];
+}
+
+function ordenarConvareRegistros(registros) {
+  if (!convareOrdenacao) return registros;
+  const { chave, direcao } = convareOrdenacao;
+  return registros.slice().sort((a, b) => {
+    const va = valorOrdenavel(convareValorColuna(a, chave));
+    const vb = valorOrdenavel(convareValorColuna(b, chave));
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * direcao;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * direcao;
+  });
+}
+
+function renderConvareTabelaCabecalho() {
+  convareTabelaThead.innerHTML = "";
+  const tr = document.createElement("tr");
+
+  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+    const th = document.createElement("th");
+    th.className = "th-ordenavel";
+    th.style.width = `${larguraPadrao}px`;
+    th.textContent = texto;
+    if (convareOrdenacao && convareOrdenacao.chave === chave) {
+      const seta = document.createElement("span");
+      seta.className = "seta-ordenacao";
+      seta.textContent = convareOrdenacao.direcao === 1 ? " ▲" : " ▼";
+      th.appendChild(seta);
+    }
+    th.addEventListener("click", () => {
+      const direcao = convareOrdenacao && convareOrdenacao.chave === chave ? -convareOrdenacao.direcao : 1;
+      convareOrdenacao = { chave, direcao };
+      convarePagina = 1;
+      renderConvareTabelaCabecalho();
+      renderConvareTabela();
+    });
+    return th;
+  };
+
+  const thLinha = criarThOrdenavel("Linha", "indice", 52);
+  thLinha.classList.add("convvei-th-linha");
+  tr.appendChild(thLinha);
+  const thProblema = criarThOrdenavel("Prob.", "problema", 40);
+  thProblema.classList.add("convvei-th-problema");
+  tr.appendChild(thProblema);
+
+  convareCamposMapeados.forEach((campo) => tr.appendChild(criarThOrdenavel(campo.rotulo, campo.chave, 180)));
+
+  const thAcoes = document.createElement("th");
+  thAcoes.style.width = "46px";
+  thAcoes.textContent = "";
+  tr.appendChild(thAcoes);
+
+  convareTabelaThead.appendChild(tr);
+}
+
+function convareTotalPaginas() {
+  return Math.max(1, Math.ceil(convareRegistros.length / Number(convareTamanhoPagina.value)));
+}
+
+function convareProblemaCombinado(indice) {
+  const a = convareProblemasPorIndice[indice];
+  const b = convareReferenciasPorIndice[indice];
+  if (!a && !b) return null;
+  return {
+    erros: [...(a ? a.erros : []), ...(b ? b.erros : [])],
+    avisos: [...(a ? a.avisos : []), ...(b ? b.avisos : [])],
+  };
+}
+
+function convareRegistroTemProblema(indice) {
+  const p = convareProblemaCombinado(indice);
+  return !!(p && (p.erros.length > 0 || p.avisos.length > 0));
+}
+
+function montarLinhaConvare(registro) {
+  const tr = document.createElement("tr");
+  tr.dataset.indice = registro.indice;
+  const problema = convareProblemaCombinado(registro.indice);
+
+  const tdLinha = document.createElement("td");
+  tdLinha.className = "convvei-td-linha";
+  tdLinha.textContent = String(registro.indice);
+  tr.appendChild(tdLinha);
+
+  const tdProblema = document.createElement("td");
+  tdProblema.className = "convvei-td-problema";
+  let icone = "";
+  if (problema && problema.erros.length > 0) {
+    icone = "🔴";
+    tr.classList.add("conversor-edicao-linha-erro");
+  } else if (problema && problema.avisos.length > 0) {
+    icone = "⚠️";
+  } else if (problema) {
+    icone = "✓";
+  }
+  tdProblema.textContent = icone;
+  if (problema) {
+    const msgs = [...problema.erros.map((e) => `⛔ ${e.mensagem}`), ...problema.avisos.map((a) => `⚠️ ${a.mensagem}`)];
+    tr.title = msgs.join("\n");
+    tdProblema.title = tr.title;
+  }
+  tr.appendChild(tdProblema);
+
+  const duplicadosPorCampo = {};
+  if (problema) {
+    const todos = [...problema.erros, ...problema.avisos];
+    todos.filter((p) => p.categoria === "duplicado_planilha").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+    todos.filter((p) => p.categoria === "duplicado_ssx" || p.categoria === "nao_cadastrado_ssx").forEach((p) => { duplicadosPorCampo[p.campo] = p; });
+  }
+
+  convareCamposMapeados.forEach((campo) => {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = registro.dados[campo.chave] || "";
+    const duplicado = duplicadosPorCampo[campo.rotulo];
+    if (duplicado) {
+      input.classList.add((duplicado.categoria === "duplicado_ssx" || duplicado.categoria === "nao_cadastrado_ssx") ? "convcli-campo-duplicado" : "convcli-campo-duplicado-planilha");
+      input.title = duplicado.mensagem;
+    }
+    input.addEventListener("change", async () => {
+      registro.dados[campo.chave] = input.value;
+      try {
+        const r = await fetch("/api/conversor-areas/editar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: convareFileId, indice: registro.indice, campo: campo.chave, valor: input.value }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return mostrarErroConvare(data.error || "Falha ao salvar a edição.");
+        await rodarValidacaoConvare();
+      } catch (err) {
+        mostrarErroConvare(err.message || String(err));
+      }
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+
+  const tdAcoes = document.createElement("td");
+  tdAcoes.className = "convcli-td-acoes";
+  const btnExcluir = document.createElement("button");
+  btnExcluir.type = "button";
+  btnExcluir.className = "btn-secondary convcli-btn-excluir-linha";
+  btnExcluir.textContent = "🗑️";
+  btnExcluir.title = "Excluir esta linha";
+  btnExcluir.addEventListener("click", () => excluirLinhaConvare(registro.indice));
+  tdAcoes.appendChild(btnExcluir);
+  tr.appendChild(tdAcoes);
+
+  return tr;
+}
+
+function renderConvareTabela() {
+  const tamanho = Number(convareTamanhoPagina.value);
+  const registrosOrdenados = ordenarConvareRegistros(convareRegistros);
+  convarePagina = Math.min(Math.max(1, convarePagina), convareTotalPaginas());
+  const inicio = (convarePagina - 1) * tamanho;
+  convareTabelaTbody.innerHTML = "";
+  registrosOrdenados.slice(inicio, inicio + tamanho).forEach((r) => convareTabelaTbody.appendChild(montarLinhaConvare(r)));
+  tornarColunasRedimensionaveis(convareTabelaElemento, CONVARE_LARGURAS_KEY, { 0: 52, 1: 40 });
+
+  convarePaginacao.innerHTML = "";
+  const total = convareTotalPaginas();
+  if (total > 1) {
+    const anterior = document.createElement("button");
+    anterior.type = "button";
+    anterior.className = "btn-secondary";
+    anterior.textContent = "‹ Anterior";
+    anterior.disabled = convarePagina === 1;
+    anterior.addEventListener("click", () => { convarePagina--; renderConvareTabela(); });
+    const info = document.createElement("span");
+    info.textContent = `Página ${convarePagina} de ${total}`;
+    const proxima = document.createElement("button");
+    proxima.type = "button";
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima ›";
+    proxima.disabled = convarePagina === total;
+    proxima.addEventListener("click", () => { convarePagina++; renderConvareTabela(); });
+    [anterior, info, proxima].forEach((n) => convarePaginacao.appendChild(n));
+  }
+}
+convareTamanhoPagina.addEventListener("change", () => { convarePagina = 1; renderConvareTabela(); });
+
+// --- EXCLUIR / ADICIONAR LINHA (Conversor de Áreas) ---
+async function excluirLinhaConvare(indice) {
+  if (!convareFileId) return;
+  if (!confirm(`Excluir a linha ${indice}? Essa ação não pode ser desfeita.`)) return;
+  try {
+    const r = await fetch("/api/conversor-areas/excluir-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId, indice }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvare(data.error || "Falha ao excluir a linha.");
+    convareRegistros = convareRegistros.filter((r2) => r2.indice !== indice);
+    delete convareReferenciasPorIndice[indice];
+    await rodarValidacaoConvare();
+    mostrarInfoConvare(`Linha ${indice} excluída.`);
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+  }
+}
+
+el("btn-convare-adicionar-linha").addEventListener("click", async () => {
+  if (!convareFileId) return;
+  try {
+    const r = await fetch("/api/conversor-areas/adicionar-linha", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvare(data.error || "Falha ao adicionar a linha.");
+    convareRegistros.push(data.registro);
+    convareOrdenacao = null;
+    renderConvareTabelaCabecalho();
+    convarePagina = convareTotalPaginas();
+    await rodarValidacaoConvare();
+    mostrarInfoConvare(`Linha ${data.registro.indice} adicionada — preencha os campos.`);
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+  }
+});
+
+el("btn-convare-limpar-vazias").addEventListener("click", async () => {
+  if (!convareFileId) return;
+  try {
+    const r = await fetch("/api/conversor-areas/limpar-vazias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvare(data.error || "Falha ao limpar as linhas vazias.");
+    convareRegistros = convareRegistros.filter((reg) => Object.values(reg.dados).some((v) => (v || "").trim()));
+    convarePagina = 1;
+    await rodarValidacaoConvare();
+    mostrarInfoConvare(data.removidos ? `${data.removidos} linha(s) vazia(s) removida(s).` : "Nenhuma linha vazia encontrada.");
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+  }
+});
+
+async function rodarTransformacaoConvare(acao, params, montarMensagem) {
+  if (!convareFileId) return;
+  try {
+    const r = await fetch("/api/conversor-areas/transformar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId, acao, params: params || {} }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarErroConvare(data.error || "Falha ao aplicar a transformação.");
+    const porIndice = new Map(data.registros.map((r2) => [r2.indice, r2]));
+    convareRegistros = convareRegistros.map((r2) => porIndice.get(r2.indice) || r2);
+    await rodarValidacaoConvare();
+    mostrarInfoConvare(montarMensagem ? montarMensagem(data) : `${data.total_alterados} registro(s) alterado(s).`);
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+  }
+}
+
+el("btn-convare-fechar-anel").addEventListener("click", () =>
+  rodarTransformacaoConvare("fechar_anel", {}, (data) => `${data.fechados} área(s) com o anel fechado.`));
+
+el("btn-convare-padronizar-coordenadas").addEventListener("click", () =>
+  rodarTransformacaoConvare("padronizar_coordenadas", {}, (data) =>
+    data.padronizados ? `${data.padronizados} linha(s) com coordenadas padronizadas.` : "Todas as coordenadas já estavam no formato padrão."));
+
+el("btn-convare-inverter-latlong").addEventListener("click", () =>
+  rodarTransformacaoConvare("inverter_lat_long", {}, (data) =>
+    data.invertidos ? `${data.invertidos} linha(s) com a ordem das coordenadas invertida.` : "Nenhuma linha tinha coordenadas pra inverter."));
+
+function ligarBtnConvarePreencherTodas(idBotao, idInput, campo, rotuloErro) {
+  el(idBotao).addEventListener("click", () => {
+    const valor = el(idInput).value.trim();
+    if (!valor) return mostrarErroConvare(`Informe ${rotuloErro} a ser preenchido.`);
+    rodarTransformacaoConvare("preencher_campo", { campo, valor }, (data) =>
+      `${data.preenchidos} linha(s) preenchida(s) com "${valor}".`);
+  });
+}
+ligarBtnConvarePreencherTodas("btn-convare-preencher-categoria", "convare-categoria-valor", "categoria", "a categoria");
+ligarBtnConvarePreencherTodas("btn-convare-preencher-grupo", "convare-grupo-valor", "grupo", "o grupo");
+
+// Tolerância: diferente dos outros preenchimentos em massa, valor vazio é
+// uma ação válida (limpa a tolerância de todas as linhas) — pedido
+// explícito, já que ela deixa de ser obrigatória quando o Tipo muda de
+// Ponto pra Área/Rota.
+el("btn-convare-preencher-tolerancia").addEventListener("click", () => {
+  const valor = el("convare-tolerancia-valor").value.trim();
+  rodarTransformacaoConvare("preencher_campo", { campo: "tolerancia", valor }, (data) =>
+    valor ? `${data.preenchidos} linha(s) preenchida(s) com tolerância "${valor}".` : `${data.preenchidos} linha(s) com a tolerância limpa.`);
+});
+
+// Cor: escala de cores (CORES_SSX, mesma tabela do manual já usada pelo
+// Conversor KML e pelo "Cor do ícone" de Veículos) em vez de pedir pra
+// digitar o número de cabeça — mesmo componente visual
+// (".conversor-cor-mini-grupo"/".conversor-cor-mini") usado nos dois,
+// aqui pra escolher UM valor que vale pra toda a planilha ao clicar
+// "Preencher todas" (não por linha).
+let convareCorSelecionada = null;
+const convareCorSwatches = el("convare-cor-swatches");
+
+function renderConvareCorSwatches() {
+  convareCorSwatches.innerHTML = "";
+  CORES_SSX.forEach(({ codigo, hex }) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "conversor-cor-mini";
+    btn.style.background = hex;
+    btn.title = `Código ${codigo} (${hex})`;
+    btn.textContent = String(codigo);
+    if (convareCorSelecionada === codigo) btn.classList.add("selecionada");
+    btn.addEventListener("click", () => {
+      convareCorSelecionada = convareCorSelecionada === codigo ? null : codigo;
+      renderConvareCorSwatches();
+    });
+    convareCorSwatches.appendChild(btn);
+  });
+}
+renderConvareCorSwatches();
+
+el("btn-convare-preencher-cor").addEventListener("click", () => {
+  if (!convareCorSelecionada) return mostrarErroConvare("Selecione uma cor na escala antes de preencher.");
+  const valor = String(convareCorSelecionada);
+  rodarTransformacaoConvare("preencher_campo", { campo: "cor", valor }, (data) =>
+    `${data.preenchidos} linha(s) preenchida(s) com a cor ${valor}.`);
+});
+
+function renderConvareResumo(data) {
+  convareResumo.innerHTML = "";
+  const tiles = document.createElement("div");
+  tiles.className = "dashboard-tiles";
+  [
+    { valor: data.n_ok, label: "Válidos" },
+    { valor: data.n_erro, label: "Com erro", clicavel: data.n_erro > 0 },
+  ].forEach(({ valor, label, clicavel }) => {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "stat-tile-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "stat-tile-valor";
+    v.textContent = valor;
+    tile.appendChild(l);
+    tile.appendChild(v);
+    if (clicavel) {
+      tile.classList.add("stat-tile-clicavel");
+      tile.title = "Ir para o primeiro registro com erro";
+      tile.addEventListener("click", irParaPrimeiroErroConvare);
+    }
+    tiles.appendChild(tile);
+  });
+  convareResumo.appendChild(tiles);
+  const legenda = document.createElement("p");
+  legenda.className = "placeholder";
+  legenda.textContent = `${data.n_ok} de ${data.total} registro(s) válidos para importar.`;
+  convareResumo.appendChild(legenda);
+}
+
+function irParaPrimeiroErroConvare() {
+  const ordenados = ordenarConvareRegistros(convareRegistros);
+  const posicao = ordenados.findIndex((r) => {
+    const p = convareProblemaCombinado(r.indice);
+    return p && p.erros.length > 0;
+  });
+  if (posicao === -1) return;
+
+  const tamanho = Number(convareTamanhoPagina.value);
+  convarePagina = Math.floor(posicao / tamanho) + 1;
+  renderConvareTabela();
+
+  const indice = ordenados[posicao].indice;
+  const tr = convareTabelaTbody.querySelector(`tr[data-indice="${indice}"]`);
+  if (!tr) return;
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  tr.classList.add("convcli-linha-destacada");
+  setTimeout(() => tr.classList.remove("convcli-linha-destacada"), 2200);
+}
+
+async function rodarValidacaoConvare() {
+  if (!convareFileId) return null;
+  try {
+    const r = await fetch("/api/conversor-areas/validar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvare(data.error || "Falha ao validar.");
+      return null;
+    }
+    convareProblemasPorIndice = {};
+    data.problemas.forEach((p) => { convareProblemasPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvareResumo(data);
+    renderConvareTabela();
+    return data;
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+    return null;
+  }
+}
+el("btn-convare-validar").addEventListener("click", () => rodarValidacaoConvare());
+
+// --- VERIFICAR REFERÊNCIAS NA SSX (Conversor de Áreas, opcional) ---
+const overlayConvareLogin = el("overlay-convare-login");
+const selectConvareCredencial = el("convare-select-credencial");
+
+function renderSelectConvareCredenciais() {
+  selectConvareCredencial.innerHTML = '<option value="">Login salvo...</option>';
+  credenciaisCache.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nome;
+    selectConvareCredencial.appendChild(opt);
+  });
+}
+
+selectConvareCredencial.addEventListener("change", () => {
+  const cred = credenciaisCache.find((c) => c.id === selectConvareCredencial.value);
+  if (!cred) return;
+  el("convare-login").value = cred.login;
+  el("convare-senha").value = cred.senha;
+  selectConvareCredencial.value = "";
+});
+
+let convareLoginAoEntrar = null;
+
+el("convare-login-fechar").addEventListener("click", () => {
+  convareLoginAoEntrar = null;
+  overlayConvareLogin.classList.add("hidden");
+});
+
+el("form-convare-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const login = el("convare-login").value.trim();
+  const senha = el("convare-senha").value;
+  if (!login || !senha) return;
+  const btn = el("btn-convare-autenticar");
+  btn.disabled = true;
+  btn.textContent = "Entrando...";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      mostrarErroConvare(data.error || "Falha ao autenticar na SSX.");
+      return;
+    }
+    convareSsxOk = true;
+    convareSsxLogin = login;
+    convareSsxBase = extrairNomeBaseDeClaims(data.claims);
+    convareSsxClaimsRaw = data.claims || null;
+    convareAtualizarPillAuth();
+    overlayConvareLogin.classList.add("hidden");
+    el("convare-senha").value = "";
+    const aoEntrar = convareLoginAoEntrar;
+    convareLoginAoEntrar = null;
+    if (aoEntrar) return await aoEntrar();
+    await rodarVerificacaoReferenciasConvare();
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Entrar";
+  }
+});
+
+el("btn-convare-logout-ssx").addEventListener("click", async () => {
+  await fetch("/api/logout-avulso", { method: "POST" });
+  convareSsxOk = false;
+  convareSsxLogin = "";
+  convareSsxBase = "";
+  convareSsxClaimsRaw = null;
+  convareAtualizarPillAuth();
+  convareReferenciasPorIndice = {};
+  renderConvareTabela();
+  mostrarInfoConvare("Sessão da SSX encerrada.");
+});
+
+async function rodarVerificacaoReferenciasConvare() {
+  if (!convareFileId) return null;
+  const btn = el("btn-convare-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-areas/verificar-duplicidade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convareSsxOk = false;
+        convareAtualizarPillAuth();
+        renderSelectConvareCredenciais();
+        overlayConvareLogin.classList.remove("hidden");
+        return null;
+      }
+      mostrarErroConvare(data.error || "Falha ao verificar referências na SSX.");
+      return null;
+    }
+    convareReferenciasPorIndice = {};
+    data.problemas.forEach((p) => { convareReferenciasPorIndice[p.indice] = { erros: p.erros, avisos: p.avisos }; });
+    renderConvareTabela();
+    mostrarInfoConvare(
+      data.total_duplicados
+        ? `${data.total_duplicados} de ${data.total_verificados} registro(s) com Categoria/Grupo ainda não cadastrado na SSX.`
+        : `Categoria e Grupo de todos os ${data.total_verificados} registro(s) já estão cadastrados na SSX.`
+    );
+    return data;
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar na SSX";
+  }
+}
+
+el("btn-convare-verificar-ssx").addEventListener("click", () => {
+  if (!convareFileId) return;
+  if (!convareSsxOk) {
+    convareLoginAoEntrar = null;
+    renderSelectConvareCredenciais();
+    overlayConvareLogin.classList.remove("hidden");
+    return;
+  }
+  rodarVerificacaoReferenciasConvare();
+});
+
+// Botão "Categorias/Grupos": checklist do que a planilha usa — mesmo
+// padrão do botão "Templates" do Conversor de Rastreadores. Aparece
+// sempre, direto de convareRegistros (já em memória), sem exigir login; a
+// checagem de quem já está cadastrado na SSX é um passo à parte, opcional
+// (mesma sessão/login de "Verificar na SSX" — convareSsxOk/convareLoginAoEntrar).
+const overlayConvareCategorias = el("overlay-convare-categorias");
+const convareCategoriasListaCategorias = el("convare-categorias-lista-categorias");
+const convareCategoriasListaGrupos = el("convare-categorias-lista-grupos");
+const convareCategoriasLegenda = el("convare-categorias-legenda");
+let convareCategoriasResultado = null;
+
+function convareValoresDistintosGrupo() {
+  const vistos = new Set();
+  convareRegistros.forEach((r) => {
+    const valor = (r.dados.grupo || "").trim();
+    if (valor) vistos.add(valor);
+  });
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+}
+
+// "Categoria" pode ter vários códigos separados por vírgula numa única
+// célula (ex.: "COD1,COD2") — cada código conta como um valor distinto,
+// mesmo critério de conversor_areas.listar_categorias_e_grupos no backend.
+function convareValoresDistintosCategoria() {
+  const vistos = new Set();
+  convareRegistros.forEach((r) => {
+    (r.dados.categoria || "").split(",").forEach((c) => {
+      const valor = c.trim();
+      if (valor) vistos.add(valor);
+    });
+  });
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+}
+
+function renderConvareCategoriasLista(container, itens) {
+  container.innerHTML = "";
+  itens.forEach(({ valor, cadastrado }) => {
+    const li = document.createElement("li");
+    if (cadastrado === false) {
+      li.classList.add("convvei-templates-faltando");
+      li.textContent = `⚠ ${valor}`;
+      li.title = "Falta cadastrar na SSX";
+    } else if (cadastrado === true) {
+      li.textContent = `✓ ${valor}`;
+      li.title = "Já cadastrado na SSX";
+    } else {
+      li.textContent = valor;
+    }
+    container.appendChild(li);
+  });
+}
+
+function renderConvareCategoriasModal() {
+  if (convareCategoriasResultado) {
+    renderConvareCategoriasLista(convareCategoriasListaCategorias, convareCategoriasResultado.categorias);
+    renderConvareCategoriasLista(convareCategoriasListaGrupos, convareCategoriasResultado.grupos);
+    convareCategoriasLegenda.textContent = "⚠ em vermelho = falta cadastrar na SSX; ✓ = já cadastrado.";
+  } else {
+    const categorias = convareValoresDistintosCategoria().map((valor) => ({ valor }));
+    const grupos = convareValoresDistintosGrupo().map((valor) => ({ valor }));
+    renderConvareCategoriasLista(convareCategoriasListaCategorias, categorias);
+    renderConvareCategoriasLista(convareCategoriasListaGrupos, grupos);
+    convareCategoriasLegenda.textContent = 'Valores usados na planilha — clique em "Verificar cadastro na SSX" pra ver o que já está cadastrado.';
+  }
+}
+
+async function verificarConvareCategoriasNaSsx() {
+  if (!convareFileId) return;
+  const btn = el("btn-convare-categorias-verificar-ssx");
+  btn.disabled = true;
+  btn.textContent = "Verificando...";
+  try {
+    const r = await fetch("/api/conversor-areas/listar-categorias-grupos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: convareFileId }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      if (r.status === 401 || r.status === 409) {
+        convareSsxOk = false;
+        convareAtualizarPillAuth();
+        convareLoginAoEntrar = verificarConvareCategoriasNaSsx;
+        renderSelectConvareCredenciais();
+        overlayConvareLogin.classList.remove("hidden");
+        return;
+      }
+      mostrarErroConvare(data.error || "Falha ao consultar categorias/grupos na SSX.");
+      return;
+    }
+    convareCategoriasResultado = { categorias: data.categorias, grupos: data.grupos };
+    renderConvareCategoriasModal();
+  } catch (err) {
+    mostrarErroConvare(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verificar cadastro na SSX";
+  }
+}
+
+el("btn-convare-categorias").addEventListener("click", () => {
+  if (!convareFileId) {
+    return mostrarErroConvare("Carregue e mapeie uma planilha no Conversor de Áreas antes.");
+  }
+  renderConvareCategoriasModal();
+  overlayConvareCategorias.classList.remove("hidden");
+});
+
+el("btn-convare-categorias-verificar-ssx").addEventListener("click", () => {
+  if (!convareSsxOk) {
+    convareLoginAoEntrar = verificarConvareCategoriasNaSsx;
+    renderSelectConvareCredenciais();
+    overlayConvareLogin.classList.remove("hidden");
+    return;
+  }
+  verificarConvareCategoriasNaSsx();
+});
+
+el("convare-categorias-fechar").addEventListener("click", () => {
+  overlayConvareCategorias.classList.add("hidden");
+});
+
+function baixarConvareArquivo(modo) {
+  const a = document.createElement("a");
+  a.href = `/api/conversor-areas/exportar/${convareFileId}/${modo}`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+const overlayConvareBaixarErro = el("overlay-convare-baixar-erro");
+const textoConvareBaixarErro = el("convare-baixar-erro-texto");
+let resolverConvareBaixarErro = null;
+function fecharConvareBaixarErro(escolha) {
+  overlayConvareBaixarErro.classList.add("hidden");
+  const resolve = resolverConvareBaixarErro;
+  resolverConvareBaixarErro = null;
+  if (resolve) resolve(escolha);
+}
+function confirmarConvareBaixarErro(nComErro) {
+  const plural = nComErro === 1 ? "área não passou" : "áreas não passaram";
+  textoConvareBaixarErro.textContent =
+    `${nComErro} ${plural} na validação e podem ser rejeitadas pelo SSX na importação. Baixe só as válidas, ou inclua as com erro pra corrigir depois.`;
+  overlayConvareBaixarErro.classList.remove("hidden");
+  return new Promise((resolve) => { resolverConvareBaixarErro = resolve; });
+}
+el("convare-baixar-erro-fechar").addEventListener("click", () => fecharConvareBaixarErro("cancelar"));
+el("btn-convare-baixar-erro-cancelar").addEventListener("click", () => fecharConvareBaixarErro("cancelar"));
+el("btn-convare-baixar-com-erros").addEventListener("click", () => fecharConvareBaixarErro("com-erros"));
+el("btn-convare-baixar-sem-erros").addEventListener("click", () => fecharConvareBaixarErro("sem-erros"));
+
+el("btn-convare-baixar").addEventListener("click", async () => {
+  if (!convareFileId) return;
+  const resultado = await rodarValidacaoConvare();
+  if (!resultado) return;
+  if (resultado.n_erro > 0) {
+    const escolha = await confirmarConvareBaixarErro(resultado.n_erro);
+    if (escolha === "cancelar") return;
+    baixarConvareArquivo(escolha === "com-erros" ? "todos" : "validos");
+  } else {
+    baixarConvareArquivo("todos");
+  }
+});
+
+el("btn-convare-importar-api").addEventListener("click", () => {
+  if (!convareFileId) {
+    return mostrarErroConvare("Carregue e mapeie uma planilha no Conversor de Áreas antes.");
+  }
+  if (!convareSsxOk) {
+    convareLoginAoEntrar = abrirModalImportDeConvare;
+    renderSelectConvareCredenciais();
+    overlayConvareLogin.classList.remove("hidden");
+    return;
+  }
+  abrirModalImportDeConvare();
+});
+
 // --- QUEBRA STRING (rastreadores) ---
 // Sub-tela "/ferramentas/quebra-string": entrada + bytes à esquerda, tabela à direita.
 const quebraStringInput = el("quebra-string-input");
@@ -5993,6 +13715,13 @@ const QUEBRA_STRING_PERFIS = {
     "comando", "data", "hora", "backup", "motivoEnvio", "gpsFixo", "satelites", "hdop", "latitude", "longitude",
     "velocidade", "curso", "lbs", "ignicao", "alarme", "statusExtra", "tensao", "bateria", "sinalGsm",
     "odometro", "horimetro", "entrada1", "saida1",
+  ],
+  // Os valores de I/O (ignição, entradas, CAN, etc.) não entram aqui: cada um vira a sua
+  // própria linha dinâmica na tabela (ver "linhasExtras" em parseTeltonikaAvl), porque o
+  // conjunto de IOs enviado muda de equipamento pra equipamento e de configuração pra configuração.
+  TELTONIKA: [
+    "possivelRastreador", "tipoPacote", "idImei", "contador", "motivoEnvio",
+    "data", "hora", "gpsFixo", "satelites", "latitude", "longitude", "altitude", "velocidade", "curso",
   ],
 };
 
@@ -7361,11 +15090,307 @@ function parseMT2000(textoOriginal) {
   };
 }
 
+// Protocolo Teltonika (AVL — Codec 8 / Codec 8 Extended), conforme a wiki oficial
+// (wiki.teltonika-gps.com/view/Teltonika_Data_Sending_Protocols). Pacote binário:
+// Preamble(4)=00000000 | Tamanho dos dados(4) | Codec ID(1) | Nº registros(1) |
+// registros AVL | Nº registros de novo(1) | CRC-16(4, só os 2 últimos bytes valem).
+// Codec 8 usa 1 byte para ID/contadores de I/O; Codec 8 Extended usa 2 bytes (e tem um
+// grupo a mais, NX, para valores de tamanho variável) — é a diferença que a Teltonika
+// recomenda migrar para poder usar AVL IDs acima de 255.
+const TELTONIKA_CODEC = { "08": "Codec 8", "8E": "Codec 8 Extended", "10": "Codec 16" };
+
+// Nome e conversão dos AVL IDs mais comuns, conforme a Teltonika Data Sending Parameters ID
+// de FMC130 (a mesma numeração AVL vale para a família FMB9XX/FMB130/FMM130/FMC130).
+// IDs não mapeados aqui aparecem como "IO <id>" com o valor bruto em hex e decimal.
+// 3º item do array = true quando o conversor recebe o hex bruto (texto/ID), não o inteiro.
+const TELTONIKA_IO_INFO = {
+  1: ["Entrada Digital 1", (v) => (v ? "Ativa" : "Inativa")],
+  2: ["Entrada Digital 2", (v) => (v ? "Ativa" : "Inativa")],
+  3: ["Entrada Digital 3", (v) => (v ? "Ativa" : "Inativa")],
+  4: ["Contador de pulsos (Entrada Digital 1)", (v) => String(v)],
+  5: ["Contador de pulsos (Entrada Digital 2)", (v) => String(v)],
+  6: ["Entrada Analógica 2", (v) => `${(v / 1000).toFixed(3)} V`],
+  9: ["Entrada Analógica 1", (v) => `${(v / 1000).toFixed(3)} V`],
+  10: ["Status do cartão SD", (v) => (v ? "Presente" : "Ausente/erro")],
+  12: ["Combustível usado (GPS)", (v) => `${(v / 1000).toFixed(3)} L`],
+  13: ["Taxa de consumo (GPS)", (v) => `${(v / 100).toFixed(2)} L/100km`],
+  15: ["Pontuação eco (Eco Score)", (v) => (v / 100).toFixed(2)],
+  16: ["Odômetro total", (v) => `${(v / 1000).toFixed(2)} km`],
+  21: ["Sinal GSM", (v) => `Nível ${v}`],
+  24: ["Velocidade (GPS)", (v) => `${v} km/h`],
+  31: ["Carga do motor, % (OBD)", (v) => `${v}%`],
+  66: ["Tensão externa", (v) => `${(v / 1000).toFixed(2)} V`],
+  67: ["Tensão da bateria interna", (v) => `${(v / 1000).toFixed(2)} V`],
+  68: ["Corrente da bateria interna", (v) => `${v} mA`],
+  69: ["Status GNSS", (v) => (v ? "Ligado" : "Desligado")],
+  72: ["Temperatura Dallas 1", (v) => `${(telInt32Signed(v) / 10).toFixed(1)} °C`],
+  73: ["Temperatura Dallas 2", (v) => `${(telInt32Signed(v) / 10).toFixed(1)} °C`],
+  74: ["Temperatura Dallas 3", (v) => `${(telInt32Signed(v) / 10).toFixed(1)} °C`],
+  75: ["Temperatura Dallas 4", (v) => `${(telInt32Signed(v) / 10).toFixed(1)} °C`],
+  78: ["Chave iButton (ID do motorista)", (hex) => hex.toUpperCase(), true],
+  80: ["Modo de dado", (v) => String(v)],
+  81: ["Velocidade (CAN)", (v) => `${v} km/h`],
+  82: ["Pedal do acelerador (CAN)", (v) => `${v}%`],
+  83: ["Combustível usado (CAN)", (v) => `${(v / 10).toFixed(1)} L`],
+  84: ["Nível de combustível, litros (CAN)", (v) => `${(v / 10).toFixed(1)} L`],
+  85: ["RPM do motor (CAN)", (v) => `${v} rpm`],
+  87: ["Odômetro total (CAN)", (v) => `${(v / 1000).toFixed(2)} km`],
+  89: ["Nível de combustível, % (CAN)", (v) => `${v}%`],
+  102: ["Horímetro do motor (CAN)", (v) => `${(v / 60).toFixed(2)} h`],
+  105: ["Odômetro total contado (CAN)", (v) => `${(v / 1000).toFixed(2)} km`],
+  107: ["Combustível usado contado (CAN)", (v) => `${(v / 10).toFixed(1)} L`],
+  113: ["Nível da bateria interna", (v) => `${v}%`],
+  114: ["Torque do motor, % (CAN)", (v) => `${v}%`],
+  115: ["Temperatura do motor (CAN)", (v) => `${((v << 16 >> 16) / 10).toFixed(1)} °C`],
+  179: ["Saída Digital 1", (v) => (v ? "Ativa" : "Inativa")],
+  180: ["Saída Digital 2", (v) => (v ? "Ativa" : "Inativa")],
+  181: ["PDOP", (v) => (v / 10).toFixed(1)],
+  182: ["HDOP", (v) => (v / 10).toFixed(1)],
+  199: ["Odômetro parcial (trip)", (v) => `${(v / 1000).toFixed(2)} km`],
+  200: ["Modo de repouso (sleep)", (v) => String(v)],
+  207: ["Tag RFID (ID lida)", (hex) => hex.toUpperCase(), true],
+  236: ["Alarme", (v) => (v ? "Disparado" : "Normal")],
+  237: ["Tipo de rede (Network Type)", (v) => String(v)],
+  238: ["ID de usuário (User ID)", (hex) => hex.toUpperCase(), true],
+  239: ["Ignição", (v) => (v ? "Ligada" : "Desligada")],
+  240: ["Movimento", (v) => (v ? "Em movimento" : "Parado")],
+  241: ["Operadora GSM ativa", (v) => String(v)],
+  246: ["Reboque (Towing)", (v) => (v ? "Detectado" : "Normal")],
+  247: ["Detecção de colisão (Crash)", (v) => String(v)],
+  248: ["Imobilizador", (v) => ({ 0: "iButton não conectado", 1: "iButton conectado (imobilizador)", 2: "iButton conectado (condução autorizada)" }[v] ?? String(v))],
+  249: ["Interferência GNSS (jamming)", (v) => (v ? "Início da interferência" : "Fim da interferência")],
+  251: ["Marcha lenta (Idling)", (v) => (v ? "Em marcha lenta" : "Normal")],
+  252: ["Desconexão de energia (Unplug)", (v) => (v ? "Desconectado" : "Normal")],
+  255: ["Excesso de velocidade", (v) => `${v} km/h`],
+  263: ["Status Bluetooth", (v) => String(v)],
+  303: ["Movimento instantâneo", (v) => (v ? "Em movimento" : "Parado")],
+  317: ["Contador de eventos de colisão", (v) => String(v)],
+  325: ["VIN (CAN)", (hex) => hexParaTexto(hex).replace(/\0+$/, ""), true],
+  380: ["Saída Digital 3", (v) => (v ? "Ativa" : "Inativa")],
+  381: ["Ground Sense", (v) => (v ? "Ativo" : "Inativo")],
+  449: ["Contador de tempo com ignição ligada", (v) => `${(v / 3600).toFixed(2)} h`],
+};
+
+// Converte um inteiro sem sinal (até 32 bits, como hexParaInt devolve) pro valor com sinal
+// equivalente — necessário pros campos AVL de 4 bytes que são "Signed" (ex: temperatura Dallas).
+function telInt32Signed(v) {
+  return v > 0x7fffffff ? v - 0x100000000 : v;
+}
+
+// IDs que ganham o badge colorido de uma chave já existente (ver quebraStringTom/
+// quebraStringNivelBateria) quando viram linha dinâmica da tabela.
+const TELTONIKA_IO_CHAVE_BADGE = {
+  239: "ignicao",
+  113: "bateria",
+  236: "alarme",
+  246: "alarme",
+  251: "alarme",
+  252: "alarme",
+  249: "alarme",
+};
+
+function telIoNomeFinal(id, valorHex) {
+  const info = TELTONIKA_IO_INFO[id];
+  if (!info) {
+    const v = hexParaInt(valorHex || "0");
+    return { nome: `IO ${id}`, final: `0x${valorHex} (${v})` };
+  }
+  const [nome, conversor, usaHexBruto] = info;
+  return { nome, final: conversor(usaHexBruto ? valorHex : hexParaInt(valorHex || "0")) };
+}
+
+// CRC-16/IBM (ARC): poly 0xA001, init 0x0000 — o cálculo usado pelo protocolo Teltonika.
+function crc16Ibm(bytesHex) {
+  let crc = 0x0000;
+  for (const h of bytesHex) {
+    crc ^= parseInt(h, 16);
+    for (let i = 0; i < 8; i++) crc = crc & 1 ? (crc >> 1) ^ 0xa001 : crc >> 1;
+  }
+  return crc & 0xffff;
+}
+
+// Lê o bloco de elementos de I/O a partir de "pos". No Codec 8 (não extendido) o Event IO ID,
+// os contadores e os IDs de cada item usam 1 byte; no Codec 8 Extended usam 2 bytes e há um
+// grupo a mais (NX) para valores de tamanho variável (Length (2) + Value (N)).
+function telParseIoBloco(bytes, pos, extendido) {
+  const tamId = extendido ? 2 : 1;
+  const ler = (p, q) => bytes.slice(p, p + q).join("");
+  if (pos + tamId * 2 > bytes.length) return null;
+  const eventoId = hexParaInt(ler(pos, tamId));
+  pos += tamId * 2; // Event IO ID + Nº total de IDs (a soma dos grupos abaixo já dá esse total).
+  const itens = [];
+  for (const tamanhoValor of [1, 2, 4, 8]) {
+    if (pos + tamId > bytes.length) break;
+    const n = hexParaInt(ler(pos, tamId));
+    pos += tamId;
+    for (let i = 0; i < n && pos + tamId + tamanhoValor <= bytes.length; i++) {
+      const id = hexParaInt(ler(pos, tamId));
+      const inicioValor = pos + tamId;
+      itens.push({ id, valorHex: ler(inicioValor, tamanhoValor), inicio: pos, fim: inicioValor + tamanhoValor });
+      pos = inicioValor + tamanhoValor;
+    }
+  }
+  if (extendido && pos + tamId <= bytes.length) {
+    const nx = hexParaInt(ler(pos, tamId));
+    pos += tamId;
+    for (let i = 0; i < nx && pos + tamId + 2 <= bytes.length; i++) {
+      const id = hexParaInt(ler(pos, tamId));
+      const tamanhoValor = hexParaInt(ler(pos + tamId, 2));
+      const inicioValor = pos + tamId + 2;
+      if (inicioValor + tamanhoValor > bytes.length) break;
+      itens.push({ id, valorHex: ler(inicioValor, tamanhoValor), inicio: pos, fim: inicioValor + tamanhoValor });
+      pos = inicioValor + tamanhoValor;
+    }
+  }
+  return { eventoId, itens, fimPos: pos };
+}
+
+// Pacote de identificação (handshake), enviado antes dos pacotes AVL: 2 bytes de tamanho +
+// IMEI em ASCII (sem preamble). Devolve null quando o hex não bate com esse formato, pra
+// quebrarString() seguir tentando os outros protocolos.
+function parseTeltonikaImei(bytes) {
+  const tamanho = hexParaInt(bytes[0] + bytes[1]);
+  if (!(tamanho >= 8 && tamanho <= 17) || bytes.length !== 2 + tamanho) return null;
+  const imeiHex = bytes.slice(2, 2 + tamanho).join("");
+  const imei = hexParaTexto(imeiHex);
+  if (!/^[0-9]+$/.test(imei)) return null;
+  return {
+    campos: {
+      possivelRastreador: { bruto: bytes.slice(0, 2).join(""), final: "Teltonika (protocolo AVL) — identificação", inicioByte: 0, fimByte: 2 },
+      tipoPacote: { bruto: bytes.slice(0, 2).join(""), final: "Login (identificação por IMEI)", inicioByte: 0, fimByte: 2 },
+      idImei: { bruto: imeiHex, final: imei, inicioByte: 2, fimByte: 2 + tamanho },
+    },
+    bytes,
+    aviso: "",
+    perfil: "TELTONIKA",
+  };
+}
+
+// Pacote AVL (posições). Decodifica campo a campo só o 1º registro do pacote (igual o GT06 faz
+// com o layout de exemplo); "ioElementos" lista todos os IOs desse registro.
+function parseTeltonikaAvl(bytes) {
+  const ler = (p, q) => bytes.slice(p, p + q).join("");
+  const campos = {
+    possivelRastreador: { bruto: ler(0, 4), final: "Teltonika (protocolo AVL)", inicioByte: 0, fimByte: 4 },
+  };
+  if (bytes.length < 10) {
+    return { campos, bytes, aviso: "Aviso: pacote incompleto — faltam bytes do cabeçalho (tamanho/codec/nº de registros).", perfil: "TELTONIKA" };
+  }
+
+  const problemas = [];
+  const dataFieldLength = hexParaInt(ler(4, 4));
+  const codecIdHex = bytes[8].toUpperCase();
+  const extendido = codecIdHex === "8E";
+  campos.tipoPacote = {
+    bruto: bytes[8],
+    final: TELTONIKA_CODEC[codecIdHex] || `Desconhecido (0x${codecIdHex})`,
+    inicioByte: 8,
+    fimByte: 9,
+  };
+
+  const numeroDeDados = hexParaInt(bytes[9]);
+  campos.contador = { bruto: bytes[9], final: `${numeroDeDados} registro(s) AVL no pacote`, inicioByte: 9, fimByte: 10 };
+
+  const tamanhoTotalEsperado = 12 + dataFieldLength;
+  if (bytes.length !== tamanhoTotalEsperado) {
+    problemas.push(`tamanho declarado ${tamanhoTotalEsperado} bytes, recebidos ${bytes.length}`);
+  } else {
+    const crcCalculado = crc16Ibm(bytes.slice(8, 8 + dataFieldLength));
+    const crcRecebido = hexParaInt(ler(8 + dataFieldLength + 2, 2));
+    if (crcRecebido !== crcCalculado) problemas.push("CRC-16 não confere");
+  }
+
+  if (codecIdHex !== "08" && !extendido) {
+    problemas.push(`codec 0x${codecIdHex} ainda não é decodificado campo a campo (só Codec 8 e Codec 8 Extended)`);
+    return { campos, bytes, aviso: `Aviso: ${problemas.join("; ")}.`, perfil: "TELTONIKA" };
+  }
+
+  const pos0 = 10;
+  if (bytes.length >= pos0 + 24) {
+    let pos = pos0;
+    const epochMs = hexParaInt(ler(pos, 8));
+    const dataUtc = new Date(epochMs);
+    const dataBrasilia = new Date(dataUtc.getTime() - 3 * 60 * 60 * 1000);
+    campos.data = { bruto: ler(pos, 8), final: formatarDataBR(dataBrasilia), inicioByte: pos, fimByte: pos + 8 };
+    campos.hora = { bruto: ler(pos, 8), final: formatarHoraBR(dataBrasilia), inicioByte: pos, fimByte: pos + 8 };
+    pos += 8;
+    pos += 1; // Priority (0 baixa, 1 alta, 2 pânico) — ainda sem campo próprio na tabela padrão.
+
+    const lonHex = ler(pos, 4);
+    const latHex = ler(pos + 4, 4);
+    const altHex = ler(pos + 8, 2);
+    const anguloHex = ler(pos + 10, 2);
+    const satHex = ler(pos + 12, 1);
+    const velHex = ler(pos + 13, 2);
+    const lon = telInt32Signed(hexParaInt(lonHex)) / 10000000;
+    const lat = telInt32Signed(hexParaInt(latHex)) / 10000000;
+    const satelites = hexParaInt(satHex);
+
+    campos.longitude = { bruto: lonHex, final: formatarCoordenada(lon), inicioByte: pos, fimByte: pos + 4 };
+    campos.latitude = { bruto: latHex, final: formatarCoordenada(lat), inicioByte: pos + 4, fimByte: pos + 8 };
+    campos.altitude = { bruto: altHex, final: `${hexParaInt(altHex)} m`, inicioByte: pos + 8, fimByte: pos + 10 };
+    campos.curso = { bruto: anguloHex, final: `${hexParaInt(anguloHex)}°`, inicioByte: pos + 10, fimByte: pos + 12 };
+    campos.satelites = { bruto: satHex, final: String(satelites), inicioByte: pos + 12, fimByte: pos + 13 };
+    campos.velocidade = { bruto: velHex, final: `${hexParaInt(velHex)} km/h`, inicioByte: pos + 13, fimByte: pos + 15 };
+    campos.gpsFixo = {
+      bruto: satHex,
+      final: satelites > 0 ? "Posicionado (GPS)" : "Sem fix (0 satélites)",
+      inicioByte: pos + 12,
+      fimByte: pos + 13,
+    };
+    pos += 15;
+
+    const bloco = telParseIoBloco(bytes, pos, extendido);
+    let linhasExtras = [];
+    if (bloco) {
+      campos.motivoEnvio = {
+        bruto: ler(pos, extendido ? 2 : 1),
+        final:
+          bloco.eventoId === 0
+            ? "Registro periódico (sem IO de evento)"
+            : `${telIoNomeFinal(bloco.eventoId, "0").nome} mudou de valor (gerou o registro)`,
+        inicioByte: pos,
+        fimByte: pos + (extendido ? 2 : 1),
+      };
+
+      // Cada equipamento/configuração manda um conjunto diferente de IOs — em vez de um
+      // esquema fixo de colunas, cada IO que vier no pacote vira a sua própria linha na tabela
+      // (nome a partir de TELTONIKA_IO_INFO; "IO <id>" quando não é um ID conhecido).
+      linhasExtras = bloco.itens.map((it) => {
+        const { nome, final } = telIoNomeFinal(it.id, it.valorHex);
+        return {
+          label: nome,
+          bruto: it.valorHex,
+          final,
+          inicioByte: it.inicio,
+          fimByte: it.fim,
+          chave: TELTONIKA_IO_CHAVE_BADGE[it.id],
+        };
+      });
+    }
+
+    if (numeroDeDados > 1) {
+      problemas.push(`pacote tem ${numeroDeDados} registros AVL — só o 1º está decodificado campo a campo aqui`);
+    }
+
+    return {
+      campos,
+      bytes,
+      aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+      perfil: "TELTONIKA",
+      linhasExtras,
+    };
+  }
+
+  return { campos, bytes, aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "", perfil: "TELTONIKA" };
+}
+
 // Devolve { campos, bytes, aviso, separador, perfil }: campos[chave] = { bruto, final, inicioByte, fimByte }
 // (campo ausente = não encontrado nessa string → exibe "-").
 // aviso = erro de entrada ou problema de tamanho/CRC; "" quando está tudo certo.
 // Roteamento: *ET → E3; ~ → J-R12 String; { → J-R12 JSON; [ → MT2000; STT;/ALT;... → Suntech Normal;
-// hex 5E... → J-R12 Zip; hex 81/82/83... → Suntech Zip; hex 78 78 → GT06.
+// hex 5E... → J-R12 Zip; hex 81/82/83... → Suntech Zip; hex 00000000... → Teltonika AVL;
+// hex 00+tamanho+IMEI ASCII → Teltonika (login); hex 78 78 → GT06.
 function quebrarString(strBruta) {
   const texto = (strBruta || "").trim().replace(/^(\\r\\n)+/, "").trim();
   if (/^\*?ET\s*,/i.test(texto)) return parseE3(texto);
@@ -7382,18 +15407,24 @@ function quebrarString(strBruta) {
       campos: {},
       bytes: [],
       aviso:
-        "Entrada inválida: use hex em número par de dígitos (GT06, J-R12 Zip, Suntech Zip), texto *ET (E3), ~...$ ou JSON (J-R12), STT;... (Suntech), [...] (MT2000).",
+        "Entrada inválida: use hex em número par de dígitos (GT06, J-R12 Zip, Suntech Zip, Teltonika), texto *ET (E3), ~...$ ou JSON (J-R12), STT;... (Suntech), [...] (MT2000).",
     };
   }
 
   const bytes = hexParaBytes(hexLimpo);
   if (bytes[0] === "5E") return parseJR12Zip(bytes);
   if (ST_ZIP_HDR[bytes[0]]) return parseSuntechZip(bytes);
+  if (bytes.slice(0, 4).join("") === "00000000") return parseTeltonikaAvl(bytes);
+  if (bytes[0] === "00" && bytes.length >= 4) {
+    const possivelImei = parseTeltonikaImei(bytes);
+    if (possivelImei) return possivelImei;
+  }
   if (bytes[0] !== "78" || bytes[1] !== "78") {
     return {
       campos: {},
       bytes,
-      aviso: "Equipamento não reconhecido: o hex precisa começar com 78 78 (GT06), 5E (J-R12 Zip) ou 81/82/83... (Suntech Zip).",
+      aviso:
+        "Equipamento não reconhecido: o hex precisa começar com 78 78 (GT06), 5E (J-R12 Zip), 81/82/83... (Suntech Zip) ou 00 00 00 00 (Teltonika AVL).",
     };
   }
 
@@ -7477,7 +15508,68 @@ function quebraStringNivelBateria(final) {
 }
 
 // perfil = chave de QUEBRA_STRING_PERFIS; sem perfil (nada colado ou equipamento não reconhecido) não há tabela.
-function renderQuebraStringResultado(campos, aviso, perfil) {
+// Monta e registra (pro clique/hover nos bytes) uma linha da tabela. "campo" pode faltar
+// (linha fixa sem valor nessa string) ou vir de uma linha dinâmica (ver "linhasExtras",
+// usado pelos elementos de I/O do Teltonika, que mudam de equipamento pra equipamento).
+// "chave" é opcional: só afeta o badge colorido (ignição, alarme...) e a barra de bateria.
+function criarLinhaQuebraStringTabela(tbody, label, campo, chave) {
+  campo = campo || {};
+  const tr = document.createElement("tr");
+  const temValor = !!campo.final;
+  // Linha sem informação nessa string fica apagada, pra o olho ir direto no que veio.
+  if (!temValor) tr.classList.add("qs-linha-vazia");
+
+  const tdLabel = document.createElement("td");
+  tdLabel.textContent = label;
+
+  const tdBruto = document.createElement("td");
+  tdBruto.textContent = campo.bruto ? campo.bruto : "-";
+
+  const tdFinal = document.createElement("td");
+  if (!temValor) {
+    tdFinal.textContent = "-";
+  } else {
+    const valor = String(campo.final);
+    const tom = quebraStringTom(chave, valor);
+    const nivel = chave === "bateria" ? quebraStringNivelBateria(valor) : null;
+    const span = document.createElement("span");
+    span.textContent = valor;
+    if (tom) span.className = `qs-badge qs-${tom}`;
+    tdFinal.appendChild(span);
+
+    if (nivel !== null) {
+      const barra = document.createElement("span");
+      barra.className = "qs-bateria";
+      barra.title = `${nivel}%`;
+      const preenchido = document.createElement("span");
+      preenchido.style.width = `${nivel}%`;
+      preenchido.className = nivel <= 20 ? "qs-perigo" : nivel <= 50 ? "qs-alerta" : "qs-ok";
+      barra.appendChild(preenchido);
+      tdFinal.appendChild(barra);
+    }
+  }
+
+  if (campo.inicioByte !== undefined) {
+    tdBruto.classList.add("quebra-string-bruto-ativo");
+    tdBruto.addEventListener("mouseenter", () => destacarBytes(campo.inicioByte, campo.fimByte, true));
+    tdBruto.addEventListener("mouseleave", () => destacarBytes(campo.inicioByte, campo.fimByte, false));
+    tr.dataset.inicioByte = String(campo.inicioByte);
+    tr.dataset.fimByte = String(campo.fimByte);
+    for (let i = campo.inicioByte; i < campo.fimByte; i++) {
+      if (!quebraStringLinhasPorByte.has(i)) quebraStringLinhasPorByte.set(i, []);
+      quebraStringLinhasPorByte.get(i).push(tr);
+    }
+  }
+
+  tr.appendChild(tdLabel);
+  tr.appendChild(tdBruto);
+  tr.appendChild(tdFinal);
+  tbody.appendChild(tr);
+}
+
+// linhasExtras = linhas dinâmicas (fora do esquema fixo de QUEBRA_STRING_CAMPOS), uma por
+// elemento de I/O do Teltonika encontrado no pacote: [{ label, bruto, final, inicioByte, fimByte, chave? }].
+function renderQuebraStringResultado(campos, aviso, perfil, linhasExtras) {
   quebraStringResultado.innerHTML = "";
 
   if (aviso) {
@@ -7523,58 +15615,11 @@ function renderQuebraStringResultado(campos, aviso, perfil) {
   quebraStringLinhasPorByte = new Map();
 
   QUEBRA_STRING_CAMPOS.filter(({ chave }) => chavesPerfil.includes(chave)).forEach(({ chave, label }) => {
-    const campo = campos[chave] || {};
-    const tr = document.createElement("tr");
-    const temValor = !!campo.final;
-    // Linha sem informação nessa string fica apagada, pra o olho ir direto no que veio.
-    if (!temValor) tr.classList.add("qs-linha-vazia");
+    criarLinhaQuebraStringTabela(tbody, label, campos[chave], chave);
+  });
 
-    const tdLabel = document.createElement("td");
-    tdLabel.textContent = label;
-
-    const tdBruto = document.createElement("td");
-    tdBruto.textContent = campo.bruto ? campo.bruto : "-";
-
-    const tdFinal = document.createElement("td");
-    if (!temValor) {
-      tdFinal.textContent = "-";
-    } else {
-      const valor = String(campo.final);
-      const tom = quebraStringTom(chave, valor);
-      const nivel = chave === "bateria" ? quebraStringNivelBateria(valor) : null;
-      const span = document.createElement("span");
-      span.textContent = valor;
-      if (tom) span.className = `qs-badge qs-${tom}`;
-      tdFinal.appendChild(span);
-
-      if (nivel !== null) {
-        const barra = document.createElement("span");
-        barra.className = "qs-bateria";
-        barra.title = `${nivel}%`;
-        const preenchido = document.createElement("span");
-        preenchido.style.width = `${nivel}%`;
-        preenchido.className = nivel <= 20 ? "qs-perigo" : nivel <= 50 ? "qs-alerta" : "qs-ok";
-        barra.appendChild(preenchido);
-        tdFinal.appendChild(barra);
-      }
-    }
-
-    if (campo.inicioByte !== undefined) {
-      tdBruto.classList.add("quebra-string-bruto-ativo");
-      tdBruto.addEventListener("mouseenter", () => destacarBytes(campo.inicioByte, campo.fimByte, true));
-      tdBruto.addEventListener("mouseleave", () => destacarBytes(campo.inicioByte, campo.fimByte, false));
-      tr.dataset.inicioByte = String(campo.inicioByte);
-      tr.dataset.fimByte = String(campo.fimByte);
-      for (let i = campo.inicioByte; i < campo.fimByte; i++) {
-        if (!quebraStringLinhasPorByte.has(i)) quebraStringLinhasPorByte.set(i, []);
-        quebraStringLinhasPorByte.get(i).push(tr);
-      }
-    }
-
-    tr.appendChild(tdLabel);
-    tr.appendChild(tdBruto);
-    tr.appendChild(tdFinal);
-    tbody.appendChild(tr);
+  (linhasExtras || []).forEach(({ label, bruto, final, inicioByte, fimByte, chave }) => {
+    criarLinhaQuebraStringTabela(tbody, label, { bruto, final, inicioByte, fimByte }, chave);
   });
 
   tabela.appendChild(tbody);
@@ -7611,9 +15656,9 @@ btnQuebraStringLimpar.addEventListener("click", () => {
 });
 
 function executarQuebraString() {
-  const { campos, bytes, aviso, separador, perfil } = quebrarString(quebraStringInput.value);
+  const { campos, bytes, aviso, separador, perfil, linhasExtras } = quebrarString(quebraStringInput.value);
   renderQuebraStringBytes(bytes, separador);
-  renderQuebraStringResultado(campos, aviso, perfil);
+  renderQuebraStringResultado(campos, aviso, perfil, linhasExtras);
   atualizarBotoesQuebraString();
 }
 
@@ -8437,6 +16482,7 @@ async function carregarMinhaConta() {
     const [mes, dia] = (p.aniversario || "").split("-");
     el("minha-conta-aniversario-dia").value = dia || "";
     el("minha-conta-aniversario-mes").value = mes || "";
+    el("minha-conta-aniversario-banner").classList.toggle("hidden", !p.aniversario_hoje);
     el("minha-conta-login").value = p.usuario || "";
     el("minha-conta-telefone").value = p.telefone_profissional || "";
     el("minha-conta-email").value = p.email || "";
@@ -8870,7 +16916,28 @@ const FERRAMENTAS_SUBTELAS = {
   "sync-planilha": el("ferramentas-sub-sync-planilha"),
   "quebra-string": el("ferramentas-sub-quebra-string"),
   "conversor-kml": el("ferramentas-sub-conversor-kml"),
+  "central-importacao": el("ferramentas-sub-central-importacao"),
+  "conversor-clientes": el("ferramentas-sub-conversor-clientes"),
+  "conversor-veiculos": el("ferramentas-sub-conversor-veiculos"),
+  "conversor-rastreadores": el("ferramentas-sub-conversor-rastreadores"),
+  "conversor-simcards": el("ferramentas-sub-conversor-simcards"),
+  "conversor-areas": el("ferramentas-sub-conversor-areas"),
+  "conversor-uo": el("ferramentas-sub-conversor-uo"),
+  "conversor-colaboradores": el("ferramentas-sub-conversor-colaboradores"),
+  "conversor-viagens": el("ferramentas-sub-conversor-viagens"),
+  "conversor-abastecimento": el("ferramentas-sub-conversor-abastecimento"),
+  "atalhos": el("ferramentas-sub-atalhos"),
 };
+// Sub-telas que são "filhas" da Central de Importação SSX — chegam por ela e
+// o Voltar do sidebar deve retornar pra lá (não pro grid de Ferramentas
+// Auxiliares). "conversor-kml" entrou aqui junto com "conversor-areas": os
+// dois cards de Áreas (Planilha e KML) agora vivem dentro da Central, não
+// mais soltos no grid raiz de Ferramentas Auxiliares.
+const SUBTELAS_FILHAS_DA_CENTRAL_IMPORTACAO = [
+  "importacao-consulta", "conversor-clientes", "conversor-veiculos", "conversor-rastreadores", "conversor-simcards",
+  "conversor-areas", "conversor-kml", "conversor-uo", "conversor-colaboradores",
+  "conversor-viagens", "conversor-abastecimento", "atalhos",
+];
 const ferramentasCardsHeader = el("ferramentas-cards-header");
 const ferramentasCards = el("ferramentas-cards");
 
@@ -8890,13 +16957,11 @@ function resolverCaminho(caminho) {
   return { tela: TELA_POR_CAMINHO_RAIZ[caminho] || "dashboard" };
 }
 
-// Rastreia a tela/idcentral atuais só pra saber quando a navegação está
-// SAINDO de uma Ficha vinculada — dispara a limpeza da autenticação nesse
-// momento. É reforço de UX (a garantia de verdade é a checagem no backend,
-// que recusa qualquer ação cujo idcentral não bata com o vínculo da sessão,
-// mesmo que essa limpeza aqui não rode por algum motivo).
+// Rastreia a tela atual só pra saber quando a navegação está SAINDO da
+// sub-tela de login avulso (Importação/Consulta) — dispara a limpeza da
+// autenticação nesse momento. É reforço de UX (a garantia de verdade é a
+// checagem no backend).
 let telaNavAtual = null;
-let idcentralNavAtual = null;
 let ferramentasSubAtual = null;
 // De onde a Ficha do Cliente foi aberta (Implantação ou Migração) — usado
 // pelo botão Voltar da Ficha pra retornar pra lá em vez de sempre cair no
@@ -8904,13 +16969,13 @@ let ferramentasSubAtual = null;
 // do navegador.
 let fichaOrigem = "dashboard";
 
-// Componente padrão: telas que autenticam a SSX (Ficha vinculada, login avulso
-// de Importação/Consulta) não devem deixar essa autenticação viva depois que a
-// pessoa sai da tela — dispara o endpoint de "sair" certo e reflete a limpeza
-// no estado local. `estavaLa`/`continuaLa` já vêm calculados pelo chamador
-// (precisam comparar com telaNavAtual/idcentralNavAtual/ferramentasSubAtual
-// ANTES desses valores serem sobrescritos pela navegação atual). É reforço de
-// UX — a garantia de verdade é sempre a checagem no backend.
+// Componente padrão: a tela de login avulso (Importação/Consulta) não deve
+// deixar essa autenticação viva depois que a pessoa sai da tela — dispara o
+// endpoint de "sair" certo e reflete a limpeza no estado local. `estavaLa`/
+// `continuaLa` já vêm calculados pelo chamador (precisam comparar com
+// telaNavAtual/ferramentasSubAtual ANTES desses valores serem sobrescritos
+// pela navegação atual). É reforço de UX — a garantia de verdade é sempre a
+// checagem no backend.
 function limparAuthSeSaiuDaTela(estavaLa, continuaLa, endpoint, idcentralParaConferir) {
   if (!estavaLa || continuaLa) return;
   fetch(endpoint, { method: "POST" }).catch(() => {});
@@ -8936,7 +17001,7 @@ function normalizarBusca(texto) {
 function criarCampoFiltroLista(valorInicial, aoMudar) {
   const wrap = document.createElement("label");
   wrap.className = "filtro-lista";
-  wrap.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>';
+  wrap.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>';
   const input = document.createElement("input");
   input.type = "text";
   input.placeholder = "Filtrar clientes…";
@@ -9096,6 +17161,17 @@ const TITULO_TOPBAR_POR_SUB = {
   "sync-planilha": "Sincronizar Planilha",
   "quebra-string": "Quebra-String",
   "conversor-kml": "Conversor KML → SSX",
+  "central-importacao": "Central de Importação SSX",
+  "conversor-clientes": "Conversor de Clientes → SSX",
+  "conversor-veiculos": "Conversor de Veículos → SSX",
+  "conversor-rastreadores": "Conversor de Rastreadores → SSX",
+  "conversor-simcards": "Conversor de SIM Cards → SSX",
+  "conversor-areas": "Planilha de Áreas → SSX",
+  "conversor-uo": "Conversor de Unidades Organizacionais → SSX",
+  "conversor-colaboradores": "Conversor de Colaboradores → SSX",
+  "conversor-viagens": "Conversor de Viagens → SSX",
+  "conversor-abastecimento": "Conversor de Abastecimento → SSX",
+  "atalhos": "Operações em massa",
 };
 
 // Sub-telas de Ferramentas mostram só o próprio nome — a volta pra Ferramentas
@@ -9110,16 +17186,9 @@ function irParaTela(tela, opcoes) {
 
   const novoSub = tela === "ferramentas" && FERRAMENTAS_SUBTELAS[opcoes.sub] ? opcoes.sub : null;
 
-  limparAuthSeSaiuDaTela(
-    telaNavAtual === "ficha" && !!idcentralNavAtual,
-    tela === "ficha" && opcoes.idcentral === idcentralNavAtual,
-    idcentralNavAtual && `/api/ficha/${encodeURIComponent(idcentralNavAtual)}/sair`,
-    idcentralNavAtual
-  );
-  // Só entra pro login avulso (idcentralAutenticado vazio) — sessão vinculada
-  // à Ficha já foi tratada acima. /api/logout faz session.clear() de propósito
-  // (é o botão "Sair", desloga da ferramenta inteira) — aqui precisa só limpar
-  // o token avulso da SSX, por isso o endpoint dedicado.
+  // /api/logout faz session.clear() de propósito (é o botão "Sair", desloga
+  // da ferramenta inteira) — aqui precisa só limpar o token avulso da SSX,
+  // por isso o endpoint dedicado.
   limparAuthSeSaiuDaTela(
     telaNavAtual === "ferramentas" && ferramentasSubAtual === "importacao-consulta" && estado.autenticado && !estado.idcentralAutenticado,
     tela === "ferramentas" && novoSub === "importacao-consulta",
@@ -9135,7 +17204,6 @@ function irParaTela(tela, opcoes) {
   if (tela === "ficha") fichaOrigem = opcoes.origem || fichaOrigem || "dashboard";
 
   telaNavAtual = tela;
-  idcentralNavAtual = tela === "ficha" ? opcoes.idcentral : null;
   ferramentasSubAtual = novoSub;
 
   const telasUnicas = new Set(Object.values(TELAS_NAV));
@@ -9246,11 +17314,14 @@ function feedCriarCard(post) {
   card.className = "feed-post";
   card.dataset.id = post.id;
 
+  const ehSasha = post.tipo === "aniversario";
+  if (ehSasha) card.classList.add("feed-post-aniversario");
+
   const cabecalho = document.createElement("header");
   cabecalho.className = "feed-post-cabecalho";
   const avatar = document.createElement("div");
-  avatar.className = "feed-avatar";
-  avatar.textContent = feedIniciais(post.autor_nome);
+  avatar.className = ehSasha ? "feed-avatar feed-avatar-robo" : "feed-avatar";
+  avatar.textContent = ehSasha ? "🤖" : feedIniciais(post.autor_nome);
   const meta = document.createElement("div");
   meta.className = "feed-post-meta";
   const autor = document.createElement("strong");
@@ -9538,10 +17609,52 @@ if (el("card-ferramentas-sync-planilha")) {
   el("card-ferramentas-sync-planilha").addEventListener("click", () => irParaTela("ferramentas", { sub: "sync-planilha" }));
 }
 el("card-ferramentas-quebra-string").addEventListener("click", () => irParaTela("ferramentas", { sub: "quebra-string" }));
+el("card-ferramentas-central-importacao").addEventListener("click", () => irParaTela("ferramentas", { sub: "central-importacao" }));
 // Pelo card o formulário do conversor começa limpo; Voltar/Avançar do navegador mantém o que estava.
-el("card-ferramentas-conversor-kml").addEventListener("click", () => {
+// Os dois cards de Áreas (Planilha e KML) agora vivem dentro da Central de
+// Importação, não mais soltos no grid raiz de Ferramentas Auxiliares — ver
+// SUBTELAS_FILHAS_DA_CENTRAL_IMPORTACAO.
+el("card-central-areas-kml").addEventListener("click", () => {
   limparConversor();
   irParaTela("ferramentas", { sub: "conversor-kml" });
+});
+el("card-central-areas-planilha").addEventListener("click", () => {
+  limparConvare();
+  irParaTela("ferramentas", { sub: "conversor-areas" });
+});
+el("card-central-clientes").addEventListener("click", () => {
+  limparConvcli();
+  irParaTela("ferramentas", { sub: "conversor-clientes" });
+});
+el("card-central-veiculos").addEventListener("click", () => {
+  limparConvvei();
+  irParaTela("ferramentas", { sub: "conversor-veiculos" });
+});
+el("card-central-rastreadores").addEventListener("click", () => {
+  limparConvrst();
+  irParaTela("ferramentas", { sub: "conversor-rastreadores" });
+});
+el("card-central-simcards").addEventListener("click", () => {
+  limparConvsim();
+  irParaTela("ferramentas", { sub: "conversor-simcards" });
+});
+el("card-central-uo").addEventListener("click", () => {
+  limparConvuo();
+  irParaTela("ferramentas", { sub: "conversor-uo" });
+});
+el("card-central-colaboradores").addEventListener("click", () => {
+  limparConvcol();
+  irParaTela("ferramentas", { sub: "conversor-colaboradores" });
+});
+el("card-central-viagens").addEventListener("click", () => {
+  irParaTela("ferramentas", { sub: "conversor-viagens" });
+});
+el("card-central-abastecimento").addEventListener("click", () => {
+  irParaTela("ferramentas", { sub: "conversor-abastecimento" });
+});
+el("card-central-atalhos").addEventListener("click", () => {
+  limparAtalhos();
+  irParaTela("ferramentas", { sub: "atalhos" });
 });
 // "Voltar" discreto do sidebar: só aparece em telas "filhas" — sub-tela de
 // Ferramentas → Ferramentas; Ficha → de onde foi aberta; Minha conta (aberta pelo
@@ -9550,7 +17663,14 @@ el("card-ferramentas-conversor-kml").addEventListener("click", () => {
 const sidebarVoltar = el("sidebar-voltar");
 
 function destinoVoltar() {
-  if (telaNavAtual === "ferramentas" && ferramentasSubAtual) return { tela: "ferramentas" };
+  if (telaNavAtual === "ferramentas" && ferramentasSubAtual) {
+    // Sub-tela aberta a partir da Central de Importação SSX (ex.: Conversor de
+    // Clientes) volta pra Central, não direto pro grid de Ferramentas Auxiliares.
+    if (SUBTELAS_FILHAS_DA_CENTRAL_IMPORTACAO.includes(ferramentasSubAtual)) {
+      return { tela: "ferramentas", sub: "central-importacao" };
+    }
+    return { tela: "ferramentas" };
+  }
   if (telaNavAtual === "ficha") return { tela: fichaOrigem || "dashboard" };
   if (telaNavAtual === "minha-conta") return { tela: "dashboard" };
   return null;
@@ -9559,14 +17679,17 @@ function destinoVoltar() {
 function atualizarSidebarVoltar() {
   const destino = destinoVoltar();
   sidebarVoltar.classList.toggle("hidden", !destino);
-  if (destino) sidebarVoltar.title = `Voltar para ${TITULO_TOPBAR_POR_TELA[destino.tela] || "Dashboard"}`;
+  if (destino) {
+    const titulo = (destino.tela === "ferramentas" && TITULO_TOPBAR_POR_SUB[destino.sub]) || TITULO_TOPBAR_POR_TELA[destino.tela] || "Dashboard";
+    sidebarVoltar.title = `Voltar para ${titulo}`;
+  }
 }
 
 sidebarVoltar.addEventListener("click", () => {
   const destino = destinoVoltar();
   if (!destino) return;
   if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
-  irParaTela(destino.tela);
+  irParaTela(destino.tela, { sub: destino.sub });
 });
 
 // --- SINCRONIZAR PLANILHA (planilha de CS -> cadastro de cliente do app) ---
@@ -9712,7 +17835,7 @@ window.addEventListener("popstate", (e) => {
 function podeSairDaAbaMarcos() {
   return fichaAbaAtual !== "marcos" || confirmarDescartarMarcos();
 }
-["geral", "implantacao", "marcos", "migracao", "consulta", "importacao"].forEach((aba) => {
+["geral", "implantacao", "marcos", "migracao", "historico"].forEach((aba) => {
   el(`ficha-aba-${aba}`).addEventListener("click", () => {
     // Clicar de novo em "Marcos" re-renderizaria a aba e perderia o rascunho.
     if (aba === fichaAbaAtual && aba === "marcos") return;
@@ -10475,7 +18598,7 @@ function construirFichaHeader(implantacao, migracao, comEngrenagem) {
 }
 
 // Engrenagem de edição da Ficha — aparece em todas as abas (Visão Geral,
-// Implantação, Marcos, Migração, Consulta, Importação). Clica e já abre
+// Implantação, Marcos, Migração). Clica e já abre
 // direto a janela de configuração (abrirConfigFicha) — se o cliente só tem
 // Implantação ou só Migração, ela mesma decide qual modal mostrar.
 function construirFichaEngrenagem(implantacao, migracao) {
@@ -10583,82 +18706,6 @@ function legendaProgressoImplantacao(implantacao) {
   return { texto: `${label} — vence em ${diff} dia${diff === 1 ? "" : "s"}.`, classe: "ok" };
 }
 
-// Credencial SSX do cliente (Fase 3b) — só admin vê o login/edita; qualquer
-// perfil pode clicar "Autenticar" (o backend lê a senha salva, nunca manda
-// ela pro navegador). O status mostrado é da SESSÃO atual (estado.*), não do
-// cadastro — então reflete corretamente "autenticado" só quando o vínculo
-// bate com ESTE idcentral.
-function construirFichaCredencialSecao(idcentral, credencialConfigurada, credencialLogin) {
-  const sec = document.createElement("div");
-  sec.className = "ficha-secao";
-  const h = document.createElement("h3");
-  h.textContent = "Credencial SSX";
-  sec.appendChild(h);
-
-  const vinculadaAqui = estado.autenticado && estado.idcentralAutenticado === idcentral;
-
-  const linha = document.createElement("div");
-  linha.className = "ficha-credencial-linha";
-
-  const pill = document.createElement("span");
-  pill.className = "status-pill " + (vinculadaAqui ? "status-on" : "status-off");
-  pill.textContent = vinculadaAqui ? "Autenticado" : "Não autenticado";
-  linha.appendChild(pill);
-
-  if (USUARIO_PERFIL_ATUAL === "adm" && credencialLogin) {
-    const loginTxt = document.createElement("span");
-    loginTxt.className = "ficha-credencial-login";
-    loginTxt.textContent = credencialLogin;
-    linha.appendChild(loginTxt);
-  }
-
-  const btnAutenticar = document.createElement("button");
-  btnAutenticar.type = "button";
-  btnAutenticar.className = "btn-secondary";
-  btnAutenticar.textContent = "Autenticar";
-  btnAutenticar.disabled = !credencialConfigurada || vinculadaAqui;
-  btnAutenticar.title = !credencialConfigurada
-    ? "Esse cliente ainda não tem credencial da SSX cadastrada."
-    : (vinculadaAqui ? "Já autenticado" : "");
-  btnAutenticar.addEventListener("click", () => autenticarFicha(idcentral));
-  linha.appendChild(btnAutenticar);
-
-  if (USUARIO_PERFIL_ATUAL === "adm") {
-    const btnEditar = document.createElement("button");
-    btnEditar.type = "button";
-    btnEditar.className = "btn-secondary";
-    btnEditar.textContent = credencialConfigurada ? "Editar credencial" : "Cadastrar credencial";
-    btnEditar.addEventListener("click", () => abrirModalFichaCredencial(idcentral, credencialLogin || ""));
-    linha.appendChild(btnEditar);
-  }
-
-  sec.appendChild(linha);
-
-  // Só Consulta e Importação chamam esta função — aqui a falta de credencial
-  // bloqueia mesmo a ação da tela, por isso vira alerta de verdade (não só
-  // status discreto como na Visão Geral).
-  if (!credencialConfigurada) {
-    const aviso = document.createElement("p");
-    aviso.className = "alerta-bloco";
-    aviso.textContent = "⚠️ Sem credencial cadastrada — Consulta, Importação, Deletar veículos e Associar rastreadores não vão funcionar pra esse cliente até um administrador cadastrar.";
-    sec.appendChild(aviso);
-  }
-
-  return sec;
-}
-
-async function autenticarFicha(idcentral) {
-  try {
-    const r = await fetch(`/api/ficha/${encodeURIComponent(idcentral)}/autenticar`, { method: "POST" });
-    const data = await parseJsonResponse(r);
-    if (!data.ok) return alert(`Erro ao autenticar: ${data.error || "falha desconhecida"}`);
-    await atualizarStatus();
-    if (fichaAbaAtual === "geral") mostrarFichaAba("geral");
-  } catch (err) {
-    alert(`Erro ao autenticar: ${String(err)}`);
-  }
-}
-
 function criarInfoItem(label, valor) {
   const item = document.createElement("div");
   item.className = "info-item";
@@ -10739,13 +18786,13 @@ function nomeCurtoEtapaImplantacao(etapa) {
 // precisa de atenção (trava operacional, risco de perda etc).
 const FICHA_MOMENTOS_CRITICOS = ["Travado por Infraestrutura", "Possível Cancelamento", "Protestado", "Sumido"];
 
-const ICONE_WHATSAPP_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91A9.85 9.85 0 0 0 12.04 2zm0 18.15h-.01a8.23 8.23 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.25-8.23a8.2 8.2 0 0 1 8.24 8.24c0 4.54-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.46-.72-1.69-.8-.23-.08-.39-.12-.56.12-.16.25-.64.8-.78.97-.14.16-.29.18-.54.06-.25-.12-1.04-.38-1.99-1.23-.73-.66-1.23-1.47-1.37-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.16.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43h-.48c-.16 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.16 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.46-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.22-.16-.47-.28z"/></svg>';
+const ICONE_WHATSAPP_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91A9.85 9.85 0 0 0 12.04 2zm0 18.15h-.01a8.23 8.23 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.25-8.23a8.2 8.2 0 0 1 8.24 8.24c0 4.54-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.46-.72-1.69-.8-.23-.08-.39-.12-.56.12-.16.25-.64.8-.78.97-.14.16-.29.18-.54.06-.25-.12-1.04-.38-1.99-1.23-.73-.66-1.23-1.47-1.37-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.16.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43h-.48c-.16 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.16 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.46-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.22-.16-.47-.28z"/></svg>';
 
 // Ícones dos cards de contato (traço, 16px), mesmo estilo dos ícones da Ficha.
 const ICONES_CONTATO = {
-  pessoa: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"></path></svg>',
-  maleta: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>',
-  pin: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
+  pessoa: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"></path></svg>',
+  maleta: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>',
+  pin: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
 };
 
 // Card de contato no padrão dos tiles da Ficha: ícone + rótulo, nome em
@@ -11244,14 +19291,13 @@ function construirFichaProgressoCard(implantacao, migracao) {
   return card;
 }
 
-// Versão compacta da Credencial SSX só pra Visão Geral (uma linha, sem cartão
-// grande) — Consulta e Importação continuam usando construirFichaCredencialSecao
-// (o bloco maior original) sem nenhuma mudança.
+// Status compacto da Credencial SSX, na Visão Geral (uma linha, sem cartão
+// grande) — só cadastro (admin-only); autenticar e usar a credencial (Consulta,
+// Importação) saíram da Ficha e agora vivem na Central de Importação SSX, que
+// lê esse mesmo cadastro pelos Logins salvos.
 function construirFichaCredencialCompacta(idcentral, credencialConfigurada, credencialLogin) {
   const wrap = document.createElement("div");
   wrap.className = "ficha-operacional-bloco";
-
-  const vinculadaAqui = estado.autenticado && estado.idcentralAutenticado === idcentral;
 
   const linha = document.createElement("div");
   linha.className = "credencial-compacta";
@@ -11260,12 +19306,9 @@ function construirFichaCredencialCompacta(idcentral, credencialConfigurada, cred
   if (!credencialConfigurada) {
     status.className = "credencial-compacta-erro";
     status.textContent = "🔴 Credencial SSX — Não cadastrada";
-  } else if (vinculadaAqui) {
-    status.className = "credencial-compacta-ok";
-    status.textContent = "🟢 Credencial SSX — Autenticada";
   } else {
-    status.className = "credencial-compacta-pendente";
-    status.textContent = "🟡 Credencial SSX — Cadastrada, não autenticada nesta sessão";
+    status.className = "credencial-compacta-ok";
+    status.textContent = "🟢 Credencial SSX — Cadastrada";
   }
   linha.appendChild(status);
 
@@ -11275,17 +19318,6 @@ function construirFichaCredencialCompacta(idcentral, credencialConfigurada, cred
     loginTxt.textContent = credencialLogin;
     linha.appendChild(loginTxt);
   }
-
-  const btnAutenticar = document.createElement("button");
-  btnAutenticar.type = "button";
-  btnAutenticar.className = "btn-secondary";
-  btnAutenticar.textContent = "Autenticar";
-  btnAutenticar.disabled = !credencialConfigurada || vinculadaAqui;
-  btnAutenticar.title = !credencialConfigurada
-    ? "Esse cliente ainda não tem credencial da SSX cadastrada."
-    : (vinculadaAqui ? "Já autenticado" : "");
-  btnAutenticar.addEventListener("click", () => autenticarFicha(idcentral));
-  linha.appendChild(btnAutenticar);
 
   if (USUARIO_PERFIL_ATUAL === "adm") {
     const btnEditar = document.createElement("button");
@@ -11352,13 +19384,12 @@ function construirFichaOperacionalCard(idcentral, implantacao, credencialConfigu
 }
 
 // Sub-abas acima do nome do cliente, dentro da Visão Geral. Cada uma mostra um
-// recorte: "Geral" é o painel completo; as outras separam o que é cadastro,
-// andamento e histórico.
+// recorte: "Geral" é o painel completo; as outras separam o que é cadastro e
+// andamento (Histórico tem aba própria no sidebar, fora da Visão Geral).
 const FICHA_SUB_ABAS = [
   ["geral", "Geral"],
   ["informacoes", "Informações do Cliente"],
   ["progresso", "Progresso"],
-  ["historico", "Histórico"],
 ];
 let fichaSubAbaAtual = "geral";
 
@@ -11383,49 +19414,633 @@ function construirFichaSubAbas(ativa) {
   return nav;
 }
 
-// Histórico do cliente: tentativas de migração (todas, da mais recente pra
-// mais antiga) e, quando existe Implantação, atalho pra linha do tempo completa.
-function construirFichaHistoricoCard(implantacao) {
-  const card = document.createElement("div");
-  card.className = "ficha-painel";
-  const h = document.createElement("h3");
-  h.textContent = "Histórico";
-  card.appendChild(h);
+// --- Aba Timeline (Histórico da Ficha) ---
+// "Caminho do cliente" em zigue-zague, mesmo formato do Acompanhamento de
+// Cliente do kanban_dashboard_dev — mas sem busca de cliente: usa sempre o
+// cliente da própria Ficha (implantacao.id). Eventos vêm do mesmo
+// /api/clientes/<id>/eventos já usado pela linha do tempo em modal
+// (abrirTimelineImplantacao) — não duplica cadastro, só a visualização.
+let fichaTimelineFiltroTag = "";
+let fichaTimelineClienteIdCache = null;
+let fichaTimelineEventosCache = [];
 
-  const migracoes = (fichaClienteAtual && fichaClienteAtual.migracoes) || [];
-  migracoes.forEach((m) => {
-    const linha = document.createElement("div");
-    linha.className = "ficha-historico-item";
-    const periodo = m.data_fim ? `${m.data_inicio} — ${m.data_fim}` : `desde ${m.data_inicio}`;
-    const motivo = m.motivo ? ` — ${m.motivo}` : "";
-    linha.textContent = `Migração · ${MIGRACAO_STATUS_LABELS[m.status] || m.status} (${periodo})${motivo}`;
-    card.appendChild(linha);
+async function obterFichaTimelineEventos(clienteId, forcarRecarga) {
+  if (!forcarRecarga && fichaTimelineClienteIdCache === clienteId) return fichaTimelineEventosCache;
+  const r = await fetch(`/api/clientes/${encodeURIComponent(clienteId)}/eventos`);
+  const data = await parseJsonResponse(r);
+  fichaTimelineClienteIdCache = clienteId;
+  fichaTimelineEventosCache = data.ok ? (data.eventos || []) : [];
+  return fichaTimelineEventosCache;
+}
+
+// Diferença em dias corridos entre duas datas "AAAA-MM-DD" (sem hora, pra não
+// variar por fuso) — mesma ideia de diasDesdeEntrada, mas entre duas datas
+// quaisquer em vez de "até hoje".
+function diasEntreDatasIso(dataA, dataB) {
+  const partesA = String(dataA || "").split("-");
+  const partesB = String(dataB || "").split("-");
+  if (partesA.length !== 3 || partesB.length !== 3) return null;
+  const [anoA, mesA, diaA] = partesA.map(Number);
+  const [anoB, mesB, diaB] = partesB.map(Number);
+  const a = new Date(anoA, mesA - 1, diaA);
+  const b = new Date(anoB, mesB - 1, diaB);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+  return Math.round((b - a) / 86400000);
+}
+
+function construirFichaTimelineGap(dias) {
+  const gap = document.createElement("span");
+  gap.className = "ficha-timeline-gap";
+  gap.textContent = dias === null ? "" : `${dias} dia${Math.abs(dias) === 1 ? "" : "s"}`;
+  return gap;
+}
+
+function construirFichaTimelineItem(ev) {
+  const item = document.createElement("div");
+  item.className = "ficha-timeline-item";
+
+  const data = document.createElement("span");
+  data.className = "ficha-timeline-item-data";
+  data.textContent = formatarDataBRSimples(ev.data) || "Sem data";
+  item.appendChild(data);
+
+  const bolinha = document.createElement("button");
+  bolinha.type = "button";
+  bolinha.className = "ficha-timeline-item-bolinha";
+  bolinha.style.backgroundColor = (ev.tag && EVENTO_TAG_COR[ev.tag]) || EVENTO_TAG_COR_PADRAO;
+  bolinha.setAttribute("aria-expanded", "false");
+  bolinha.title = `Abrir detalhes: ${ev.titulo}`;
+  item.appendChild(bolinha);
+
+  const rotulo = document.createElement("p");
+  rotulo.className = "ficha-timeline-item-rotulo";
+  rotulo.textContent = ev.titulo;
+  item.appendChild(rotulo);
+
+  const detalhe = document.createElement("div");
+  detalhe.className = "ficha-timeline-item-detalhe hidden";
+  const dTitulo = document.createElement("p");
+  dTitulo.className = "ficha-timeline-item-detalhe-titulo";
+  dTitulo.textContent = "Detalhes do acontecimento";
+  detalhe.appendChild(dTitulo);
+  [
+    ["Setor", ev.setor || "—"],
+    ["Tag", ev.tag || "Sem tag"],
+    ["Descrição", ev.descricao || "—"],
+    ["CSM", ev.responsavel || "Não informado"],
+  ].forEach(([rotuloCampo, valor]) => {
+    const p = document.createElement("p");
+    const strong = document.createElement("strong");
+    strong.textContent = `${rotuloCampo}: `;
+    p.appendChild(strong);
+    p.appendChild(document.createTextNode(valor));
+    detalhe.appendChild(p);
+  });
+  item.appendChild(detalhe);
+
+  bolinha.addEventListener("click", () => {
+    const vaiAbrir = detalhe.classList.contains("hidden");
+    detalhe.classList.toggle("hidden", !vaiAbrir);
+    bolinha.setAttribute("aria-expanded", String(vaiAbrir));
   });
 
-  if (implantacao) {
-    const acoes = document.createElement("div");
-    acoes.className = "ficha-acoes";
-    const btn = document.createElement("button");
-    btn.className = "btn-secondary";
-    btn.textContent = "Ver linha do tempo completa";
-    btn.addEventListener("click", () => abrirTimelineImplantacao(implantacao));
-    acoes.appendChild(btn);
-    card.appendChild(acoes);
+  return item;
+}
+
+const FICHA_TIMELINE_ITENS_POR_LINHA = 4;
+
+// Monta o "Caminho do cliente": linhas de N eventos em zigue-zague (linha par
+// → esquerda pra direita, ímpar → invertida), com o marcador "Início" antes
+// do primeiro evento, um badge de dias entre cada par de eventos consecutivos
+// (dentro da linha ou no conector entre linhas) e detalhe que expande ao
+// clicar na bolinha.
+function renderFichaTimelineCaminho(container, contadorEl, eventosTodos, filtroTag) {
+  const eventos = (eventosTodos || [])
+    .filter((ev) => !filtroTag || ev.tag === filtroTag)
+    .slice()
+    .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+
+  contadorEl.textContent = `${eventos.length} acontecimento${eventos.length === 1 ? "" : "s"}`;
+
+  container.innerHTML = "";
+  if (!eventos.length) {
+    container.appendChild(construirFichaHistoricoVazio(
+      "Nenhum acontecimento ainda",
+      filtroTag ? `Nenhum acontecimento com a tag "${filtroTag}" registrado.` : 'Clique em "Editar acontecimentos" pra começar a registrar.'
+    ));
+    return;
   }
 
-  if (!migracoes.length && !implantacao) {
-    const p = document.createElement("p");
-    p.className = "placeholder";
-    p.textContent = "Nenhum histórico registrado.";
-    card.appendChild(p);
+  const linhas = [];
+  for (let i = 0; i < eventos.length; i += FICHA_TIMELINE_ITENS_POR_LINHA) {
+    linhas.push(eventos.slice(i, i + FICHA_TIMELINE_ITENS_POR_LINHA));
   }
+
+  linhas.forEach((eventosDaLinha, idxLinha) => {
+    const invertida = idxLinha % 2 === 1;
+    const linha = document.createElement("div");
+    linha.className = "ficha-timeline-linha" + (invertida ? " invertida" : "");
+
+    if (idxLinha === 0) {
+      const inicio = document.createElement("div");
+      inicio.className = "ficha-timeline-inicio";
+      const rotuloInicio = document.createElement("span");
+      rotuloInicio.className = "ficha-timeline-inicio-rotulo";
+      rotuloInicio.textContent = "Início";
+      const bolinhaInicio = document.createElement("span");
+      bolinhaInicio.className = "ficha-timeline-inicio-bolinha";
+      inicio.appendChild(rotuloInicio);
+      inicio.appendChild(bolinhaInicio);
+      linha.appendChild(inicio);
+    }
+
+    eventosDaLinha.forEach((ev, idxNaLinha) => {
+      if (idxNaLinha > 0) {
+        linha.appendChild(construirFichaTimelineGap(diasEntreDatasIso(eventosDaLinha[idxNaLinha - 1].data, ev.data)));
+      }
+      linha.appendChild(construirFichaTimelineItem(ev));
+    });
+
+    container.appendChild(linha);
+
+    const proximaLinha = linhas[idxLinha + 1];
+    if (proximaLinha) {
+      const conector = document.createElement("div");
+      conector.className = "ficha-timeline-conector " + (invertida ? "esquerda" : "direita");
+      const ultimoDaLinha = eventosDaLinha[eventosDaLinha.length - 1];
+      conector.appendChild(construirFichaTimelineGap(diasEntreDatasIso(ultimoDaLinha.data, proximaLinha[0].data)));
+      container.appendChild(conector);
+    }
+  });
+}
+
+async function carregarFichaTimeline(implantacao, forcarRecarga, card) {
+  const contadorEl = card._fichaTimelineContador;
+  const caminhoWrap = card._fichaTimelineCaminhoWrap;
+  caminhoWrap.innerHTML = '<p class="placeholder">Carregando...</p>';
+  try {
+    const eventos = await obterFichaTimelineEventos(implantacao.id, forcarRecarga);
+    renderFichaTimelineCaminho(caminhoWrap, contadorEl, eventos, fichaTimelineFiltroTag);
+  } catch (err) {
+    mostrarErroEmNode(caminhoWrap, String(err));
+  }
+}
+
+// Estado vazio padrão das abas da Histórico (sem Implantação, área sem
+// registro ainda etc.) — cartão discreto com ícone, em vez de um parágrafo
+// solto, pra manter a mesma linguagem visual em toda a aba.
+function construirFichaHistoricoVazio(titulo, texto) {
+  const vazio = document.createElement("div");
+  vazio.className = "ficha-historico-vazio";
+  vazio.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>';
+  const h4 = document.createElement("p");
+  h4.className = "ficha-historico-vazio-titulo";
+  h4.textContent = titulo;
+  vazio.appendChild(h4);
+  if (texto) {
+    const p = document.createElement("p");
+    p.className = "ficha-historico-vazio-texto";
+    p.textContent = texto;
+    vazio.appendChild(p);
+  }
+  return vazio;
+}
+
+function construirFichaTimelineCard(implantacao) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel";
+
+  if (!implantacao) {
+    card.appendChild(construirFichaHistoricoVazio(
+      "Sem Implantação",
+      "Esse cliente não tem Implantação — não há linha do tempo pra mostrar."
+    ));
+    return card;
+  }
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "ficha-timeline-toolbar";
+
+  const legenda = document.createElement("div");
+  legenda.className = "ficha-timeline-legenda";
+  const legendaTitulo = document.createElement("span");
+  legendaTitulo.className = "ficha-timeline-legenda-titulo";
+  legendaTitulo.textContent = "TAGS";
+  legenda.appendChild(legendaTitulo);
+  EVENTO_TAGS.forEach(([nome, cor]) => {
+    const item = document.createElement("span");
+    item.className = "ficha-timeline-legenda-item";
+    const bolinha = document.createElement("span");
+    bolinha.className = "ficha-timeline-legenda-bolinha";
+    bolinha.style.backgroundColor = cor;
+    item.appendChild(bolinha);
+    item.appendChild(document.createTextNode(nome));
+    legenda.appendChild(item);
+  });
+  toolbar.appendChild(legenda);
+
+  const acoes = document.createElement("div");
+  acoes.className = "ficha-timeline-toolbar-acoes";
+
+  const btnAtualizar = document.createElement("button");
+  btnAtualizar.type = "button";
+  btnAtualizar.className = "btn-secondary";
+  btnAtualizar.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg><span>Atualizar</span>';
+  btnAtualizar.addEventListener("click", () => carregarFichaTimeline(implantacao, true, card));
+  acoes.appendChild(btnAtualizar);
+
+  const selectTag = document.createElement("select");
+  selectTag.className = "ficha-timeline-filtro-tag";
+  const optTodas = document.createElement("option");
+  optTodas.value = "";
+  optTodas.textContent = "Todas as Tags";
+  selectTag.appendChild(optTodas);
+  EVENTO_TAGS.forEach(([nome]) => {
+    const opt = document.createElement("option");
+    opt.value = nome;
+    opt.textContent = nome;
+    selectTag.appendChild(opt);
+  });
+  selectTag.value = fichaTimelineFiltroTag;
+  selectTag.addEventListener("change", () => {
+    fichaTimelineFiltroTag = selectTag.value;
+    renderFichaTimelineCaminho(card._fichaTimelineCaminhoWrap, card._fichaTimelineContador, fichaTimelineEventosCache, fichaTimelineFiltroTag);
+  });
+  acoes.appendChild(selectTag);
+
+  const btnEditar = document.createElement("button");
+  btnEditar.type = "button";
+  btnEditar.className = "btn-secondary";
+  btnEditar.textContent = "Editar acontecimentos";
+  btnEditar.title = "Adicionar, editar ou excluir acontecimentos (abre por setor)";
+  btnEditar.addEventListener("click", () => abrirTimelineImplantacao(implantacao));
+  acoes.appendChild(btnEditar);
+
+  toolbar.appendChild(acoes);
+  card.appendChild(toolbar);
+
+  const corpo = document.createElement("div");
+  corpo.className = "ficha-timeline-corpo";
+  card.appendChild(corpo);
+
+  const cabecalho = document.createElement("div");
+  cabecalho.className = "ficha-timeline-cabecalho";
+  const tituloCaminho = document.createElement("div");
+  tituloCaminho.className = "ficha-timeline-cabecalho-titulo";
+  tituloCaminho.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 13v8"></path><path d="M12 3v3"></path><path d="M4 6a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h13a2 2 0 0 0 1.152-.365l3.424-2.317a1 1 0 0 0 0-1.635l-3.424-2.318A2 2 0 0 0 17 6z"></path></svg><span>Caminho do cliente</span>';
+  cabecalho.appendChild(tituloCaminho);
+  const contador = document.createElement("span");
+  contador.className = "ficha-timeline-contador";
+  cabecalho.appendChild(contador);
+  corpo.appendChild(cabecalho);
+
+  const caminhoWrap = document.createElement("div");
+  caminhoWrap.className = "ficha-timeline-caminho";
+  corpo.appendChild(caminhoWrap);
+
+  card._fichaTimelineContador = contador;
+  card._fichaTimelineCaminhoWrap = caminhoWrap;
+
+  if (fichaTimelineClienteIdCache === implantacao.id) {
+    renderFichaTimelineCaminho(caminhoWrap, contador, fichaTimelineEventosCache, fichaTimelineFiltroTag);
+  } else {
+    caminhoWrap.innerHTML = '<p class="placeholder">Carregando...</p>';
+    carregarFichaTimeline(implantacao, false, card);
+  }
+
   return card;
+}
+
+// --- Aba Detalhado (Histórico da Ficha) — eventos em formato de chat ---
+// Mesmos eventos da Timeline (/api/clientes/<id>/eventos, cache
+// compartilhado via obterFichaTimelineEventos) + as tentativas de migração
+// "traduzidas" em eventos sintéticos (tag "Migração", não gravados no
+// backend) — tudo numa lista só, ordenada por data crescente (mais antigo no
+// topo, mais recente embaixo), aberta já rolada pro final. Um composer fixo
+// embaixo registra um novo acontecimento de verdade, com os mesmos campos do
+// modal de acontecimento (Setor/Título/Tag/Descrição/Data/Responsável).
+
+// Início/fim de uma tentativa de migração viram "acontecimentos" de leitura
+// (sem id real no backend — nunca editáveis/excluíveis por aqui), pra
+// aparecerem misturados aos outros no mesmo chat cronológico.
+function construirEventosSinteticosMigracao(migracoes) {
+  const eventos = [];
+  (migracoes || []).forEach((m) => {
+    if (m.data_inicio) {
+      eventos.push({
+        id: `sintetico-mig-inicio-${m.id}`,
+        setor: "Migração",
+        tag: "Migração",
+        titulo: "Migração iniciada",
+        descricao: m.motivo ? `Motivo: ${m.motivo}` : "",
+        data: m.data_inicio,
+        responsavel: "",
+        sintetico: true,
+      });
+    }
+    if (m.data_fim) {
+      eventos.push({
+        id: `sintetico-mig-fim-${m.id}`,
+        setor: "Migração",
+        tag: "Migração",
+        titulo: `Migração ${MIGRACAO_STATUS_LABELS[m.status] || m.status}`,
+        descricao: m.motivo ? `Motivo: ${m.motivo}` : "",
+        data: m.data_fim,
+        responsavel: "",
+        sintetico: true,
+      });
+    }
+  });
+  return eventos;
+}
+
+function montarFichaChatEventos(eventosReais, migracoes) {
+  return (eventosReais || [])
+    .concat(construirEventosSinteticosMigracao(migracoes))
+    .slice()
+    .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+}
+
+// Cor da bolinha do rail (timeline à esquerda do chat) — mesma lógica de
+// prioridade que antes virava borda do cartão: Tag primeiro, senão Setor.
+function corFichaChatEvento(ev) {
+  return ev.tag ? (EVENTO_TAG_COR[ev.tag] || EVENTO_TAG_COR_PADRAO) : (IMPLANTACAO_SETOR_COR[ev.setor] || "var(--cinza-300)");
+}
+
+function construirFichaChatMensagem(ev) {
+  const bolha = document.createElement("div");
+  bolha.className = "ficha-chat-mensagem" + (ev.sintetico ? " sintetico" : "");
+
+  const topo = document.createElement("div");
+  topo.className = "ficha-chat-mensagem-topo";
+
+  const setorSpan = document.createElement("span");
+  setorSpan.className = "ficha-chat-mensagem-setor";
+  setorSpan.textContent = ev.setor || "—";
+  topo.appendChild(setorSpan);
+
+  if (ev.tag) {
+    const chip = EVENTO_TAG_CHIP[ev.tag];
+    const tagSpan = document.createElement("span");
+    tagSpan.className = "ficha-chat-mensagem-tag";
+    tagSpan.style.backgroundColor = chip ? chip.bg : "var(--cinza-100)";
+    tagSpan.style.color = chip ? chip.fg : "var(--cinza-700)";
+    tagSpan.textContent = ev.tag;
+    topo.appendChild(tagSpan);
+  }
+
+  if (ev.sintetico) {
+    const sinteticoSpan = document.createElement("span");
+    sinteticoSpan.className = "ficha-chat-mensagem-sintetico-rotulo";
+    sinteticoSpan.textContent = "registrado no cadastro de migração";
+    topo.appendChild(sinteticoSpan);
+  }
+  bolha.appendChild(topo);
+
+  const titulo = document.createElement("p");
+  titulo.className = "ficha-chat-mensagem-titulo";
+  titulo.textContent = ev.titulo;
+  bolha.appendChild(titulo);
+
+  if (ev.descricao) {
+    const desc = document.createElement("p");
+    desc.className = "ficha-chat-mensagem-descricao";
+    desc.textContent = ev.descricao;
+    bolha.appendChild(desc);
+  }
+
+  if (ev.responsavel) {
+    const resp = document.createElement("p");
+    resp.className = "ficha-chat-mensagem-responsavel";
+    resp.textContent = `— ${ev.responsavel}`;
+    bolha.appendChild(resp);
+  }
+
+  return bolha;
+}
+
+// Linha do rail (bolinha + linha vertical contínua) + o cartão da mensagem —
+// é o "item" que entra na lista do chat (a linha conecta visualmente um item
+// ao próximo via CSS, ver .ficha-chat-rail::before).
+function construirFichaChatItem(ev) {
+  const item = document.createElement("div");
+  item.className = "ficha-chat-item";
+
+  const rail = document.createElement("div");
+  rail.className = "ficha-chat-rail";
+  const ponto = document.createElement("span");
+  ponto.className = "ficha-chat-rail-ponto";
+  ponto.style.backgroundColor = corFichaChatEvento(ev);
+  rail.appendChild(ponto);
+  item.appendChild(rail);
+
+  item.appendChild(construirFichaChatMensagem(ev));
+  return item;
+}
+
+function construirFichaChatDivisorData(dataIso) {
+  const divisor = document.createElement("div");
+  divisor.className = "ficha-chat-divisor";
+  const span = document.createElement("span");
+  span.textContent = formatarDataBRSimples(dataIso) || "Sem data";
+  divisor.appendChild(span);
+  return divisor;
+}
+
+// Rola pro final só depois do nó estar de verdade no documento (scrollHeight
+// de um elemento ainda desconectado vem zerado) — por isso o rAF, tanto na
+// primeira montagem quanto depois de registrar um acontecimento novo.
+function renderFichaChat(container, eventos) {
+  container.innerHTML = "";
+  if (!eventos.length) {
+    container.appendChild(construirFichaHistoricoVazio(
+      "Nenhum acontecimento ainda",
+      "Use o campo abaixo pra registrar o primeiro — ele entra direto na conversa."
+    ));
+    return;
+  }
+  // Mensagens do mesmo dia ficam juntas sob um só divisor de data (igual
+  // chat de verdade) — cada mensagem individual não repete mais a data.
+  let dataAnterior = null;
+  eventos.forEach((ev) => {
+    const dataDoEvento = ev.data || "";
+    if (dataDoEvento !== dataAnterior) {
+      container.appendChild(construirFichaChatDivisorData(dataDoEvento));
+      dataAnterior = dataDoEvento;
+    }
+    container.appendChild(construirFichaChatItem(ev));
+  });
+  requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
+}
+
+async function carregarFichaDetalhadoChat(implantacao, forcarRecarga, card) {
+  const chatEl = card._fichaChatLista;
+  chatEl.innerHTML = '<p class="placeholder">Carregando...</p>';
+  try {
+    const eventosReais = await obterFichaTimelineEventos(implantacao.id, forcarRecarga);
+    const migracoes = (fichaClienteAtual && fichaClienteAtual.migracoes) || [];
+    renderFichaChat(chatEl, montarFichaChatEventos(eventosReais, migracoes));
+  } catch (err) {
+    mostrarErroEmNode(chatEl, String(err));
+  }
+}
+
+// --- Modal "Novo acontecimento" do chat (aba Detalhado) ---
+// Antes era um formulário sempre visível embaixo do chat — comia espaço de
+// tela e sobrava pouca área pra ler as mensagens. Agora é só um botão; o
+// formulário mora num modal próprio (overlay-ficha-chat-evento), reaproveitando
+// os mesmos campos (Setor aqui É um campo, diferente do modal de Implantação/
+// Marcos onde o setor já vem de qual "+" foi clicado).
+const overlayFichaChatEvento = el("overlay-ficha-chat-evento");
+const formFichaChatEvento = el("form-ficha-chat-evento");
+const inputFichaChatEventoTitulo = el("ficha-chat-evento-titulo");
+const selectFichaChatEventoSetor = el("ficha-chat-evento-setor");
+const selectFichaChatEventoTag = el("ficha-chat-evento-tag");
+const inputFichaChatEventoData = el("ficha-chat-evento-data");
+const inputFichaChatEventoResponsavel = el("ficha-chat-evento-responsavel");
+const textareaFichaChatEventoDescricao = el("ficha-chat-evento-descricao");
+const btnSalvarFichaChatEvento = el("btn-salvar-ficha-chat-evento");
+let fichaChatEventoImplantacaoAtual = null;
+
+function abrirModalFichaChatEvento(implantacao) {
+  fichaChatEventoImplantacaoAtual = implantacao;
+  formFichaChatEvento.reset();
+  inputFichaChatEventoData.value = new Date().toISOString().slice(0, 10);
+  overlayFichaChatEvento.classList.remove("hidden");
+  inputFichaChatEventoTitulo.focus();
+}
+
+el("ficha-chat-evento-modal-fechar").addEventListener("click", () => overlayFichaChatEvento.classList.add("hidden"));
+
+formFichaChatEvento.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!fichaChatEventoImplantacaoAtual) return;
+  const payload = {
+    setor: selectFichaChatEventoSetor.value,
+    titulo: inputFichaChatEventoTitulo.value.trim(),
+    tag: selectFichaChatEventoTag.value,
+    descricao: textareaFichaChatEventoDescricao.value.trim(),
+    data: inputFichaChatEventoData.value,
+    responsavel: inputFichaChatEventoResponsavel.value.trim(),
+  };
+  if (!payload.titulo) return;
+  btnSalvarFichaChatEvento.disabled = true;
+  try {
+    const r = await fetch(`/api/clientes/${fichaChatEventoImplantacaoAtual.id}/eventos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return alert(`Erro ao registrar: ${data.error || "falha desconhecida"}`);
+    // Cache da Timeline fica desatualizada com o evento novo — força
+    // recarregar na próxima vez que qualquer uma das duas abas for aberta.
+    fichaTimelineClienteIdCache = null;
+    overlayFichaChatEvento.classList.add("hidden");
+    if (fichaHistoricoAreaAtual === "detalhado" || fichaHistoricoAreaAtual === "timeline") mostrarFichaAba("historico");
+  } catch (err) {
+    alert(`Erro ao registrar: ${String(err)}`);
+  } finally {
+    btnSalvarFichaChatEvento.disabled = false;
+  }
+});
+
+function construirFichaDetalhadoChat(implantacao) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel ficha-detalhado-card";
+
+  if (!implantacao) {
+    card.appendChild(construirFichaHistoricoVazio(
+      "Sem Implantação",
+      "Esse cliente não tem Implantação — não há histórico detalhado pra mostrar."
+    ));
+    return card;
+  }
+
+  const chat = document.createElement("div");
+  chat.className = "ficha-chat-lista";
+  card.appendChild(chat);
+  card._fichaChatLista = chat;
+
+  const btnNovoEvento = document.createElement("button");
+  btnNovoEvento.type = "button";
+  btnNovoEvento.className = "btn-primary ficha-chat-btn-novo";
+  btnNovoEvento.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg><span>Adicionar acontecimento</span>';
+  btnNovoEvento.addEventListener("click", () => abrirModalFichaChatEvento(implantacao));
+  card.appendChild(btnNovoEvento);
+
+  if (fichaTimelineClienteIdCache === implantacao.id) {
+    const migracoes = (fichaClienteAtual && fichaClienteAtual.migracoes) || [];
+    renderFichaChat(chat, montarFichaChatEventos(fichaTimelineEventosCache, migracoes));
+  } else {
+    chat.innerHTML = '<p class="placeholder">Carregando...</p>';
+    carregarFichaDetalhadoChat(implantacao, false, card);
+  }
+
+  return card;
+}
+
+// Abas por área dentro da aba Histórico do sidebar — "Timeline" (padrão ao
+// abrir) é o atalho pra linha do tempo de Implantação, "Detalhado" é o
+// conteúdo que antes se chamava "Geral" (tentativas de migração). As áreas
+// CS/Treinamento/Suporte/Comercial ainda não têm uma fonte de registros
+// associada a elas; ficam com um placeholder até existir o que filtrar.
+const FICHA_HISTORICO_AREAS = [
+  ["timeline", "Timeline"],
+  ["detalhado", "Detalhado"],
+  ["cs", "CS"],
+  ["treinamento", "Treinamento"],
+  ["suporte", "Suporte"],
+  ["comercial", "Comercial"],
+];
+let fichaHistoricoAreaAtual = "timeline";
+
+function construirFichaHistoricoAbas(ativa) {
+  const nav = document.createElement("div");
+  nav.className = "ficha-subabas";
+  nav.setAttribute("role", "tablist");
+  FICHA_HISTORICO_AREAS.forEach(([chave, rotulo]) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ficha-subaba" + (chave === ativa ? " ativo" : "");
+    btn.textContent = rotulo;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", String(chave === ativa));
+    btn.addEventListener("click", () => {
+      if (chave === fichaHistoricoAreaAtual) return;
+      fichaHistoricoAreaAtual = chave;
+      mostrarFichaAba("historico");
+    });
+    nav.appendChild(btn);
+  });
+  return nav;
+}
+
+function construirFichaHistorico(implantacao, migracao) {
+  const wrap = document.createElement("div");
+  wrap.className = "ficha-historico-wrap";
+  wrap.appendChild(construirFichaHistoricoAbas(fichaHistoricoAreaAtual));
+
+  if (fichaHistoricoAreaAtual === "timeline") {
+    wrap.appendChild(construirFichaTimelineCard(implantacao));
+  } else if (fichaHistoricoAreaAtual === "detalhado") {
+    wrap.appendChild(construirFichaDetalhadoChat(implantacao));
+  } else {
+    const nomeArea = (FICHA_HISTORICO_AREAS.find(([chave]) => chave === fichaHistoricoAreaAtual) || [])[1] || "";
+    const card = document.createElement("div");
+    card.className = "ficha-painel";
+    card.appendChild(construirFichaHistoricoVazio(
+      "Nada por aqui ainda",
+      `Essa área (${nomeArea}) ainda não tem uma fonte de registros associada a ela.`
+    ));
+    wrap.appendChild(card);
+  }
+  return wrap;
 }
 
 function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin, subAba = "geral") {
   const wrap = document.createElement("div");
   wrap.appendChild(construirFichaSubAbas(subAba));
-  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
 
   if (subAba === "informacoes") {
     if (implantacao) wrap.appendChild(construirFichaLinhaContato(implantacao));
@@ -11445,10 +20060,6 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
     }
     return wrap;
   }
-  if (subAba === "historico") {
-    wrap.appendChild(construirFichaHistoricoCard(implantacao));
-    return wrap;
-  }
 
   // Tags hierárquicas + linha de contato — pra bater o olho na Visão Geral e
   // já entender a situação do cliente, sem precisar abrir Configuração/Editar
@@ -11465,7 +20076,7 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
       if (implantacao.persona) tags.appendChild(criarTagResumo(implantacao.persona, "tag-persona"));
       if (implantacao.flag) {
         const tagFlag = criarTagResumo(implantacao.flag, classeFlagTag(implantacao.flag));
-        tagFlag.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>');
+        tagFlag.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>');
         tags.appendChild(tagFlag);
       }
       if (implantacaoAtrasada(implantacao)) tags.appendChild(criarTagResumo("Atrasado", "tag-flag-red"));
@@ -11501,7 +20112,6 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
 
 function construirFichaImplantacao(implantacao, migracao) {
   const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
 
   if (!implantacao) {
     const p = document.createElement("p");
@@ -11757,7 +20367,6 @@ function renderResumoModelos(container, resumo) {
 
 function construirFichaMigracao(implantacao, migracao, migracoes) {
   const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
 
   if (!migracao) {
     const p = document.createElement("p");
@@ -11947,263 +20556,34 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
   return wrap;
 }
 
-// Botões de Consulta/Importação (Fase 3b) — mesmos endpoints/modais de
-// sempre, só que sempre mandando o idcentral da Ficha, e com resultado
-// renderizado localmente aqui dentro (não no painel global #saida, que fica
-// escondido tanto em Ferramentas Auxiliares quanto na Ficha).
-const CONSULTA_TIPOS_FICHA = [
-  ["clientes", "Listar Clientes"],
-  ["veiculos", "Listar Veículos"],
-  ["rastreadores", "Listar Rastreadores"],
-  ["pessoas", "Listar Pessoas"],
-  ["desatualizados", "Listar Desatualizados"],
-  ["uos", "Listar UO's"],
-];
-
-function construirFichaConsulta(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin) {
-  const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
-  wrap.appendChild(construirFichaCredencialSecao(idcentral, credencialConfigurada, credencialLogin));
-
-  const autenticadoAqui = estado.autenticado && estado.idcentralAutenticado === idcentral;
-
-  const sec = document.createElement("div");
-  sec.className = "ficha-secao";
-  const h = document.createElement("h3");
-  h.textContent = "Consulta";
-  sec.appendChild(h);
-
-  const outputWrap = document.createElement("div");
-  outputWrap.className = "ficha-consulta-resultado";
-
-  const btnExportar = document.createElement("button");
-  btnExportar.type = "button";
-  btnExportar.className = "btn-secondary hidden";
-  btnExportar.textContent = "Exportar Excel";
-
-  let ultimaConsultaLocal = null;
-
-  function mostrarErroLocal(msg) {
-    outputWrap.innerHTML = "";
-    const p = document.createElement("p");
-    p.className = "placeholder";
-    p.style.color = "#b91c1c";
-    p.textContent = "Erro: " + msg;
-    outputWrap.appendChild(p);
-  }
-
-  function renderResultadoLocal(headers, rows, sortState) {
-    outputWrap.innerHTML = "";
-    const table = document.createElement("table");
-    table.className = "tabela-saida";
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
-    headers.forEach((rotulo, i) => {
-      const th = document.createElement("th");
-      th.className = "th-ordenavel";
-      th.textContent = rotulo;
-      if (sortState && sortState.coluna === i) {
-        const seta = document.createElement("span");
-        seta.className = "seta-ordenacao";
-        seta.textContent = sortState.direcao === 1 ? " ▲" : " ▼";
-        th.appendChild(seta);
-      }
-      th.addEventListener("click", () => {
-        const direcao = sortState && sortState.coluna === i ? -sortState.direcao : 1;
-        renderResultadoLocal(headers, ordenarLinhas(rows, i, direcao), { coluna: i, direcao });
-      });
-      trHead.appendChild(th);
-    });
-    thead.appendChild(trHead);
-    table.appendChild(thead);
-
-    const tbody = document.createElement("tbody");
-    if (rows.length === 0) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = headers.length;
-      td.textContent = "Nenhum registro encontrado.";
-      td.style.color = "#6b7280";
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-    }
-    rows.forEach((row) => {
-      const tr = document.createElement("tr");
-      row.forEach((v) => {
-        const td = document.createElement("td");
-        td.textContent = v === null || v === undefined ? "" : String(v);
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    outputWrap.appendChild(table);
-  }
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "botoes";
-  CONSULTA_TIPOS_FICHA.forEach(([tipo, rotulo]) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = rotulo;
-    btn.disabled = !autenticadoAqui;
-    btn.addEventListener("click", async () => {
-      outputWrap.innerHTML = '<p class="placeholder">Consultando...</p>';
-      btnExportar.classList.add("hidden");
-      try {
-        const r = await fetch(`/api/list/${tipo}?idcentral=${encodeURIComponent(idcentral)}`);
-        const data = await parseJsonResponse(r);
-        if (!data.ok) return mostrarErroLocal(data.error || "Falha na consulta.");
-        ultimaConsultaLocal = { tipo, headers: data.headers, rows: data.rows };
-        renderResultadoLocal(data.headers, data.rows);
-        btnExportar.classList.remove("hidden");
-      } catch (err) {
-        mostrarErroLocal(String(err));
-      }
-    });
-    toolbar.appendChild(btn);
-  });
-  sec.appendChild(toolbar);
-
-  btnExportar.addEventListener("click", async () => {
-    if (!ultimaConsultaLocal) return;
-    btnExportar.disabled = true;
-    try {
-      const r = await fetch("/api/exportar-excel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ultimaConsultaLocal),
-      });
-      if (!r.ok) throw new Error("Falha ao gerar a planilha.");
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${ultimaConsultaLocal.tipo}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      alert(`Erro ao exportar: ${String(err)}`);
-    } finally {
-      btnExportar.disabled = false;
-    }
-  });
-  sec.appendChild(btnExportar);
-  sec.appendChild(outputWrap);
-
-  if (!autenticadoAqui) {
-    const p = document.createElement("p");
-    p.className = "placeholder";
-    p.textContent = credencialConfigurada
-      ? "Clique em Autenticar, acima, pra liberar as consultas."
-      : "Cadastre a credencial SSX, acima, pra liberar as consultas.";
-    sec.appendChild(p);
-  }
-
-  wrap.appendChild(sec);
-  return wrap;
-}
-
-function construirFichaImportacao(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin) {
-  const wrap = document.createElement("div");
-  wrap.appendChild(construirFichaHeader(implantacao, migracao, true));
-  wrap.appendChild(construirFichaCredencialSecao(idcentral, credencialConfigurada, credencialLogin));
-
-  const autenticadoAqui = estado.autenticado && estado.idcentralAutenticado === idcentral;
-
-  const secImport = document.createElement("div");
-  secImport.className = "ficha-secao";
-  const hImport = document.createElement("h3");
-  hImport.textContent = "Importação";
-  secImport.appendChild(hImport);
-
-  const toolbarImport = document.createElement("div");
-  toolbarImport.className = "botoes";
-  [
-    ["cliente", "Importar Cliente"],
-    ["veiculo", "Importar Veículo"],
-    [null, "Importar Rastreador"],
-    ["uo", "Importar UO"],
-    ["usuario", "Importar Usuário"],
-    [null, "Importar SimCard"],
-  ].forEach(([tipo, rotulo]) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = rotulo;
-    if (!tipo) {
-      btn.disabled = true;
-      btn.title = "Ainda não implementado";
-    } else {
-      btn.disabled = !autenticadoAqui;
-      btn.addEventListener("click", () => abrirModalImport(tipo, idcentral));
-    }
-    toolbarImport.appendChild(btn);
-  });
-  secImport.appendChild(toolbarImport);
-  wrap.appendChild(secImport);
-
-  const secManutencao = document.createElement("div");
-  secManutencao.className = "ficha-secao";
-  const hManutencao = document.createElement("h3");
-  hManutencao.textContent = "Manutenção";
-  secManutencao.appendChild(hManutencao);
-
-  const toolbarManutencao = document.createElement("div");
-  toolbarManutencao.className = "botoes";
-  const btnDeletar = document.createElement("button");
-  btnDeletar.type = "button";
-  btnDeletar.textContent = "Deletar veículos";
-  btnDeletar.disabled = !autenticadoAqui;
-  btnDeletar.addEventListener("click", () => abrirModalDeletarVeiculos(idcentral));
-  toolbarManutencao.appendChild(btnDeletar);
-
-  const btnAssociar = document.createElement("button");
-  btnAssociar.type = "button";
-  btnAssociar.textContent = "Associar rastreadores";
-  btnAssociar.disabled = !autenticadoAqui;
-  btnAssociar.addEventListener("click", () => abrirModalAssociarRastreadores(idcentral));
-  toolbarManutencao.appendChild(btnAssociar);
-  secManutencao.appendChild(toolbarManutencao);
-  wrap.appendChild(secManutencao);
-
-  if (!autenticadoAqui) {
-    const p = document.createElement("p");
-    p.className = "placeholder";
-    p.textContent = credencialConfigurada
-      ? "Clique em Autenticar, acima, pra liberar a importação."
-      : "Cadastre a credencial SSX, acima, pra liberar a importação.";
-    wrap.appendChild(p);
-  }
-
-  return wrap;
-}
-
 function mostrarFichaAba(aba) {
   fichaAbaAtual = aba;
   el("ficha-aba-geral").classList.toggle("ativo", aba === "geral");
   el("ficha-aba-implantacao").classList.toggle("ativo", aba === "implantacao");
   el("ficha-aba-marcos").classList.toggle("ativo", aba === "marcos");
   el("ficha-aba-migracao").classList.toggle("ativo", aba === "migracao");
-  el("ficha-aba-consulta").classList.toggle("ativo", aba === "consulta");
-  el("ficha-aba-importacao").classList.toggle("ativo", aba === "importacao");
+  el("ficha-aba-historico").classList.toggle("ativo", aba === "historico");
 
   const corpo = el("ficha-cliente-corpo");
   corpo.innerHTML = "";
+  // Só a sub-aba Detalhado (chat de acontecimentos) precisa travar a altura
+  // do painel na tela toda — as outras abas continuam rolando a página
+  // normalmente. Ver regras em "Aba Detalhado (Histórico)" no style.css.
+  el("tela-ficha-cliente").classList.toggle("ficha-historico-detalhado-ativo", aba === "historico" && fichaHistoricoAreaAtual === "detalhado");
   if (!fichaClienteAtual) return;
   const { idcentral, implantacao, migracao, migracoes, credencial_configurada, credencial_login } = fichaClienteAtual;
   if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login, fichaSubAbaAtual));
   if (aba === "implantacao") corpo.appendChild(construirFichaImplantacao(implantacao, migracao));
   if (aba === "marcos") corpo.appendChild(construirFichaMarcos(implantacao, migracao));
   if (aba === "migracao") corpo.appendChild(construirFichaMigracao(implantacao, migracao, migracoes));
-  if (aba === "consulta") corpo.appendChild(construirFichaConsulta(idcentral, implantacao, migracao, credencial_configurada, credencial_login));
-  if (aba === "importacao") corpo.appendChild(construirFichaImportacao(idcentral, implantacao, migracao, credencial_configurada, credencial_login));
+  if (aba === "historico") corpo.appendChild(construirFichaHistorico(implantacao, migracao));
 }
 
 async function carregarFichaCliente(idcentral, aba = "geral") {
   fichaClienteAtual = null;
   el("ficha-sidebar-nome").textContent = "Carregando...";
+  const cabecalho = el("ficha-cliente-cabecalho");
+  cabecalho.innerHTML = "";
   const corpo = el("ficha-cliente-corpo");
   corpo.innerHTML = '<p class="placeholder">Carregando...</p>';
   try {
@@ -12218,10 +20598,15 @@ async function carregarFichaCliente(idcentral, aba = "geral") {
     fichaClienteAtual = data;
     const nome = (data.implantacao && data.implantacao.cliente) || (data.migracao && data.migracao.nome) || idcentral;
     el("ficha-sidebar-nome").textContent = nome;
+    // Nome do cliente + engrenagem fica fora do conteúdo que troca a cada aba
+    // (não é mais reconstruído em toda mostrarFichaAba) — menos repetição,
+    // menos espaço de título ocupado em cada aba.
+    cabecalho.innerHTML = "";
+    cabecalho.appendChild(construirFichaHeader(data.implantacao, data.migracao, true));
     el("ficha-aba-migracao").classList.toggle("hidden", !data.migracao);
     // Cliente criado pela tela de Migração sem par na Implantação
-    // (tem_implantacao=false) tem menu enxuto: só Visão Geral, Migração,
-    // Consulta e Importação — sem Implantação/Marcos, que não existem pra ele.
+    // (tem_implantacao=false) tem menu enxuto: só Visão Geral, Migração e
+    // Histórico — sem Implantação/Marcos, que não existem pra ele.
     const semImplantacao = data.implantacao && data.implantacao.tem_implantacao === false;
     el("ficha-aba-implantacao").classList.toggle("hidden", semImplantacao);
     el("ficha-aba-marcos").classList.toggle("hidden", semImplantacao);

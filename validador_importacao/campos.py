@@ -14,7 +14,7 @@ ObrigatorioSpec = Union[bool, Callable[[dict], bool]]
 class CampoSpec:
     chave: str  # chave interna usada no mapeamento (ex.: "codigo_integracao")
     rotulo: str  # nome do campo como aparece na documentação da SSX
-    tipo: str  # "texto" | "byte" | "bool" | "inteiro"
+    tipo: str  # "texto" | "byte" | "bool" | "inteiro" | "decimal" | "data" (AAAA-MM-DD)
     tamanho_max: Optional[int] = None
     obrigatorio: ObrigatorioSpec = False
     valores_validos: Optional[Sequence[str]] = None

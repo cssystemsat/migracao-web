@@ -8,9 +8,11 @@ import threading
 import time
 import unicodedata
 import uuid
+import zipfile
 import zlib
 from datetime import datetime, timezone
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 import firebase_admin
 import openpyxl
@@ -23,8 +25,18 @@ from googleapiclient.errors import HttpError
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from sqlalchemy.exc import IntegrityError
+
+import conversor_clientes
+import conversor_veiculos
+import conversor_rastreadores
+import conversor_simcards
+import conversor_areas
+import conversor_uo
+import conversor_colaboradores
 import conversorkml
 import planilha_migracao
+import usuarios_sql
 import validador_importacao
 from auditoria import diff_campos, registrar_acao
 
@@ -41,6 +53,19 @@ app.jinja_env.auto_reload = True
 APP_VERSION = "4.0"
 
 BASE_URL = "https://integration.systemsatx.com.br"
+
+# "aniversario" (Minha Conta) é "MM-DD" sem fuso — compara sempre contra o
+# dia civil em Brasília, não o UTC do servidor (virada de dia diferente perto
+# da meia-noite senão).
+FUSO_BR = ZoneInfo("America/Sao_Paulo")
+
+
+def _hoje_mm_dd():
+    return datetime.now(FUSO_BR).strftime("%m-%d")
+
+
+def _hoje_iso():
+    return datetime.now(FUSO_BR).strftime("%Y-%m-%d")
 
 # --- FIREBASE / FIRESTORE (banco de dados) ---
 # Credencial vem inteira (o JSON da chave de serviço) numa única variável de
@@ -60,13 +85,10 @@ CREDENCIAIS_COLLECTION = "credenciais"
 CREDENCIAIS_CLIENTE_COLLECTION = "credenciais_cliente"
 
 # --- CONTAS DE ACESSO À PRÓPRIA FERRAMENTA (protege o app quando publicado na internet) ---
-# Guardadas no Firestore (coleção "app_usuarios") — a migração dessa tabela pro Postgres
-# (Fase 1 de schema_relacional_alvo_v3, ver models.Usuario/migrar_usuarios_para_postgres.py)
-# está PRONTA MAS NÃO ATIVA: produção hoje é o Render (usuários reais, sem Postgres
-# provisionado lá ainda) e o destino combinado pro Postgres é o servidor da empresa,
-# ainda sem data definida. Quando esse banco existir de verdade, trocar estas funções
-# pra usar obter_sessao()/models.Usuario (a versão anterior deste arquivo já tinha essa
-# implementação pronta) e rodar migrar_usuarios_para_postgres.py --apply uma vez.
+# Login/usuários são Postgres (ver usuarios_sql.py e docs/HISTORICO_DECISOES.md).
+# APP_USUARIOS_COLLECTION continua existindo só porque migrar_usuarios_para_postgres.py
+# ainda lê o Firestore como ORIGEM da cópia de dados — a coleção em si fica intacta lá,
+# sem uso pelo app, como backup sem prazo de remoção.
 #
 # Cada usuário tem: usuário, hash de senha (nunca a senha em texto puro), um "perfil": adm
 # (acesso total, único que gerencia outros usuários), analista (opera só nos clientes da
@@ -80,59 +102,15 @@ PERFIL_PADRAO = "analista"
 AREAS_USUARIO = ["CS - Implantação", "CS - Onboarding", "CS - Ongoing", "Treinamento", "Suporte", "Comercial"]
 
 
-def _sem_usuarios_cadastrados():
-    return len(list(db.collection(APP_USUARIOS_COLLECTION).limit(1).stream())) == 0
-
-
-def _buscar_usuario_app(usuario):
-    usuario_norm = usuario.strip().lower()
-    docs = db.collection(APP_USUARIOS_COLLECTION).where(
-        filter=FieldFilter("usuario_norm", "==", usuario_norm)
-    ).limit(1).stream()
-    for d in docs:
-        return dict(d.to_dict(), id=d.id)
-    return None
-
-
-def _buscar_usuario_por_id(usuario_id):
-    if not usuario_id:
-        return None
-    doc = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id).get()
-    return dict(doc.to_dict(), id=doc.id) if doc.exists else None
-
-
 def _perfil_de_usuario(dados_usuario):
-    """Lê o perfil de um doc de app_usuarios. Compatível com docs antigos que só têm
-    a flag booleana 'admin' (de antes do perfil/área existirem): admin=True vira 'adm',
-    o resto vira o perfil padrão."""
+    """Lê o perfil de um dict de usuário. Compatível com docs antigos (de antes da
+    migração pro Postgres) que só têm a flag booleana 'admin': admin=True vira 'adm',
+    o resto vira o perfil padrão. Toda linha no Postgres já tem 'perfil' resolvido
+    (o script de migração de dados já aplicou esse fallback na cópia)."""
     perfil = dados_usuario.get("perfil")
     if perfil in PERFIS_USUARIO:
         return perfil
     return "adm" if dados_usuario.get("admin") else PERFIL_PADRAO
-
-
-def _contar_admins(excluir_id=None):
-    total = 0
-    for d in db.collection(APP_USUARIOS_COLLECTION).stream():
-        if excluir_id and d.id == excluir_id:
-            continue
-        if _perfil_de_usuario(d.to_dict()) == "adm":
-            total += 1
-    return total
-
-
-def _criar_usuario_app(usuario, senha, perfil=PERFIL_PADRAO, area=None, nome_responsavel=""):
-    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document()
-    dados = {
-        "usuario": usuario,
-        "usuario_norm": usuario.strip().lower(),
-        "senha_hash": generate_password_hash(senha),
-        "perfil": perfil,
-        "area": area or None,
-        "nome_responsavel": nome_responsavel,
-    }
-    doc_ref.set(dados)
-    return dict(dados, id=doc_ref.id)
 
 
 def _sessao_login_app(usuario_doc):
@@ -149,7 +127,7 @@ def _sessao_login_app(usuario_doc):
     # foto (base64, pode passar de 6KB) direto aqui fazia o cookie de sessão inteiro
     # ser descartado silenciosamente pelo navegador, e o login parecia "voltar pra
     # tela de login" mesmo com usuário/senha corretos. Por isso só a flag aqui — a
-    # foto em si é servida por /api/app-usuario/foto, lida do Firestore por request.
+    # foto em si é servida por /api/app-usuario/foto, lida do Postgres por request.
     _marcar_foto_na_sessao(usuario_doc.get("foto") or "")
 
 
@@ -186,9 +164,9 @@ def exigir_login_app():
         return redirect(url_for("login_app"))
     # Sessão aberta antes da v4.0 só tem "app_usuario_admin" (sem perfil) —
     # sem isso o admin logado desde antes do deploy vira não-admin até sair e
-    # entrar de novo. Recarrega do Firestore uma vez e completa a sessão.
+    # entrar de novo. Recarrega do Postgres uma vez e completa a sessão.
     if "app_usuario_perfil" not in session:
-        usuario_doc = _buscar_usuario_por_id(session.get("app_usuario_id"))
+        usuario_doc = usuarios_sql.buscar_usuario_por_id(session.get("app_usuario_id"))
         if not usuario_doc:
             session.clear()
             return redirect(url_for("login_app"))
@@ -201,7 +179,7 @@ def login_app():
     # manda direto pro app em vez de reexibir o formulário de login.
     if session.get("app_ok"):
         return redirect(url_for("index"))
-    modo_setup = _sem_usuarios_cadastrados()
+    modo_setup = usuarios_sql.sem_usuarios_cadastrados()
     erro = None
     if request.method == "POST":
         usuario = request.form.get("usuario", "").strip()
@@ -216,11 +194,17 @@ def login_app():
             elif len(senha) < 4:
                 erro = "A senha deve ter pelo menos 4 caracteres."
             else:
-                novo = _criar_usuario_app(usuario, senha, perfil="adm")
-                _sessao_login_app(novo)
-                return redirect(url_for("index"))
+                try:
+                    novo = usuarios_sql.criar_usuario(usuario, senha, perfil="adm")
+                except IntegrityError:
+                    # Alguém mais rápido já concluiu o primeiro acesso nesse meio-tempo
+                    # (banco vazio só acontece uma vez na vida do sistema).
+                    erro = "Alguém já concluiu o primeiro acesso agora — faça login normalmente."
+                else:
+                    _sessao_login_app(novo)
+                    return redirect(url_for("index"))
         else:
-            doc = _buscar_usuario_app(usuario) if usuario else None
+            doc = usuarios_sql.buscar_usuario(usuario) if usuario else None
             if doc and check_password_hash(doc["senha_hash"], senha):
                 _sessao_login_app(doc)
                 return redirect(url_for("index"))
@@ -244,18 +228,7 @@ def logout_app():
 def listar_app_usuarios():
     if not _sou_admin():
         return jsonify(ok=False, error="Apenas administradores podem gerenciar usuários."), 403
-    docs = db.collection(APP_USUARIOS_COLLECTION).stream()
-    lista = [
-        {
-            "id": d.id,
-            "usuario": d.to_dict().get("usuario"),
-            "perfil": _perfil_de_usuario(d.to_dict()),
-            "area": d.to_dict().get("area") or "",
-            "nome_responsavel": d.to_dict().get("nome_responsavel", ""),
-        }
-        for d in docs
-    ]
-    return jsonify(ok=True, usuarios=lista)
+    return jsonify(ok=True, usuarios=usuarios_sql.listar_usuarios())
 
 
 @app.route("/api/app-usuarios/opcoes", methods=["GET"])
@@ -269,17 +242,7 @@ def listar_app_usuarios_opcoes():
     administradores."""
     area = request.args.get("area", "").strip()
     area_prefix = request.args.get("area_prefix", "").strip()
-    docs = db.collection(APP_USUARIOS_COLLECTION).stream()
-    lista = []
-    for d in docs:
-        dados = d.to_dict()
-        area_usuario = dados.get("area") or ""
-        if area and area_usuario != area:
-            continue
-        if area_prefix and not area_usuario.startswith(area_prefix):
-            continue
-        lista.append({"id": d.id, "nome": (dados.get("nome_responsavel") or dados.get("usuario") or "")})
-    lista.sort(key=lambda u: u["nome"].lower())
+    lista = usuarios_sql.listar_usuarios_opcoes(area=area, area_prefix=area_prefix)
     return jsonify(ok=True, usuarios=lista)
 
 
@@ -301,9 +264,9 @@ def criar_app_usuario():
         return jsonify(ok=False, error="Informe usuário e senha."), 400
     if len(senha) < 4:
         return jsonify(ok=False, error="A senha deve ter pelo menos 4 caracteres."), 400
-    if _buscar_usuario_app(usuario):
+    if usuarios_sql.buscar_usuario(usuario):
         return jsonify(ok=False, error="Já existe um usuário com esse nome."), 400
-    novo = _criar_usuario_app(usuario, senha, perfil=perfil, area=area, nome_responsavel=nome_responsavel)
+    novo = usuarios_sql.criar_usuario(usuario, senha, perfil=perfil, area=area, nome_responsavel=nome_responsavel)
     return jsonify(ok=True, usuario=dict(
         id=novo["id"], usuario=novo["usuario"], perfil=novo["perfil"], area=novo["area"] or "",
         nome_responsavel=novo["nome_responsavel"],
@@ -315,12 +278,10 @@ def editar_app_usuario(usuario_id):
     if not _sou_admin():
         return jsonify(ok=False, error="Apenas administradores podem gerenciar usuários."), 403
     data = request.get_json(force=True) or {}
-    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+    atual = usuarios_sql.buscar_usuario_por_id(usuario_id)
+    if not atual:
         return jsonify(ok=False, error="Usuário não encontrado."), 404
 
-    atual = doc.to_dict()
     novo_nome = str(data.get("usuario", atual["usuario"])).strip()
     nova_senha = str(data.get("senha", "")).strip()
     perfil_atual = _perfil_de_usuario(atual)
@@ -340,35 +301,30 @@ def editar_app_usuario(usuario_id):
     if nova_senha and len(nova_senha) < 4:
         return jsonify(ok=False, error="A senha deve ter pelo menos 4 caracteres."), 400
 
-    outro = _buscar_usuario_app(novo_nome)
+    outro = usuarios_sql.buscar_usuario(novo_nome)
     if outro and outro["id"] != usuario_id:
         return jsonify(ok=False, error="Já existe um usuário com esse nome."), 400
 
     # Não deixa remover o último administrador (senão ninguém mais gerencia usuários).
     if perfil_atual == "adm" and novo_perfil != "adm":
-        if _contar_admins(excluir_id=usuario_id) == 0:
+        if usuarios_sql.contar_admins(excluir_id=usuario_id) == 0:
             return jsonify(ok=False, error="Precisa existir pelo menos um administrador."), 400
 
-    dados = {
+    campos = {
         "usuario": novo_nome,
         "usuario_norm": novo_nome.lower(),
         "perfil": novo_perfil,
         "area": nova_area,
         "nome_responsavel": novo_responsavel,
-        "senha_hash": atual["senha_hash"],
-        # set() substitui o doc inteiro — sem isso, editar um usuário aqui (tela
-        # de admin) apagaria os campos de perfil pessoal (ver /api/app-usuario/perfil).
-        "nome": atual.get("nome", ""),
-        "sobrenome": atual.get("sobrenome", ""),
-        "aniversario": atual.get("aniversario", ""),
-        "telefone_profissional": atual.get("telefone_profissional", ""),
-        "email": atual.get("email", ""),
-        "foto": atual.get("foto", ""),
     }
+    # Update parcial (só os atributos passados) — ao contrário do antigo doc_ref.set()
+    # do Firestore, não precisa recopiar nome/sobrenome/aniversario/telefone/email pra
+    # não apagar os campos de perfil pessoal (ver /api/app-usuario/perfil); e nunca
+    # toca a foto, que fica em tabela própria.
     if nova_senha:
-        dados["senha_hash"] = generate_password_hash(nova_senha)
+        campos["senha_hash"] = generate_password_hash(nova_senha)
 
-    doc_ref.set(dados)
+    usuarios_sql.atualizar_usuario(usuario_id, **campos)
 
     if usuario_id == session.get("app_usuario_id"):
         session["app_usuario_nome"] = novo_nome
@@ -387,14 +343,13 @@ def excluir_app_usuario(usuario_id):
         return jsonify(ok=False, error="Apenas administradores podem gerenciar usuários."), 403
     if usuario_id == session.get("app_usuario_id"):
         return jsonify(ok=False, error="Você não pode excluir o próprio usuário enquanto está logado."), 400
-    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+    atual = usuarios_sql.buscar_usuario_por_id(usuario_id)
+    if not atual:
         return jsonify(ok=False, error="Usuário não encontrado."), 404
-    if _perfil_de_usuario(doc.to_dict()) == "adm":
-        if _contar_admins(excluir_id=usuario_id) == 0:
+    if _perfil_de_usuario(atual) == "adm":
+        if usuarios_sql.contar_admins(excluir_id=usuario_id) == 0:
             return jsonify(ok=False, error="Precisa existir pelo menos um administrador."), 400
-    doc_ref.delete()
+    usuarios_sql.excluir_usuario(usuario_id)
     return jsonify(ok=True)
 
 
@@ -408,13 +363,12 @@ def trocar_minha_senha_app():
     senha_nova = str(data.get("senha_nova", ""))
     if len(senha_nova) < 4:
         return jsonify(ok=False, error="A nova senha deve ter pelo menos 4 caracteres."), 400
-    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+    atual = usuarios_sql.buscar_usuario_por_id(usuario_id)
+    if not atual:
         return jsonify(ok=False, error="Usuário não encontrado."), 404
-    if not check_password_hash(doc.to_dict()["senha_hash"], senha_atual):
+    if not check_password_hash(atual["senha_hash"], senha_atual):
         return jsonify(ok=False, error="Senha atual incorreta."), 400
-    doc_ref.update({"senha_hash": generate_password_hash(senha_nova)})
+    usuarios_sql.atualizar_senha(usuario_id, senha_nova)
     return jsonify(ok=True)
 
 
@@ -425,6 +379,7 @@ def _perfil_pessoal(usuario_doc):
         "nome": usuario_doc.get("nome", ""),
         "sobrenome": usuario_doc.get("sobrenome", ""),
         "aniversario": usuario_doc.get("aniversario", ""),
+        "aniversario_hoje": bool(usuario_doc.get("aniversario")) and usuario_doc.get("aniversario") == _hoje_mm_dd(),
         "telefone_profissional": usuario_doc.get("telefone_profissional", ""),
         "email": usuario_doc.get("email", ""),
         "foto": usuario_doc.get("foto", ""),
@@ -442,7 +397,7 @@ def obter_meu_perfil():
     usuario_id = session.get("app_usuario_id")
     if not usuario_id:
         return jsonify(ok=False, error="Não autenticado."), 401
-    usuario_doc = _buscar_usuario_por_id(usuario_id)
+    usuario_doc = usuarios_sql.buscar_usuario_por_id(usuario_id)
     if not usuario_doc:
         return jsonify(ok=False, error="Usuário não encontrado."), 404
     return jsonify(ok=True, perfil=_perfil_pessoal(usuario_doc))
@@ -465,8 +420,7 @@ def editar_meu_perfil():
     if erro_foto:
         return jsonify(ok=False, error=erro_foto), 400
 
-    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id)
-    if not doc_ref.get().exists:
+    if not usuarios_sql.buscar_usuario_por_id(usuario_id):
         return jsonify(ok=False, error="Usuário não encontrado."), 404
 
     dados = {
@@ -475,11 +429,11 @@ def editar_meu_perfil():
         "aniversario": aniversario,
         "telefone_profissional": str(data.get("telefone_profissional", "")).strip(),
         "email": str(data.get("email", "")).strip(),
-        "foto": foto,
     }
-    doc_ref.update(dados)
+    usuarios_sql.atualizar_perfil_pessoal(usuario_id, dados)
+    usuarios_sql.definir_foto(usuario_id, foto)
     _marcar_foto_na_sessao(foto)
-    return jsonify(ok=True, perfil=_perfil_pessoal(dict(dados, usuario=session.get("app_usuario_nome", ""))))
+    return jsonify(ok=True, perfil=_perfil_pessoal(dict(dados, usuario=session.get("app_usuario_nome", ""), foto=foto)))
 
 
 def _validar_foto_perfil(foto):
@@ -510,10 +464,9 @@ def salvar_minha_foto():
     erro = _validar_foto_perfil(foto)
     if erro:
         return jsonify(ok=False, error=erro), 400
-    doc_ref = db.collection(APP_USUARIOS_COLLECTION).document(usuario_id)
-    if not doc_ref.get().exists:
+    if not usuarios_sql.buscar_usuario_por_id(usuario_id):
         return jsonify(ok=False, error="Usuário não encontrado."), 404
-    doc_ref.update({"foto": foto})
+    usuarios_sql.definir_foto(usuario_id, foto)
     _marcar_foto_na_sessao(foto)
     return jsonify(ok=True)
 
@@ -525,8 +478,7 @@ def foto_meu_perfil():
     usuario_id = session.get("app_usuario_id")
     if not usuario_id:
         return "", 401
-    usuario_doc = _buscar_usuario_por_id(usuario_id)
-    foto = usuario_doc.get("foto") if usuario_doc else None
+    foto = usuarios_sql.obter_foto(usuario_id)
     if not foto or not foto.startswith("data:"):
         return "", 404
     cabecalho, _, b64 = foto.partition(",")
@@ -546,8 +498,15 @@ INT_FIELDS = [
     "Tracker1.Simcard2.CountryCode", "Tracker1.Simcard2.AreaCode", "Tracker1.Simcard2.PhoneNumber",
     "Tracker2.Simcard1.CountryCode", "Tracker2.Simcard1.AreaCode", "Tracker2.Simcard1.PhoneNumber",
     "Tracker2.Simcard2.CountryCode", "Tracker2.Simcard2.AreaCode", "Tracker2.Simcard2.PhoneNumber",
+    "BillingCylcleEndDay",
+    "Type", "Tolerance",
+    "IdentifierType", "AccessCodeType", "ConsolidationType", "LicenseRegistrationType",
 ]
-BOOL_FIELDS = ["Active", "ChangePasswordNextLogin", "SendPasswordEmail"]
+BOOL_FIELDS = ["Active", "ChangePasswordNextLogin", "SendPasswordEmail", "DaylightSaving"]
+# Campos de ponto flutuante (number/double no Swagger) — só surgiram com
+# SimCard/Insert (Price, MegabyteLimit); nenhum campo anterior precisava
+# dessa coerção (os já existentes eram todos int ou bool).
+FLOAT_FIELDS = ["Price", "MegabyteLimit"]
 
 PARAMS = {
     "cliente": {
@@ -562,14 +521,17 @@ PARAMS = {
             "UserProfileTemplateIntegrationCode", "PhoneNumber", "CellPhoneNumber",
         ],
     },
+    # Campos confirmados no Swagger (schema OrganizationalUnitInsertParameter,
+    # additionalProperties:false) em 2026-10-20 — a lista anterior ("Note",
+    # "Active", "ExternalIntegrationCode") não existe nesse schema e faltava
+    # "Description"; corrigido pra bater exatamente com a API real.
     "uo": {
         "titulo": "UO",
         "endpoint": "/Administration/OrganizationalUnit/Insert",
         "defaults": {},
         "campos": [
-            "Name", "OrganizationalUnitIntegrationCode", "TypeOrganizationalUnit",
-            "ParentOrganizationalUnitIntegrationCode", "ClientIntegrationCode",
-            "Note", "Active", "ExternalIntegrationCode",
+            "OrganizationalUnitIntegrationCode", "Name", "TypeOrganizationalUnit",
+            "ParentOrganizationalUnitIntegrationCode", "ClientIntegrationCode", "Description",
         ],
     },
     "usuario": {
@@ -599,6 +561,59 @@ PARAMS = {
             "Tracker1.Simcard1.ICCID", "Tracker1.Simcard1.APN",
             "Tracker1.Simcard1.CountryCode", "Tracker1.Simcard1.AreaCode",
             "Tracker1.Simcard1.PhoneNumber",
+        ],
+    },
+    "rastreador": {
+        "titulo": "Rastreador",
+        "endpoint": "/Administration/Tracker/Insert",
+        "defaults": {},
+        "campos": [
+            "TrackerIntegrationCode", "IdTracker", "AuxiliaryId",
+            "TrackerTemplateIntegrationCode", "StatusIntegrationCode",
+            "ClientIntegrationCode", "AcquisitionDate", "ICCID1", "ICCID2", "IMEI",
+        ],
+    },
+    "simcard": {
+        "titulo": "SIM Card",
+        "endpoint": "/Administration/SimCard/Insert",
+        "defaults": {},
+        "campos": [
+            "ICCID", "APNDomain", "CountryCallingCode", "AreaCallingCode", "PhoneNumber",
+            "BillingCylcleEndDay", "Price", "MegabyteLimit", "PIN", "PUK",
+        ],
+    },
+    # Geography/Insert não aceita "ColorCode" (cor é só do arquivo de
+    # importação/KML, não da API REST — confirmado no Swagger) e exige
+    # "Tolerance" sempre, mesmo pra Área/Rota (o manual de arquivo só exige
+    # pra Ponto) — ver conversor_areas_usar_como_upload, que preenche 0
+    # quando a planilha deixou em branco.
+    "area": {
+        "titulo": "Área",
+        "endpoint": "/Administration/Geography/Insert",
+        "defaults": {},
+        "campos": [
+            "GeographyIntegrationCode", "Name", "Description", "Type", "Area",
+            "Tolerance", "GroupIntegrationCode", "ListCategoryIntegrationCode",
+        ],
+    },
+    # Person/InsertPerson não tem campo pra "Passageiro ou motorista" (só
+    # existe no layout de arquivo) e "OrganizationUnitIntegrationCode" aqui
+    # é SEM o "al" de "Organizational" — nome diferente do campo
+    # equivalente em OrganizationalUnit/Insert, confirmado no Swagger (mesma
+    # pegadinha de nomenclatura já vista entre outros endpoints da SSX).
+    "colaborador": {
+        "titulo": "Colaborador",
+        "endpoint": "/Administration/Person/InsertPerson",
+        "defaults": {},
+        "campos": [
+            "PersonIntegrationCode", "OrganizationUnitIntegrationCode", "Name", "Email",
+            "CountryCode", "AreaCode", "CellPhoneNumber", "PhoneNumber", "IDCard", "CPF",
+            "DateOfBirth", "Gender", "IdentifierType", "AccessCodeType", "AccessCode",
+            "TimeZone", "DaylightSaving", "Language", "Country",
+            "PersonRoleIntegrationCode", "WorkScheduleIntegrationCode", "ConsolidationType",
+            "Registration", "LicenseDriver", "ExpirationDateLicenseDriver",
+            "EmissionDateLicenseDriver", "FirstDateLicenseDriver", "LicenseRegistrationType",
+            "UserProfileTemplateIntegrationCode", "Login", "Password",
         ],
     },
 }
@@ -653,8 +668,251 @@ LABELS = {
         "Tracker1.Simcard1.AreaCode": "DDD",
         "Tracker1.Simcard1.PhoneNumber": "Número da linha",
     },
-    "uo": {},
+    "rastreador": {
+        "TrackerIntegrationCode": "Código de integração",
+        "IdTracker": "Identificação",
+        "AuxiliaryId": "Identificação auxiliar",
+        "TrackerTemplateIntegrationCode": "Template do rastreador",
+        "StatusIntegrationCode": "Status do rastreador",
+        "ClientIntegrationCode": "Código de integração do cliente",
+        "AcquisitionDate": "Data de aquisição",
+        "ICCID1": "ICCID 1",
+        "ICCID2": "ICCID 2",
+        "IMEI": "IMEI",
+    },
+    "simcard": {
+        "ICCID": "ICCID",
+        "APNDomain": "Domínio da APN",
+        "CountryCallingCode": "DDI",
+        "AreaCallingCode": "DDD",
+        "PhoneNumber": "Telefone",
+        "BillingCylcleEndDay": "Dia de corte",
+        "Price": "Valor do plano",
+        "MegabyteLimit": "Limite de megabytes",
+        "PIN": "PIN",
+        "PUK": "PUK",
+    },
+    "uo": {
+        "OrganizationalUnitIntegrationCode": "Código de integração",
+        "Name": "Nome",
+        "TypeOrganizationalUnit": "Tipo da Unidade Organizacional",
+        "ParentOrganizationalUnitIntegrationCode": "Código de integração da Unidade Organizacional pai",
+        "ClientIntegrationCode": "Código de integração do cliente",
+        "Description": "Descrição",
+    },
     "usuario": {},
+    "area": {
+        "GeographyIntegrationCode": "Código de integração",
+        "Name": "Nome",
+        "Description": "Descrição",
+        "Type": "Tipo",
+        "Area": "Coordenadas",
+        "Tolerance": "Tolerância",
+        "GroupIntegrationCode": "Grupo",
+        "ListCategoryIntegrationCode": "Categoria",
+    },
+    "colaborador": {
+        "PersonIntegrationCode": "Código de integração",
+        "OrganizationUnitIntegrationCode": "Código de integração da unidade organizacional",
+        "Name": "Nome",
+        "Email": "E-mail",
+        "CountryCode": "DDI",
+        "AreaCode": "DDD",
+        "CellPhoneNumber": "Celular",
+        "PhoneNumber": "Telefone",
+        "IDCard": "Identidade",
+        "CPF": "CPF",
+        "DateOfBirth": "Data de nascimento",
+        "Gender": "Sexo",
+        "IdentifierType": "Tipo do identificador",
+        "AccessCodeType": "Tipo de código do identificador",
+        "AccessCode": "Código de acesso do identificador",
+        "TimeZone": "GMT",
+        "DaylightSaving": "Horário de verão",
+        "Language": "Idioma",
+        "Country": "País",
+        "PersonRoleIntegrationCode": "Código de integração do cargo",
+        "WorkScheduleIntegrationCode": "Código de integração da escala",
+        "ConsolidationType": "Tipo de consolidação da jornada",
+        "Registration": "Matrícula",
+        "LicenseDriver": "CNH",
+        "ExpirationDateLicenseDriver": "Validade da CNH",
+        "EmissionDateLicenseDriver": "Emissão da CNH",
+        "FirstDateLicenseDriver": "1ª Habilitação",
+        "LicenseRegistrationType": "Categoria da CNH",
+        "UserProfileTemplateIntegrationCode": "Perfil de acesso do usuário",
+        "Login": "Login",
+        "Password": "Senha",
+    },
+}
+
+# Correspondência entre os campos do Conversor de Clientes (chave de
+# validador_importacao/tipo_cliente.py CAMPOS_CLIENTE) e os aceitos pela API
+# de importação (PARAMS["cliente"]) — usada só pra pré-selecionar o
+# mapeamento quando "Importar via API" reaproveita os dados já carregados no
+# Conversor (ver /api/conversor-clientes/usar-como-upload). É correspondência
+# de SIGNIFICADO, não de nome parecido — "registro" = "IE / RG" e "perfil_acesso"
+# = "Template de perfil de acesso" não têm nenhuma palavra em comum, por isso
+# fica explícita aqui em vez de depender do auto-mapeamento por texto do
+# modal genérico. Campo do Conversor sem entrada aqui (status, bloqueado,
+# endereço, idioma, código integração pessoa, ...) não existe na API — fica
+# de fora do mapeamento sugerido, a pessoa decide se usa API ou CSV.
+CONVERSOR_CLIENTES_PARA_API = {
+    "codigo_integracao": "ClientIntegrationCode",
+    "template_cliente": "ClientTemplateIntegrationCode",
+    "unidade_organizacional": "OrganizationalUnitIntegrationCode",
+    "codigo": "Code",
+    "cliente_tipo": "ClientType",
+    "nome": "TradingName",
+    "razao_social": "CompanyName",
+    "cpf_cnpj": "DocumentNumber",
+    "registro": "RegisterNumber",
+    "procedimento_atendimento": "CustomerSupportProcedure",
+    "nome_usuario": "UserName",
+    "login": "Login",
+    "senha": "Password",
+    "perfil_acesso": "UserProfileTemplateIntegrationCode",
+    "telefone": "PhoneNumber",
+    "celular": "CellPhoneNumber",
+}
+
+# Mesma ideia de CONVERSOR_CLIENTES_PARA_API, mas pro Conversor de Veículos:
+# chave de validador_importacao/tipo_veiculo.py CAMPOS_VEICULO -> campo
+# aceito pela API de importação (PARAMS["veiculo"]). A API só aceita o
+# Rastreador 1 com 1 SIM card (Tracker1.Simcard1.*) — sem os campos de status
+# do mapa (têm default fixo no Insert), responsável, motorista, rastreador 2
+# nem o 2º SIM card do rastreador 1: esses ficam de fora do mapeamento
+# sugerido, só saem pelo arquivo .txt (que leva o layout completo).
+CONVERSOR_VEICULOS_PARA_API = {
+    "codigo_integracao_veiculo": "VehicleIntegrationCode",
+    "codigo_integracao_cliente": "ClientIntegrationCode",
+    "identificacao": "Identification",
+    "placa": "LicensePlate",
+    "chassi": "ChassiNumber",
+    "renavam": "RenavamNumber",
+    "cor": "Color",
+    "uf": "FederalState",
+    "cidade": "City",
+    "ano_modelo": "ModelYear",
+    "ano_fabricacao": "FabricationYear",
+    "combustivel": "Fuel",
+    "qr_code": "QRCode",
+    "codigo_fipe": "FipeCode",
+    "icone_mapa": "IdMapIcon",
+    "cor_icone_mapa": "IdMapIconColor",
+    "veiculo_cliente": "ClientVehicleIntegrationCode",
+    "rastreador1_codigo_integracao": "Tracker1.TrackerIntegrationCode",
+    "rastreador1_identificacao": "Tracker1.IdTracker",
+    "rastreador1_template": "Tracker1.TrackerTemplateIntegrationCode",
+    "rastreador1_imei": "Tracker1.TrackerIMEI",
+    "rastreador1_iccid1": "Tracker1.Simcard1.ICCID",
+    "rastreador1_apn1": "Tracker1.Simcard1.APN",
+    "rastreador1_ddi1": "Tracker1.Simcard1.CountryCode",
+    "rastreador1_ddd1": "Tracker1.Simcard1.AreaCode",
+    "rastreador1_telefone1": "Tracker1.Simcard1.PhoneNumber",
+}
+
+# Idem, mas pro Conversor de Rastreadores: chave de
+# validador_importacao/tipo_rastreador.py CAMPOS_RASTREADOR -> campo aceito
+# por PARAMS["rastreador"] (Tracker/Insert). Domínio pequeno o bastante pra
+# mapear TODOS os 10 campos do layout oficial, diferente de Cliente/Veículo.
+CONVERSOR_RASTREADORES_PARA_API = {
+    "codigo_integracao": "TrackerIntegrationCode",
+    "identificacao": "IdTracker",
+    "identificacao_auxiliar": "AuxiliaryId",
+    "template": "TrackerTemplateIntegrationCode",
+    "status": "StatusIntegrationCode",
+    "codigo_integracao_cliente": "ClientIntegrationCode",
+    "data_aquisicao": "AcquisitionDate",
+    "iccid1": "ICCID1",
+    "iccid2": "ICCID2",
+    "imei": "IMEI",
+}
+
+# Idem, mas pro Conversor de SIM Cards: chave de
+# validador_importacao/tipo_simcard.py CAMPOS_SIMCARD -> campo aceito por
+# PARAMS["simcard"] (SimCard/Insert). Também cobre os 10 campos do layout
+# oficial inteiro.
+CONVERSOR_SIMCARDS_PARA_API = {
+    "iccid": "ICCID",
+    "apn_dominio": "APNDomain",
+    "ddi": "CountryCallingCode",
+    "ddd": "AreaCallingCode",
+    "telefone": "PhoneNumber",
+    "dia_corte": "BillingCylcleEndDay",
+    "valor_plano": "Price",
+    "limite_megabytes": "MegabyteLimit",
+    "pin": "PIN",
+    "puk": "PUK",
+}
+
+# Idem, mas pro Conversor de Áreas: chave de
+# validador_importacao/tipo_area.py CAMPOS_AREA -> campo aceito por
+# PARAMS["area"] (Geography/Insert). "Cor" fica de fora (API não aceita);
+# "Tipo" precisa virar código (1/2/3) e "Tolerância" precisa de um default
+# quando vazia — os dois ajustes acontecem em
+# conversor_areas_usar_como_upload, não aqui (este dict só mapeia NOMES de
+# campo, não transforma valores).
+CONVERSOR_AREAS_PARA_API = {
+    "codigo_integracao": "GeographyIntegrationCode",
+    "nome": "Name",
+    "descricao": "Description",
+    "tipo": "Type",
+    "coordenadas": "Area",
+    "tolerancia": "Tolerance",
+    "grupo": "GroupIntegrationCode",
+    "categoria": "ListCategoryIntegrationCode",
+}
+
+# Idem, mas pro Conversor de Unidades Organizacionais: chave de
+# validador_importacao/tipo_uo.py CAMPOS_UO -> campo aceito por PARAMS["uo"]
+# (OrganizationalUnit/Insert). Cobertura completa (6/6) — mesma situação de
+# Rastreador/SIM Card, diferente de Veículo.
+CONVERSOR_UO_PARA_API = {
+    "codigo_integracao": "OrganizationalUnitIntegrationCode",
+    "nome": "Name",
+    "tipo": "TypeOrganizationalUnit",
+    "unidade_pai": "ParentOrganizationalUnitIntegrationCode",
+    "codigo_integracao_cliente": "ClientIntegrationCode",
+    "descricao": "Description",
+}
+
+# Idem, mas pro Conversor de Colaboradores: chave de
+# validador_importacao/tipo_colaborador.py CAMPOS_COLABORADOR -> campo
+# aceito por PARAMS["colaborador"] (Person/InsertPerson). "is_passageiro"
+# fica de fora (API não tem esse campo, só existe no layout de arquivo).
+CONVERSOR_COLABORADORES_PARA_API = {
+    "codigo_integracao": "PersonIntegrationCode",
+    "unidade_organizacional": "OrganizationUnitIntegrationCode",
+    "nome": "Name",
+    "email": "Email",
+    "ddi": "CountryCode",
+    "ddd": "AreaCode",
+    "celular": "CellPhoneNumber",
+    "telefone": "PhoneNumber",
+    "identidade": "IDCard",
+    "cpf": "CPF",
+    "data_nascimento": "DateOfBirth",
+    "sexo": "Gender",
+    "tipo_identificador": "IdentifierType",
+    "tipo_codigo_acesso": "AccessCodeType",
+    "codigo_acesso": "AccessCode",
+    "gmt": "TimeZone",
+    "horario_verao": "DaylightSaving",
+    "idioma": "Language",
+    "pais": "Country",
+    "cargo": "PersonRoleIntegrationCode",
+    "escala": "WorkScheduleIntegrationCode",
+    "tipo_consolidacao_jornada": "ConsolidationType",
+    "matricula": "Registration",
+    "cnh": "LicenseDriver",
+    "data_validade_cnh": "ExpirationDateLicenseDriver",
+    "data_emissao_cnh": "EmissionDateLicenseDriver",
+    "data_primeira_habilitacao": "FirstDateLicenseDriver",
+    "categoria_cnh": "LicenseRegistrationType",
+    "perfil_acesso": "UserProfileTemplateIntegrationCode",
+    "login": "Login",
+    "senha": "Password",
 }
 
 LISTAGENS = {
@@ -694,6 +952,61 @@ LISTAGENS = {
         headers=["NOME", "COD", "TIPO"],
         campos=["Name", "OrganizationalUnitIntegrationCode", "TypeOrganizationalUnit"],
     ),
+    # Usadas por conversor_veiculos_verificar_duplicidade pra conferir se as
+    # referências da planilha (template do rastreador, APN, responsável) já
+    # estão cadastradas na SSX (ver doc oficial em
+    # https://integration.systemsatx.com.br — spec "Administration").
+    "templates_rastreador": dict(
+        endpoint="/Administration/Tracker/ListTemplate",
+        payload=None,
+        headers=["NOME", "CÓDIGO DE INTEGRAÇÃO"],
+        campos=["Name", "TrackerTemplateIntegrationCode"],
+    ),
+    "simcards": dict(
+        endpoint="/Administration/SimCard/List",
+        payload=None,
+        headers=["ICCID", "APN", "TELEFONE"],
+        campos=["ICCID", "APNDomain", "PhoneNumber"],
+    ),
+    # Usada por conversor_rastreadores_verificar_duplicidade/listar_templates
+    # pra conferir se o "Status do rastreador" da planilha já está
+    # cadastrado na SSX (campo não existe pra Veículo, só surgiu aqui).
+    "status_rastreador": dict(
+        endpoint="/Administration/Tracker/ListStatusTracker",
+        payload=None,
+        headers=["NOME", "CÓDIGO DE INTEGRAÇÃO"],
+        campos=["Name", "TrackerStatusIntegrationCode"],
+    ),
+    # Idem, pro Conversor de Clientes (template do cliente, perfil de acesso).
+    "templates_cliente": dict(
+        endpoint="/Administration/Client/ListTemplate",
+        payload=None,
+        headers=["NOME", "CÓDIGO DE INTEGRAÇÃO"],
+        campos=["Name", "ClientTemplateIntegrationCode"],
+    ),
+    "perfis_acesso": dict(
+        endpoint="/Administration/Client/ListProfileTemplate",
+        payload=None,
+        headers=["NOME", "CÓDIGO DE INTEGRAÇÃO"],
+        campos=["Name", "ClientProfileTemplateIntegrationCode"],
+    ),
+    # Usadas por conversor_areas_verificar_referencias/listar_categorias_e_grupos
+    # pra conferir se Categoria/Grupo da planilha já estão cadastrados na SSX.
+    # Não existe "Geography/List" no Swagger (só Insert/Update/Delete) — por
+    # isso o Conversor de Áreas não tem checagem de duplicidade contra a SSX,
+    # diferente dos outros 4 conversores.
+    "categorias_area": dict(
+        endpoint="/Administration/Geography/ListCategories",
+        payload=None,
+        headers=["NOME", "CÓDIGO DE INTEGRAÇÃO"],
+        campos=["CategoryName", "CategoryIntegrationCode"],
+    ),
+    "grupos_area": dict(
+        endpoint="/Administration/Geography/ListGroups",
+        payload=None,
+        headers=["NOME", "CÓDIGO DE INTEGRAÇÃO"],
+        campos=["GroupName", "GroupIntegrationCode"],
+    ),
 }
 
 # Armazenamento em memória dos Excel enviados (uso local, um usuário por vez)
@@ -713,6 +1026,11 @@ def tratar_valor(caminho_completo, valor):
             return 0
     if caminho_completo in BOOL_FIELDS:
         return v_str.lower() in ["true", "1", "sim", "yes", "ativo"]
+    if caminho_completo in FLOAT_FIELDS:
+        try:
+            return float(v_str.replace(",", "."))
+        except ValueError:
+            return None
     return v_str
 
 
@@ -827,6 +1145,27 @@ def _autenticar_ssx(usuario, senha):
         return None, f"Falha ao autenticar: {e}"
 
 
+def _claims_do_token(token):
+    """O endpoint `/Login` da SSX (confirmado no Swagger) só devolve
+    AccessToken + ExpiresIn — nenhum campo de "nome da base/central" nem
+    endpoint separado de "dados da conta atual". Mas o AccessToken é um JWT
+    (3 partes separadas por "."), e o nome da base pode estar codificado
+    ali dentro como claim — decodifica só a 2ª parte (payload), sem validar
+    assinatura (não precisa: a gente só está LENDO um token que a própria
+    SSX acabou de emitir pra essa sessão, não confiando nele pra autorizar
+    nada). Devolve {} se não for um JWT ou não der pra decodificar — nunca
+    levanta exceção."""
+    try:
+        partes = token.split(".")
+        if len(partes) != 3:
+            return {}
+        payload = partes[1]
+        payload += "=" * (-len(payload) % 4)  # padding do base64url
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
 @app.route("/api/login", methods=["POST"])
 def login():
     data = request.get_json(force=True) or {}
@@ -838,10 +1177,14 @@ def login():
     if erro:
         return jsonify(ok=False, error=erro), 400
     session["token"] = token
+    claims = _claims_do_token(token)
     # Login manual (avulso) nunca fica vinculado a um cliente específico —
     # mesmo que a sessão já estivesse vinculada a um antes.
     session.pop("token_idcentral", None)
-    return jsonify(ok=True)
+    # "claims" só pra telas que queiram mostrar algo além do login digitado
+    # (ex.: nome da base, se existir como claim no JWT) — ver
+    # _claims_do_token. Pode vir {} se o token não for um JWT decodificável.
+    return jsonify(ok=True, claims=claims)
 
 
 def _token_para(idcentral_solicitado):
@@ -869,36 +1212,12 @@ def _token_para(idcentral_solicitado):
     return token, None, None
 
 
-@app.route("/api/ficha/<idcentral>/autenticar", methods=["POST"])
-def ficha_autenticar(idcentral):
-    doc = db.collection(CREDENCIAIS_CLIENTE_COLLECTION).document(idcentral).get()
-    dados = doc.to_dict() if doc.exists else None
-    if not dados or not dados.get("login") or not dados.get("senha"):
-        return jsonify(ok=False, error="Esse cliente ainda não tem credencial da SSX cadastrada."), 400
-    token, erro = _autenticar_ssx(dados["login"], dados["senha"])
-    if erro:
-        return jsonify(ok=False, error=erro), 400
-    session["token"] = token
-    session["token_idcentral"] = idcentral
-    return jsonify(ok=True)
-
-
-@app.route("/api/ficha/<idcentral>/sair", methods=["POST"])
-def ficha_sair(idcentral):
-    # Só limpa se a sessão realmente estiver vinculada a ESTE cliente — nunca
-    # mexe numa autenticação avulsa (ou de outro cliente) por engano.
-    if session.get("token_idcentral") == idcentral:
-        session.pop("token", None)
-        session.pop("token_idcentral", None)
-    return jsonify(ok=True)
-
-
 @app.route("/api/logout-avulso", methods=["POST"])
 def logout_avulso():
     # Limpa só o token de login avulso (Área de Importação e Consulta), ao sair
-    # da tela — igual ficha_sair acima, mas pro caso sem idcentral. Nunca mexe
-    # numa sessão vinculada a cliente (token_idcentral setado), e diferente de
-    # /api/logout (botão "Sair"), NÃO desloga da ferramenta em si.
+    # da tela. Nunca mexe numa sessão vinculada a cliente (token_idcentral
+    # setado, de um jeito que hoje nada mais seta), e diferente de /api/logout
+    # (botão "Sair"), NÃO desloga da ferramenta em si.
     if not session.get("token_idcentral"):
         session.pop("token", None)
     return jsonify(ok=True)
@@ -930,17 +1249,48 @@ def logout():
     return jsonify(ok=True)
 
 
+def _credenciais_clientes_para_logins_salvos():
+    """Credencial SSX cadastrada na Ficha de cada cliente (coleção
+    CREDENCIAIS_CLIENTE_COLLECTION, documento = idcentral) também aparece nos
+    Logins salvos da Central de Importação — o cadastro em si continua sendo
+    feito só pela configuração do cliente (Ficha); aqui é só leitura, pra
+    poder ser usada nas telas de Consulta/Importação avulsas."""
+    nomes_por_idcentral = {
+        c.get("idcentral"): c.get("cliente")
+        for c in _cache_api_obter("clientes", _carregar_clientes_todos)
+    }
+    lista = []
+    for doc in db.collection(CREDENCIAIS_CLIENTE_COLLECTION).stream():
+        dados = doc.to_dict() or {}
+        if not dados.get("login") or not dados.get("senha"):
+            continue
+        lista.append({
+            "id": f"cliente:{doc.id}",
+            "nome": nomes_por_idcentral.get(doc.id) or doc.id,
+            "login": dados["login"],
+            "senha": dados["senha"],
+            "origem": "cliente",
+            "idcentral": doc.id,
+        })
+    return lista
+
+
 # --- LOGINS SALVOS (para trocar de cliente rapidamente) ---
 # Guardados no Firestore (coleção "credenciais"), sobrevive a redeploys.
 # Admin-only: são senhas em texto puro, e essa lista não é vinculada a um
 # cliente/dono específico — restrito assim pra não expor senha de terceiros
-# a qualquer perfil logado.
+# a qualquer perfil logado. A lista também inclui (origem="cliente") as
+# credenciais cadastradas na configuração de cada cliente — ver
+# _credenciais_clientes_para_logins_salvos; essas só podem ser editadas/
+# excluídas pela Ficha, não pelos endpoints de edição abaixo.
 @app.route("/api/credenciais", methods=["GET"])
 def listar_credenciais():
     if not _sou_admin():
         return jsonify(ok=False, error="Apenas administradores podem ver os logins salvos."), 403
     docs = db.collection(CREDENCIAIS_COLLECTION).stream()
-    lista = [dict(d.to_dict(), id=d.id) for d in docs]
+    lista = [dict(d.to_dict(), id=d.id, origem="manual") for d in docs]
+    lista.extend(_credenciais_clientes_para_logins_salvos())
+    lista.sort(key=lambda c: c.get("nome") or "")
     return jsonify(ok=True, credenciais=lista)
 
 
@@ -1272,6 +1622,10 @@ def excluir_modelo_comando(comando_id):
 # digitada — é só o acontecimento mais recente entre os 4 setores.
 IMPLANTACAO_CLIENTES_COLLECTION = "implantacao_clientes"
 IMPLANTACAO_SETORES = ["Implantação", "Migração", "Suporte", "Comercial"]
+# Tag opcional do acontecimento — colore a bolinha na Timeline da Ficha
+# (aba Histórico). Mesma lista/cores do "Acompanhamento de cliente" do
+# kanban_dashboard_dev, replicada aqui pra manter o mesmo formato visual.
+EVENTO_TAGS = ["Operação", "Migração", "Fricção", "Sugestão de desenvolvimento", "Travamento", "Problema"]
 # Etapas oficiais do Kanban de Implantação (Fase 1 só usa o campo pra guardar/exibir;
 # a visão em Kanban propriamente dita é de uma fase seguinte).
 IMPLANTACAO_ETAPAS = ["marco-1", "marco-2", "marco-3", "marco-4", "marco-5", "concluido"]
@@ -1386,12 +1740,16 @@ def _dados_implantacao_evento(data):
     titulo = str(data.get("titulo", "")).strip()
     if not titulo or setor not in IMPLANTACAO_SETORES:
         return None
+    tag = str(data.get("tag", "")).strip()
+    if tag not in EVENTO_TAGS:
+        tag = ""
     return {
         "setor": setor,
         "titulo": titulo,
         "descricao": str(data.get("descricao", "")).strip(),
         "data": str(data.get("data", "")).strip(),
         "responsavel": str(data.get("responsavel", "")).strip(),
+        "tag": tag,
     }
 
 
@@ -2660,7 +3018,7 @@ def listar_tarefas():
             continue
         uid = t["criado_por"]
         if uid not in nomes_criadores:
-            u = _buscar_usuario_por_id(uid) or {}
+            u = usuarios_sql.buscar_usuario_por_id(uid) or {}
             nomes_criadores[uid] = u.get("nome_responsavel") or u.get("usuario") or ""
         t["criado_por_nome"] = nomes_criadores[uid]
     lista.sort(key=lambda t: (bool(t.get("concluida")), t.get("data_limite", "")))
@@ -2687,7 +3045,7 @@ def criar_tarefa():
         cliente_dados = cliente_doc.to_dict() or {}
 
     responsavel_id = str(data.get("responsavel_id", "")).strip()
-    responsavel_dados = _buscar_usuario_por_id(responsavel_id)
+    responsavel_dados = usuarios_sql.buscar_usuario_por_id(responsavel_id)
     if not responsavel_dados:
         return jsonify(ok=False, error="Responsável não encontrado."), 404
 
@@ -2729,7 +3087,7 @@ def editar_tarefa(tarefa_id):
 
     responsavel_id = str(data.get("responsavel_id", "")).strip()
     if responsavel_id:
-        responsavel_dados = _buscar_usuario_por_id(responsavel_id)
+        responsavel_dados = usuarios_sql.buscar_usuario_por_id(responsavel_id)
         if not responsavel_dados:
             return jsonify(ok=False, error="Responsável não encontrado."), 404
         dados["responsavel_id"] = responsavel_id
@@ -3232,19 +3590,6 @@ def _carregar_clientes_migracao():
     return lista
 
 
-def _telefones_profissionais_por_nome():
-    """Mapa nome de exibição -> telefone profissional, pra achar o WhatsApp do
-    CS e do Comercial (que na implantação são guardados só pelo nome)."""
-    mapa = {}
-    for d in db.collection(APP_USUARIOS_COLLECTION).stream():
-        dados = d.to_dict()
-        nome = dados.get("nome_responsavel") or dados.get("usuario") or ""
-        telefone = dados.get("telefone_profissional") or ""
-        if nome and telefone:
-            mapa.setdefault(nome, telefone)
-    return mapa
-
-
 @app.route("/api/ficha/<idcentral>")
 def obter_ficha_cliente(idcentral):
     """Busca o cliente único (coleção "clientes") por IdCentral, junto com o
@@ -3277,7 +3622,7 @@ def obter_ficha_cliente(idcentral):
 
     # WhatsApp do CS e do Comercial vem do cadastro de login de cada um (só o
     # nome fica salvo no cliente). Calculado aqui, não gravado no documento.
-    telefones = _telefones_profissionais_por_nome()
+    telefones = usuarios_sql.telefones_profissionais_por_nome()
     implantacao["csm_whatsapp"] = telefones.get(implantacao.get("csm") or "", "")
     implantacao["vendedor_whatsapp"] = telefones.get(implantacao.get("vendedor") or "", "")
 
@@ -4184,6 +4529,2765 @@ def validador_rodar():
     )
 
 
+# --- CONVERSOR DE PLANILHA DE CLIENTES (importação para a SSX) ---
+# Fluxo completo (upload -> mapear colunas -> editar/transformar -> validar ->
+# exportar) rodando no servidor, reaproveitando validador_importacao/ como
+# única fonte de verdade das regras (ver conversor_clientes.py) e
+# _ler_planilha_validador/_tentar_ler_csv já usados pelo Validador acima.
+# Não chama a API da SSX nem grava nada — só lê o arquivo enviado e devolve
+# planilha/arquivo pra download, por isso roda síncrono como o Validador.
+CONVERSOR_CLIENTES_UPLOADS = {}
+CONVERSOR_CLIENTES_LOCK = threading.Lock()
+
+
+@app.route("/api/conversor-clientes/campos")
+def conversor_clientes_campos():
+    campos = []
+    for campo in conversor_clientes.CAMPOS_CLIENTE:
+        obrigatorio = "condicional" if callable(campo.obrigatorio) else bool(campo.obrigatorio)
+        campos.append({
+            "chave": campo.chave, "rotulo": campo.rotulo, "obrigatorio": obrigatorio,
+            "tipo": campo.tipo, "tamanho_max": campo.tamanho_max,
+        })
+    return jsonify(ok=True, campos=campos)
+
+
+@app.route("/api/conversor-clientes/upload", methods=["POST"])
+def conversor_clientes_upload():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    arquivo = request.files["arquivo"]
+    try:
+        df = _ler_planilha_validador(arquivo)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler o arquivo: {e}"), 400
+    if df.empty:
+        return jsonify(ok=False, error="A planilha está vazia."), 400
+
+    file_id = uuid.uuid4().hex
+    nome_base = os.path.splitext(arquivo.filename or "clientes")[0]
+    with CONVERSOR_CLIENTES_LOCK:
+        CONVERSOR_CLIENTES_UPLOADS[file_id] = {"df": df, "nome_base": nome_base, "registros": None}
+    return jsonify(ok=True, file_id=file_id, colunas=list(df.columns), total_linhas=len(df))
+
+
+@app.route("/api/conversor-clientes/mapear", methods=["POST"])
+def conversor_clientes_mapear():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    mapping = body.get("mapping") or {}  # {chave_destino: coluna_origem}
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+    if entry is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+    if not mapping:
+        return jsonify(ok=False, error="Mapeie ao menos uma coluna antes de continuar."), 400
+
+    df = entry["df"]
+    colunas_validas = set(df.columns)
+    mapping_valido = {chave: col for chave, col in mapping.items() if col in colunas_validas}
+
+    registros = []
+    for pos, row in enumerate(df.itertuples(index=False), start=1):
+        row_dict = dict(zip(df.columns, row))
+        dados = {}
+        for chave, col in mapping_valido.items():
+            valor = row_dict.get(col)
+            dados[chave] = "" if (valor is None or str(valor).strip().lower() == "nan") else str(valor).strip()
+        registros.append({"indice": pos, "original": dict(dados), "dados": dict(dados)})
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry["registros"] = registros
+
+    return jsonify(ok=True, total=len(registros), registros=registros)
+
+
+@app.route("/api/conversor-clientes/usar-como-upload", methods=["POST"])
+def conversor_clientes_usar_como_upload():
+    """Transforma os registros JÁ carregados/editados no Conversor de Clientes
+    num "upload" do modal de importação genérico (UPLOADS, o mesmo dict usado
+    por /api/import/upload) — pro botão "Importar via API" não obrigar a
+    pessoa a exportar e re-enviar o arquivo que ela já tem na tela. Colunas do
+    DataFrame = rótulo oficial (CAMPOS_CLIENTE) de cada campo que entrou no
+    mapeamento aplicado, só os que foram usados. Também devolve o mapeamento
+    já pronto (CONVERSOR_CLIENTES_PARA_API) — não dá pra confiar só no
+    auto-mapeamento por texto do modal genérico pra esses campos (ver
+    comentário da constante). "Senha" vazia manda "0" — só nesse caminho da
+    API, o .txt exportado continua em branco (mesmo ajuste de "Tolerance" em
+    conversor_areas_usar_como_upload)."""
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Carregue e mapeie uma planilha no Conversor de Clientes antes."), 400
+
+    registros = entry["registros"]
+    rotulo_por_chave = {c.chave: c.rotulo for c in conversor_clientes.CAMPOS_CLIENTE}
+    chaves = list(registros[0]["dados"].keys())
+    colunas = [rotulo_por_chave.get(chave, chave) for chave in chaves]
+
+    linhas = []
+    for r in registros:
+        dados = dict(r["dados"])
+        if "senha" in dados and not str(dados.get("senha", "")).strip():
+            dados["senha"] = "0"
+        linhas.append({rotulo_por_chave.get(chave, chave): dados.get(chave, "") for chave in chaves})
+    df = pd.DataFrame(linhas, columns=colunas, dtype=str)
+
+    novo_file_id = uuid.uuid4().hex
+    with UPLOADS_LOCK:
+        UPLOADS[novo_file_id] = df
+
+    mapeamento_sugerido = {}
+    for chave in chaves:
+        campo_api = CONVERSOR_CLIENTES_PARA_API.get(chave)
+        if campo_api:
+            mapeamento_sugerido[campo_api] = rotulo_por_chave.get(chave, chave)
+
+    return jsonify(
+        ok=True, file_id=novo_file_id, colunas=colunas, total_linhas=len(df),
+        mapeamento_sugerido=mapeamento_sugerido,
+    )
+
+
+@app.route("/api/conversor-clientes/editar", methods=["POST"])
+def conversor_clientes_editar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+    campo = body.get("campo")
+    valor = body.get("valor", "")
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+    campos_validos = {c.chave for c in conversor_clientes.CAMPOS_CLIENTE}
+    if campo not in campos_validos:
+        return jsonify(ok=False, error="Campo desconhecido."), 400
+
+    registro = next((r for r in entry["registros"] if r["indice"] == indice), None)
+    if registro is None:
+        return jsonify(ok=False, error="Registro não encontrado."), 404
+    registro["dados"][campo] = str(valor).strip()
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-clientes/excluir-linha", methods=["POST"])
+def conversor_clientes_excluir_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+        if entry is None or not entry.get("registros"):
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if r["indice"] != indice]
+        if len(entry["registros"]) == tamanho_antes:
+            return jsonify(ok=False, error="Linha não encontrada."), 404
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-clientes/adicionar-linha", methods=["POST"])
+def conversor_clientes_adicionar_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        proximo_indice = max((r["indice"] for r in registros), default=0) + 1
+        # Copia as mesmas chaves (campos mapeados) de uma linha já existente,
+        # todas vazias — não dá pra saber aqui quais campos foram mapeados
+        # (isso só existe no JS/estado da tela), então usa o molde do que já
+        # está em memória; planilha vazia (0 linhas) cai no CAMPOS_CLIENTE
+        # inteiro como última alternativa.
+        chaves = list(registros[0]["dados"].keys()) if registros else [c.chave for c in conversor_clientes.CAMPOS_CLIENTE]
+        dados_vazios = {chave: "" for chave in chaves}
+        novo = {"indice": proximo_indice, "original": dict(dados_vazios), "dados": dict(dados_vazios)}
+        registros.append(novo)
+    return jsonify(ok=True, registro=novo)
+
+
+@app.route("/api/conversor-clientes/limpar-vazias", methods=["POST"])
+def conversor_clientes_limpar_vazias():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if any((v or "").strip() for v in r["dados"].values())]
+        removidos = tamanho_antes - len(entry["registros"])
+    return jsonify(ok=True, removidos=removidos)
+
+
+@app.route("/api/conversor-clientes/transformar", methods=["POST"])
+def conversor_clientes_transformar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    acao = body.get("acao")
+    params = body.get("params") or {}
+    indices_alvo = body.get("indices")  # lista de int, ou None/omitido = todas as linhas
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+    alterados = set()
+    extra = {}
+
+    if acao == "limpar_documentos":
+        for r in alvo:
+            anterior = r["dados"].get("cpf_cnpj", "")
+            novo = conversor_clientes.limpar_cpf_cnpj(anterior)
+            if novo != anterior:
+                r["dados"]["cpf_cnpj"] = novo
+                alterados.add(r["indice"])
+
+    elif acao == "separar_endereco":
+        extra = conversor_clientes.separar_endereco(alvo, alterados)
+
+    elif acao == "ajustar_telefones":
+        ddd_padrao = "".join(c for c in str(params.get("ddd_padrao") or "55") if c.isdigit()) or "55"
+        if len(ddd_padrao) != 2:
+            return jsonify(ok=False, error="Informe um DDD padrão com 2 dígitos."), 400
+        extra = conversor_clientes.ajustar_telefones(alvo, alterados, ddd_padrao)
+
+    elif acao == "repetir_nome_usuario":
+        extra = conversor_clientes.repetir_campo(alvo, alterados, "nome", "nome_usuario")
+
+    elif acao == "repetir_codigo_integracao_pessoa":
+        extra = conversor_clientes.repetir_campo(alvo, alterados, "codigo_integracao", "codigo_integracao_pessoa")
+
+    elif acao == "preencher_template_cliente":
+        valor = (params.get("valor") or "").strip()
+        if not valor:
+            return jsonify(ok=False, error="Informe o template do cliente a ser preenchido."), 400
+        extra = conversor_clientes.preencher_campo_todas_linhas(alvo, alterados, "template_cliente", valor)
+
+    elif acao == "preencher_perfil_acesso":
+        valor = (params.get("valor") or "").strip()
+        if not valor:
+            return jsonify(ok=False, error="Informe o perfil de acesso a ser preenchido."), 400
+        extra = conversor_clientes.preencher_campo_todas_linhas(alvo, alterados, "perfil_acesso", valor)
+
+    elif acao == "gerar_emails":
+        dominio = (params.get("dominio") or "").strip()
+        if not dominio:
+            return jsonify(ok=False, error="Informe o domínio pra gerar os e-mails."), 400
+        # "Login" é o campo usado como e-mail de acesso do cliente no manual da
+        # SSX (não existe um campo "E-mail" separado) — só preenche quem está
+        # vazio, nunca sobrescreve um login real já informado.
+        usados = {r["dados"].get("login", "") for r in registros if r["dados"].get("login")}
+        for r in alvo:
+            if r["dados"].get("login"):
+                continue
+            novo = conversor_clientes.gerar_email(r["dados"].get("nome", ""), dominio, usados)
+            r["dados"]["login"] = novo
+            usados.add(novo)
+            alterados.add(r["indice"])
+
+    elif acao == "preencher_senhas":
+        senha = params.get("senha") or ""
+        sobrescrever = bool(params.get("sobrescrever"))
+        if not senha:
+            return jsonify(ok=False, error="Informe a senha a ser preenchida."), 400
+        for r in alvo:
+            anterior = r["dados"].get("senha", "")
+            novo = conversor_clientes.preencher_senha(anterior, senha, sobrescrever)
+            if novo != anterior:
+                r["dados"]["senha"] = novo
+                alterados.add(r["indice"])
+
+    elif acao == "ajustar_tipo_pessoa":
+        extra = conversor_clientes.ajustar_tipo_pessoa(alvo, alterados)
+
+    else:
+        return jsonify(ok=False, error="Ação de transformação desconhecida."), 400
+
+    registros_alterados = [r for r in registros if r["indice"] in alterados]
+    resposta = dict(ok=True, total_alterados=len(alterados), registros=registros_alterados)
+    resposta.update(extra)
+    return jsonify(**resposta)
+
+
+@app.route("/api/conversor-clientes/validar", methods=["POST"])
+def conversor_clientes_validar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    por_posicao = conversor_clientes.validar_registros(registros)
+    # Duplicidade de Nome/CPF-CNPJ/Login dentro da PRÓPRIA planilha (não
+    # contra a SSX — isso é o botão separado "Verificar na SSX") — por_posicao
+    # é indexado por posição (erro.linha - 2), essa aqui por "indice" do
+    # registro, então mescla na hora de montar a resposta, não dentro de
+    # validar_registros.
+    por_indice_interna = conversor_clientes.verificar_duplicidade_interna(registros)
+
+    problemas = []
+    n_erro = 0
+    for pos, registro in enumerate(registros):
+        problema = por_posicao.get(pos, {"erros": [], "avisos": []})
+        extra = por_indice_interna.get(registro["indice"])
+        erros = list(problema["erros"])
+        avisos = list(problema["avisos"]) + (extra["avisos"] if extra else [])
+        if not erros and not avisos:
+            continue
+        if erros:
+            n_erro += 1
+        problemas.append({"indice": registro["indice"], "erros": erros, "avisos": avisos})
+
+    return jsonify(ok=True, total=len(registros), n_ok=len(registros) - n_erro, n_erro=n_erro, problemas=problemas)
+
+
+# Verificação de duplicidade na SSX (opcional — exige login na própria API,
+# diferente de "Validar planilha" acima, que é local/offline): reaproveita
+# _token_para/requisicao_padrao/LISTAGENS["clientes"] já usados pela Área de
+# Importação e Consulta, então login feito aqui ou lá vale nos dois lugares
+# (mesma sessão avulsa). Só clientes ATIVOS entram na comparação — é o único
+# filtro de listagem confirmado hoje (ver LISTAGENS["clientes"]).
+@app.route("/api/conversor-clientes/verificar-duplicidade", methods=["POST"])
+def conversor_clientes_verificar_duplicidade():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indices_alvo = body.get("indices")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+
+    config = LISTAGENS["clientes"]
+    try:
+        clientes_ssx = requisicao_padrao(config["endpoint"], config["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar clientes na SSX: {e}"), 400
+
+    por_indice = conversor_clientes.verificar_duplicidade_ssx(alvo, clientes_ssx)
+    problemas = [{"indice": idx, "erros": p["erros"], "avisos": p["avisos"]} for idx, p in por_indice.items()]
+    return jsonify(
+        ok=True, total_verificados=len(alvo), total_duplicados=len(problemas), problemas=problemas,
+    )
+
+
+# Botão "Templates" (Conversor de Clientes): checklist do que a planilha usa
+# de Template de cliente, Unidade organizacional e Perfil de acesso do
+# usuário — cadastros que precisam existir na SSX ANTES da importação
+# funcionar — com quem já está cadastrado e quem falta. Mesma sessão/token
+# de "Verificar na SSX". Mesmo padrão de
+# conversor_veiculos_listar_templates_apns.
+@app.route("/api/conversor-clientes/listar-templates-perfis", methods=["POST"])
+def conversor_clientes_listar_templates_perfis():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    try:
+        templates_ssx = requisicao_padrao(LISTAGENS["templates_cliente"]["endpoint"], LISTAGENS["templates_cliente"]["payload"], token)
+        uos_ssx = requisicao_padrao(LISTAGENS["uos"]["endpoint"], LISTAGENS["uos"]["payload"], token)
+        perfis_ssx = requisicao_padrao(LISTAGENS["perfis_acesso"]["endpoint"], LISTAGENS["perfis_acesso"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    resultado = conversor_clientes.listar_templates_uo_perfis(entry["registros"], templates_ssx, uos_ssx, perfis_ssx)
+    return jsonify(ok=True, **resultado)
+
+
+@app.route("/api/conversor-clientes/exportar/<file_id>/<modo>")
+def conversor_clientes_exportar(file_id, modo):
+    if modo not in ("todos", "validos"):
+        return jsonify(ok=False, error="Modo inválido."), 400
+
+    with CONVERSOR_CLIENTES_LOCK:
+        entry = CONVERSOR_CLIENTES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    if modo == "validos":
+        por_posicao = conversor_clientes.validar_registros(registros)
+        posicoes_com_erro = {pos for pos, p in por_posicao.items() if p["erros"]}
+        registros_exportar = [r for i, r in enumerate(registros) if i not in posicoes_com_erro]
+    else:
+        registros_exportar = registros
+
+    conteudo = conversor_clientes.gerar_arquivo_oficial(registros_exportar).encode("ascii", errors="ignore")
+    nome_arquivo = f"{entry['nome_base']}_SSX_Clientes_{modo}.txt"
+    return Response(
+        conteudo,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
+
+
+# --- CONVERSOR DE PLANILHA DE VEÍCULOS (importação para a SSX) ---
+# Mesmo fluxo e mesmo molde do bloco "CONVERSOR DE PLANILHA DE CLIENTES"
+# acima (upload -> mapear colunas -> editar/transformar -> validar ->
+# exportar), reaproveitando validador_importacao/ (TIPO_VEICULO) como única
+# fonte de verdade das regras (ver conversor_veiculos.py). Não chama a API da
+# SSX nem grava nada — só lê o arquivo enviado e devolve planilha/arquivo pra
+# download, por isso roda síncrono, igual o Conversor de Clientes.
+CONVERSOR_VEICULOS_UPLOADS = {}
+CONVERSOR_VEICULOS_LOCK = threading.Lock()
+
+# Campos liberados pra "preencher pra todas as linhas" (ícone/cor do mapa —
+# a frota inteira costuma usar o mesmo). Checado no servidor pra não aceitar
+# um "campo" qualquer vindo do corpo da requisição.
+CONVERSOR_VEICULOS_CAMPOS_PREENCHIVEIS = {"icone_mapa", "cor_icone_mapa"}
+# Pares liberados pra "repetir campo" — mesma ideia (lista fechada em vez de
+# aceitar origem/destino livres do corpo da requisição).
+CONVERSOR_VEICULOS_PARES_REPETIVEIS = {
+    ("codigo_integracao_veiculo", "veiculo_cliente"),
+    ("placa", "identificacao"),
+    ("placa", "codigo_integracao_veiculo"),
+    ("rastreador1_identificacao", "rastreador1_codigo_integracao"),
+}
+
+
+@app.route("/api/conversor-veiculos/campos")
+def conversor_veiculos_campos():
+    campos = []
+    for campo in conversor_veiculos.CAMPOS_VEICULO:
+        obrigatorio = "condicional" if callable(campo.obrigatorio) else bool(campo.obrigatorio)
+        campos.append({
+            "chave": campo.chave, "rotulo": campo.rotulo, "obrigatorio": obrigatorio,
+            "tipo": campo.tipo, "tamanho_max": campo.tamanho_max,
+        })
+    return jsonify(ok=True, campos=campos)
+
+
+@app.route("/api/conversor-veiculos/upload", methods=["POST"])
+def conversor_veiculos_upload():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    arquivo = request.files["arquivo"]
+    try:
+        df = _ler_planilha_validador(arquivo)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler o arquivo: {e}"), 400
+    if df.empty:
+        return jsonify(ok=False, error="A planilha está vazia."), 400
+
+    file_id = uuid.uuid4().hex
+    nome_base = os.path.splitext(arquivo.filename or "veiculos")[0]
+    with CONVERSOR_VEICULOS_LOCK:
+        CONVERSOR_VEICULOS_UPLOADS[file_id] = {"df": df, "nome_base": nome_base, "registros": None}
+    return jsonify(ok=True, file_id=file_id, colunas=list(df.columns), total_linhas=len(df))
+
+
+@app.route("/api/conversor-veiculos/mapear", methods=["POST"])
+def conversor_veiculos_mapear():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    mapping = body.get("mapping") or {}  # {chave_destino: coluna_origem}
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+    if entry is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+    if not mapping:
+        return jsonify(ok=False, error="Mapeie ao menos uma coluna antes de continuar."), 400
+
+    df = entry["df"]
+    colunas_validas = set(df.columns)
+    mapping_valido = {chave: col for chave, col in mapping.items() if col in colunas_validas}
+
+    registros = []
+    for pos, row in enumerate(df.itertuples(index=False), start=1):
+        row_dict = dict(zip(df.columns, row))
+        dados = {}
+        for chave, col in mapping_valido.items():
+            valor = row_dict.get(col)
+            dados[chave] = "" if (valor is None or str(valor).strip().lower() == "nan") else str(valor).strip()
+        registros.append({"indice": pos, "original": dict(dados), "dados": dict(dados)})
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry["registros"] = registros
+
+    return jsonify(ok=True, total=len(registros), registros=registros)
+
+
+@app.route("/api/conversor-veiculos/usar-como-upload", methods=["POST"])
+def conversor_veiculos_usar_como_upload():
+    """Transforma os registros JÁ carregados/editados no Conversor de
+    Veículos num "upload" do modal de importação genérico (UPLOADS, o mesmo
+    dict usado por /api/import/upload) — pro botão "Importar via API" não
+    obrigar a pessoa a exportar e re-enviar o arquivo que ela já tem na tela.
+    Mesmo padrão de conversor_clientes_usar_como_upload (ver esse pro
+    contexto completo)."""
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Carregue e mapeie uma planilha no Conversor de Veículos antes."), 400
+
+    registros = entry["registros"]
+    rotulo_por_chave = {c.chave: c.rotulo for c in conversor_veiculos.CAMPOS_VEICULO}
+    chaves = list(registros[0]["dados"].keys())
+    colunas = [rotulo_por_chave.get(chave, chave) for chave in chaves]
+
+    linhas = [
+        {rotulo_por_chave.get(chave, chave): r["dados"].get(chave, "") for chave in chaves}
+        for r in registros
+    ]
+    df = pd.DataFrame(linhas, columns=colunas, dtype=str)
+
+    novo_file_id = uuid.uuid4().hex
+    with UPLOADS_LOCK:
+        UPLOADS[novo_file_id] = df
+
+    mapeamento_sugerido = {}
+    for chave in chaves:
+        campo_api = CONVERSOR_VEICULOS_PARA_API.get(chave)
+        if campo_api:
+            mapeamento_sugerido[campo_api] = rotulo_por_chave.get(chave, chave)
+
+    return jsonify(
+        ok=True, file_id=novo_file_id, colunas=colunas, total_linhas=len(df),
+        mapeamento_sugerido=mapeamento_sugerido,
+    )
+
+
+@app.route("/api/conversor-veiculos/editar", methods=["POST"])
+def conversor_veiculos_editar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+    campo = body.get("campo")
+    valor = body.get("valor", "")
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+    campos_validos = {c.chave for c in conversor_veiculos.CAMPOS_VEICULO}
+    if campo not in campos_validos:
+        return jsonify(ok=False, error="Campo desconhecido."), 400
+
+    registro = next((r for r in entry["registros"] if r["indice"] == indice), None)
+    if registro is None:
+        return jsonify(ok=False, error="Registro não encontrado."), 404
+    registro["dados"][campo] = str(valor).strip()
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-veiculos/excluir-linha", methods=["POST"])
+def conversor_veiculos_excluir_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+        if entry is None or not entry.get("registros"):
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if r["indice"] != indice]
+        if len(entry["registros"]) == tamanho_antes:
+            return jsonify(ok=False, error="Linha não encontrada."), 404
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-veiculos/adicionar-linha", methods=["POST"])
+def conversor_veiculos_adicionar_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        proximo_indice = max((r["indice"] for r in registros), default=0) + 1
+        chaves = list(registros[0]["dados"].keys()) if registros else [c.chave for c in conversor_veiculos.CAMPOS_VEICULO]
+        dados_vazios = {chave: "" for chave in chaves}
+        novo = {"indice": proximo_indice, "original": dict(dados_vazios), "dados": dict(dados_vazios)}
+        registros.append(novo)
+    return jsonify(ok=True, registro=novo)
+
+
+@app.route("/api/conversor-veiculos/limpar-vazias", methods=["POST"])
+def conversor_veiculos_limpar_vazias():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if any((v or "").strip() for v in r["dados"].values())]
+        removidos = tamanho_antes - len(entry["registros"])
+    return jsonify(ok=True, removidos=removidos)
+
+
+@app.route("/api/conversor-veiculos/transformar", methods=["POST"])
+def conversor_veiculos_transformar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    acao = body.get("acao")
+    params = body.get("params") or {}
+    indices_alvo = body.get("indices")  # lista de int, ou None/omitido = todas as linhas
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+    alterados = set()
+    extra = {}
+
+    if acao == "limpar_campo":
+        campo = params.get("campo")
+        if campo not in conversor_veiculos._CAMPOS_ALFANUMERICOS_LIMPAVEIS:
+            return jsonify(ok=False, error="Campo inválido para limpeza."), 400
+        extra = conversor_veiculos.limpar_campo_alfanumerico(alvo, alterados, campo)
+
+    elif acao == "ajustar_chips":
+        ddd_padrao = "".join(c for c in str(params.get("ddd_padrao") or "55") if c.isdigit()) or "55"
+        if len(ddd_padrao) != 2:
+            return jsonify(ok=False, error="Informe um DDD padrão com 2 dígitos."), 400
+        extra = conversor_veiculos.ajustar_chips(alvo, alterados, ddd_padrao)
+
+    elif acao == "repetir_campo":
+        origem, destino = params.get("origem"), params.get("destino")
+        if (origem, destino) not in CONVERSOR_VEICULOS_PARES_REPETIVEIS:
+            return jsonify(ok=False, error="Par de campos inválido para repetição."), 400
+        extra = conversor_veiculos.repetir_campo(alvo, alterados, origem, destino)
+
+    elif acao == "preencher_campo":
+        campo = params.get("campo")
+        valor = (params.get("valor") or "").strip()
+        if campo not in CONVERSOR_VEICULOS_CAMPOS_PREENCHIVEIS:
+            return jsonify(ok=False, error="Campo inválido para preenchimento em massa."), 400
+        if not valor:
+            return jsonify(ok=False, error="Informe o valor a ser preenchido."), 400
+        extra = conversor_veiculos.preencher_campo_todas_linhas(alvo, alterados, campo, valor)
+
+    elif acao == "preencher_status":
+        # Sem nenhum campo marcado, preenche os 4 com "0" — ver
+        # conversor_veiculos.preencher_status_mapa (lista vazia não é erro,
+        # só significa "nenhum marcado", e o próprio helper cobre esse caso).
+        campos = params.get("campos") or []
+        campos_validos = [c for c in campos if c in conversor_veiculos.CAMPOS_STATUS_MAPA]
+        extra = conversor_veiculos.preencher_status_mapa(alvo, alterados, campos_validos)
+
+    elif acao == "aplicar_gt06":
+        templates = [t for t in (params.get("templates") or []) if isinstance(t, str) and t.strip()]
+        if not templates:
+            return jsonify(ok=False, error="Selecione ao menos um template antes de aplicar o padrão GT06."), 400
+        extra = conversor_veiculos.aplicar_padrao_gt06(alvo, alterados, templates)
+
+    elif acao == "limpar_gt06":
+        # Lista vazia = TODOS os templates (ver limpar_padrao_gt06) — a
+        # confirmação pra esse caso já acontece no front antes de chamar
+        # esta rota, não bloqueia aqui.
+        templates = [t for t in (params.get("templates") or []) if isinstance(t, str) and t.strip()]
+        extra = conversor_veiculos.limpar_padrao_gt06(alvo, alterados, templates)
+
+    else:
+        return jsonify(ok=False, error="Ação de transformação desconhecida."), 400
+
+    registros_alterados = [r for r in registros if r["indice"] in alterados]
+    resposta = dict(ok=True, total_alterados=len(alterados), registros=registros_alterados)
+    resposta.update(extra)
+    return jsonify(**resposta)
+
+
+@app.route("/api/conversor-veiculos/validar", methods=["POST"])
+def conversor_veiculos_validar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    por_posicao = conversor_veiculos.validar_registros(registros)
+    por_indice_interna = conversor_veiculos.verificar_duplicidade_interna(registros)
+
+    problemas = []
+    n_erro = 0
+    for pos, registro in enumerate(registros):
+        problema = por_posicao.get(pos, {"erros": [], "avisos": []})
+        extra = por_indice_interna.get(registro["indice"])
+        erros = list(problema["erros"])
+        avisos = list(problema["avisos"]) + (extra["avisos"] if extra else [])
+        if not erros and not avisos:
+            continue
+        if erros:
+            n_erro += 1
+        problemas.append({"indice": registro["indice"], "erros": erros, "avisos": avisos})
+
+    return jsonify(ok=True, total=len(registros), n_ok=len(registros) - n_erro, n_erro=n_erro, problemas=problemas)
+
+
+# Verificação na SSX (opcional — exige login na própria API): duas checagens
+# na mesma sessão/token — mesmo padrão de
+# conversor_clientes_verificar_duplicidade (ver esse pro contexto completo).
+# 1) Duplicidade (verificar_duplicidade_ssx): código/placa que NÃO deveriam
+#    já existir. 2) Referências (verificar_referencias_ssx): cliente,
+#    template de rastreador, APN e responsável que DEVERIAM já existir —
+#    senão a SSX rejeita a linha na importação de verdade.
+@app.route("/api/conversor-veiculos/verificar-duplicidade", methods=["POST"])
+def conversor_veiculos_verificar_duplicidade():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indices_alvo = body.get("indices")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+
+    try:
+        veiculos_ssx = requisicao_padrao(LISTAGENS["veiculos"]["endpoint"], LISTAGENS["veiculos"]["payload"], token)
+        clientes_ssx = requisicao_padrao(LISTAGENS["clientes"]["endpoint"], LISTAGENS["clientes"]["payload"], token)
+        templates_ssx = requisicao_padrao(LISTAGENS["templates_rastreador"]["endpoint"], LISTAGENS["templates_rastreador"]["payload"], token)
+        simcards_ssx = requisicao_padrao(LISTAGENS["simcards"]["endpoint"], LISTAGENS["simcards"]["payload"], token)
+        pessoas_ssx = requisicao_padrao(LISTAGENS["pessoas"]["endpoint"], LISTAGENS["pessoas"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    por_indice_dup = conversor_veiculos.verificar_duplicidade_ssx(alvo, veiculos_ssx)
+    por_indice_ref = conversor_veiculos.verificar_referencias_ssx(alvo, clientes_ssx, templates_ssx, simcards_ssx, pessoas_ssx)
+
+    por_indice = {}
+    for origem in (por_indice_dup, por_indice_ref):
+        for idx, p in origem.items():
+            entrada = por_indice.setdefault(idx, {"erros": [], "avisos": []})
+            entrada["erros"].extend(p["erros"])
+            entrada["avisos"].extend(p["avisos"])
+
+    problemas = [{"indice": idx, "erros": p["erros"], "avisos": p["avisos"]} for idx, p in por_indice.items()]
+    return jsonify(
+        ok=True, total_verificados=len(alvo), total_duplicados=len(problemas), problemas=problemas,
+    )
+
+
+# Botão "Templates": checklist do que a planilha usa de Template de
+# rastreador/APN — os 2 cadastros que precisam existir na SSX ANTES da
+# importação funcionar — com quem já está cadastrado e quem falta. Mesma
+# sessão/token de "Verificar na SSX", mas não roda a checagem pesada de
+# duplicidade/referência linha a linha, só compara as listas distintas.
+@app.route("/api/conversor-veiculos/listar-templates-apns", methods=["POST"])
+def conversor_veiculos_listar_templates_apns():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    try:
+        templates_ssx = requisicao_padrao(LISTAGENS["templates_rastreador"]["endpoint"], LISTAGENS["templates_rastreador"]["payload"], token)
+        simcards_ssx = requisicao_padrao(LISTAGENS["simcards"]["endpoint"], LISTAGENS["simcards"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    resultado = conversor_veiculos.listar_templates_e_apns(entry["registros"], templates_ssx, simcards_ssx)
+    return jsonify(ok=True, **resultado)
+
+
+@app.route("/api/conversor-veiculos/exportar/<file_id>/<modo>")
+def conversor_veiculos_exportar(file_id, modo):
+    if modo not in ("todos", "validos"):
+        return jsonify(ok=False, error="Modo inválido."), 400
+
+    with CONVERSOR_VEICULOS_LOCK:
+        entry = CONVERSOR_VEICULOS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    if modo == "validos":
+        por_posicao = conversor_veiculos.validar_registros(registros)
+        posicoes_com_erro = {pos for pos, p in por_posicao.items() if p["erros"]}
+        registros_exportar = [r for i, r in enumerate(registros) if i not in posicoes_com_erro]
+    else:
+        registros_exportar = registros
+
+    conteudo = conversor_veiculos.gerar_arquivo_oficial(registros_exportar).encode("ascii", errors="ignore")
+    nome_arquivo = f"{entry['nome_base']}_SSX_Veiculos_{modo}.txt"
+    return Response(
+        conteudo,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
+
+
+# --- CONVERSOR DE PLANILHA DE RASTREADORES (importação para a SSX) ---
+# Mesmo fluxo e mesmo molde do bloco "CONVERSOR DE PLANILHA DE VEÍCULOS"
+# acima (upload -> mapear colunas -> editar/transformar -> validar ->
+# exportar), reaproveitando validador_importacao/ (TIPO_RASTREADOR) como
+# única fonte de verdade das regras (ver conversor_rastreadores.py).
+CONVERSOR_RASTREADORES_UPLOADS = {}
+CONVERSOR_RASTREADORES_LOCK = threading.Lock()
+
+# Campos liberados pra "preencher pra todas as linhas" (Template/Status/
+# Cliente — uma leva de rastreadores importada de uma vez costuma usar o
+# mesmo template e pertencer ao mesmo cliente). Checado no servidor pra não
+# aceitar um "campo" qualquer vindo do corpo da requisição.
+CONVERSOR_RASTREADORES_CAMPOS_PREENCHIVEIS = {"template", "status", "codigo_integracao_cliente"}
+# Pares liberados pra "repetir campo" — mesma ideia (lista fechada em vez de
+# aceitar origem/destino livres do corpo da requisição).
+CONVERSOR_RASTREADORES_PARES_REPETIVEIS = {
+    ("identificacao", "codigo_integracao"),
+}
+
+
+@app.route("/api/conversor-rastreadores/campos")
+def conversor_rastreadores_campos():
+    campos = []
+    for campo in conversor_rastreadores.CAMPOS_RASTREADOR:
+        obrigatorio = "condicional" if callable(campo.obrigatorio) else bool(campo.obrigatorio)
+        campos.append({
+            "chave": campo.chave, "rotulo": campo.rotulo, "obrigatorio": obrigatorio,
+            "tipo": campo.tipo, "tamanho_max": campo.tamanho_max,
+        })
+    return jsonify(ok=True, campos=campos)
+
+
+@app.route("/api/conversor-rastreadores/upload", methods=["POST"])
+def conversor_rastreadores_upload():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    arquivo = request.files["arquivo"]
+    try:
+        df = _ler_planilha_validador(arquivo)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler o arquivo: {e}"), 400
+    if df.empty:
+        return jsonify(ok=False, error="A planilha está vazia."), 400
+
+    file_id = uuid.uuid4().hex
+    nome_base = os.path.splitext(arquivo.filename or "rastreadores")[0]
+    with CONVERSOR_RASTREADORES_LOCK:
+        CONVERSOR_RASTREADORES_UPLOADS[file_id] = {"df": df, "nome_base": nome_base, "registros": None}
+    return jsonify(ok=True, file_id=file_id, colunas=list(df.columns), total_linhas=len(df))
+
+
+@app.route("/api/conversor-rastreadores/mapear", methods=["POST"])
+def conversor_rastreadores_mapear():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    mapping = body.get("mapping") or {}  # {chave_destino: coluna_origem}
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+    if entry is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+    if not mapping:
+        return jsonify(ok=False, error="Mapeie ao menos uma coluna antes de continuar."), 400
+
+    df = entry["df"]
+    colunas_validas = set(df.columns)
+    mapping_valido = {chave: col for chave, col in mapping.items() if col in colunas_validas}
+
+    registros = []
+    for pos, row in enumerate(df.itertuples(index=False), start=1):
+        row_dict = dict(zip(df.columns, row))
+        dados = {}
+        for chave, col in mapping_valido.items():
+            valor = row_dict.get(col)
+            dados[chave] = "" if (valor is None or str(valor).strip().lower() == "nan") else str(valor).strip()
+        registros.append({"indice": pos, "original": dict(dados), "dados": dict(dados)})
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry["registros"] = registros
+
+    return jsonify(ok=True, total=len(registros), registros=registros)
+
+
+@app.route("/api/conversor-rastreadores/usar-como-upload", methods=["POST"])
+def conversor_rastreadores_usar_como_upload():
+    """Transforma os registros JÁ carregados/editados no Conversor de
+    Rastreadores num "upload" do modal de importação genérico (UPLOADS, o
+    mesmo dict usado por /api/import/upload) — pro botão "Importar via API"
+    não obrigar a pessoa a exportar e re-enviar o arquivo que ela já tem na
+    tela. Mesmo padrão de conversor_veiculos_usar_como_upload."""
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Carregue e mapeie uma planilha no Conversor de Rastreadores antes."), 400
+
+    registros = entry["registros"]
+    rotulo_por_chave = {c.chave: c.rotulo for c in conversor_rastreadores.CAMPOS_RASTREADOR}
+    chaves = list(registros[0]["dados"].keys())
+    colunas = [rotulo_por_chave.get(chave, chave) for chave in chaves]
+
+    linhas = [
+        {rotulo_por_chave.get(chave, chave): r["dados"].get(chave, "") for chave in chaves}
+        for r in registros
+    ]
+    df = pd.DataFrame(linhas, columns=colunas, dtype=str)
+
+    novo_file_id = uuid.uuid4().hex
+    with UPLOADS_LOCK:
+        UPLOADS[novo_file_id] = df
+
+    mapeamento_sugerido = {}
+    for chave in chaves:
+        campo_api = CONVERSOR_RASTREADORES_PARA_API.get(chave)
+        if campo_api:
+            mapeamento_sugerido[campo_api] = rotulo_por_chave.get(chave, chave)
+
+    return jsonify(
+        ok=True, file_id=novo_file_id, colunas=colunas, total_linhas=len(df),
+        mapeamento_sugerido=mapeamento_sugerido,
+    )
+
+
+@app.route("/api/conversor-rastreadores/editar", methods=["POST"])
+def conversor_rastreadores_editar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+    campo = body.get("campo")
+    valor = body.get("valor", "")
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+    campos_validos = {c.chave for c in conversor_rastreadores.CAMPOS_RASTREADOR}
+    if campo not in campos_validos:
+        return jsonify(ok=False, error="Campo desconhecido."), 400
+
+    registro = next((r for r in entry["registros"] if r["indice"] == indice), None)
+    if registro is None:
+        return jsonify(ok=False, error="Registro não encontrado."), 404
+    registro["dados"][campo] = str(valor).strip()
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-rastreadores/excluir-linha", methods=["POST"])
+def conversor_rastreadores_excluir_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+        if entry is None or not entry.get("registros"):
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if r["indice"] != indice]
+        if len(entry["registros"]) == tamanho_antes:
+            return jsonify(ok=False, error="Linha não encontrada."), 404
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-rastreadores/adicionar-linha", methods=["POST"])
+def conversor_rastreadores_adicionar_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        proximo_indice = max((r["indice"] for r in registros), default=0) + 1
+        chaves = list(registros[0]["dados"].keys()) if registros else [c.chave for c in conversor_rastreadores.CAMPOS_RASTREADOR]
+        dados_vazios = {chave: "" for chave in chaves}
+        novo = {"indice": proximo_indice, "original": dict(dados_vazios), "dados": dict(dados_vazios)}
+        registros.append(novo)
+    return jsonify(ok=True, registro=novo)
+
+
+@app.route("/api/conversor-rastreadores/limpar-vazias", methods=["POST"])
+def conversor_rastreadores_limpar_vazias():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if any((v or "").strip() for v in r["dados"].values())]
+        removidos = tamanho_antes - len(entry["registros"])
+    return jsonify(ok=True, removidos=removidos)
+
+
+@app.route("/api/conversor-rastreadores/transformar", methods=["POST"])
+def conversor_rastreadores_transformar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    acao = body.get("acao")
+    params = body.get("params") or {}
+    indices_alvo = body.get("indices")  # lista de int, ou None/omitido = todas as linhas
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+    alterados = set()
+    extra = {}
+
+    if acao == "limpar_campo":
+        campo = params.get("campo")
+        if campo not in conversor_rastreadores._CAMPOS_NUMERICOS_LIMPAVEIS:
+            return jsonify(ok=False, error="Campo inválido para limpeza."), 400
+        extra = conversor_rastreadores.limpar_campo_numerico(alvo, alterados, campo)
+
+    elif acao == "repetir_campo":
+        origem, destino = params.get("origem"), params.get("destino")
+        if (origem, destino) not in CONVERSOR_RASTREADORES_PARES_REPETIVEIS:
+            return jsonify(ok=False, error="Par de campos inválido para repetição."), 400
+        extra = conversor_rastreadores.repetir_campo(alvo, alterados, origem, destino)
+
+    elif acao == "preencher_campo":
+        campo = params.get("campo")
+        valor = (params.get("valor") or "").strip()
+        if campo not in CONVERSOR_RASTREADORES_CAMPOS_PREENCHIVEIS:
+            return jsonify(ok=False, error="Campo inválido para preenchimento em massa."), 400
+        if not valor:
+            return jsonify(ok=False, error="Informe o valor a ser preenchido."), 400
+        extra = conversor_rastreadores.preencher_campo_todas_linhas(alvo, alterados, campo, valor)
+
+    elif acao == "aplicar_gt06":
+        templates = [t for t in (params.get("templates") or []) if isinstance(t, str) and t.strip()]
+        if not templates:
+            return jsonify(ok=False, error="Selecione ao menos um template antes de aplicar o padrão GT06."), 400
+        extra = conversor_rastreadores.aplicar_padrao_gt06(alvo, alterados, templates)
+
+    elif acao == "limpar_gt06":
+        # Lista vazia = TODOS os templates (ver limpar_padrao_gt06) — a
+        # confirmação pra esse caso já acontece no front antes de chamar
+        # esta rota, não bloqueia aqui.
+        templates = [t for t in (params.get("templates") or []) if isinstance(t, str) and t.strip()]
+        extra = conversor_rastreadores.limpar_padrao_gt06(alvo, alterados, templates)
+
+    else:
+        return jsonify(ok=False, error="Ação de transformação desconhecida."), 400
+
+    registros_alterados = [r for r in registros if r["indice"] in alterados]
+    resposta = dict(ok=True, total_alterados=len(alterados), registros=registros_alterados)
+    resposta.update(extra)
+    return jsonify(**resposta)
+
+
+@app.route("/api/conversor-rastreadores/validar", methods=["POST"])
+def conversor_rastreadores_validar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    por_posicao = conversor_rastreadores.validar_registros(registros)
+    por_indice_interna = conversor_rastreadores.verificar_duplicidade_interna(registros)
+
+    problemas = []
+    n_erro = 0
+    for pos, registro in enumerate(registros):
+        problema = por_posicao.get(pos, {"erros": [], "avisos": []})
+        extra = por_indice_interna.get(registro["indice"])
+        erros = list(problema["erros"])
+        avisos = list(problema["avisos"]) + (extra["avisos"] if extra else [])
+        if not erros and not avisos:
+            continue
+        if erros:
+            n_erro += 1
+        problemas.append({"indice": registro["indice"], "erros": erros, "avisos": avisos})
+
+    return jsonify(ok=True, total=len(registros), n_ok=len(registros) - n_erro, n_erro=n_erro, problemas=problemas)
+
+
+# Verificação na SSX (opcional — exige login na própria API): duas checagens
+# na mesma sessão/token — mesmo padrão de
+# conversor_veiculos_verificar_duplicidade. 1) Duplicidade
+# (verificar_duplicidade_ssx): código/identificação que NÃO deveriam já
+# existir. 2) Referências (verificar_referencias_ssx): template, status,
+# cliente e os dois ICCID que DEVERIAM já existir — senão a SSX rejeita a
+# linha na importação de verdade.
+@app.route("/api/conversor-rastreadores/verificar-duplicidade", methods=["POST"])
+def conversor_rastreadores_verificar_duplicidade():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indices_alvo = body.get("indices")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+
+    try:
+        rastreadores_ssx = requisicao_padrao(LISTAGENS["rastreadores"]["endpoint"], LISTAGENS["rastreadores"]["payload"], token)
+        templates_ssx = requisicao_padrao(LISTAGENS["templates_rastreador"]["endpoint"], LISTAGENS["templates_rastreador"]["payload"], token)
+        status_ssx = requisicao_padrao(LISTAGENS["status_rastreador"]["endpoint"], LISTAGENS["status_rastreador"]["payload"], token)
+        clientes_ssx = requisicao_padrao(LISTAGENS["clientes"]["endpoint"], LISTAGENS["clientes"]["payload"], token)
+        simcards_ssx = requisicao_padrao(LISTAGENS["simcards"]["endpoint"], LISTAGENS["simcards"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    por_indice_dup = conversor_rastreadores.verificar_duplicidade_ssx(alvo, rastreadores_ssx)
+    por_indice_ref = conversor_rastreadores.verificar_referencias_ssx(alvo, templates_ssx, status_ssx, clientes_ssx, simcards_ssx)
+
+    por_indice = {}
+    for origem in (por_indice_dup, por_indice_ref):
+        for idx, p in origem.items():
+            entrada = por_indice.setdefault(idx, {"erros": [], "avisos": []})
+            entrada["erros"].extend(p["erros"])
+            entrada["avisos"].extend(p["avisos"])
+
+    problemas = [{"indice": idx, "erros": p["erros"], "avisos": p["avisos"]} for idx, p in por_indice.items()]
+    return jsonify(
+        ok=True, total_verificados=len(alvo), total_duplicados=len(problemas), problemas=problemas,
+    )
+
+
+# Botão "Templates": checklist do que a planilha usa de Template/Status de
+# rastreador — os 2 cadastros que precisam existir na SSX ANTES da
+# importação funcionar — com quem já está cadastrado e quem falta. Mesma
+# sessão/token de "Verificar na SSX", mas não roda a checagem pesada de
+# duplicidade/referência linha a linha, só compara as listas distintas.
+@app.route("/api/conversor-rastreadores/listar-templates-status", methods=["POST"])
+def conversor_rastreadores_listar_templates_status():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    try:
+        templates_ssx = requisicao_padrao(LISTAGENS["templates_rastreador"]["endpoint"], LISTAGENS["templates_rastreador"]["payload"], token)
+        status_ssx = requisicao_padrao(LISTAGENS["status_rastreador"]["endpoint"], LISTAGENS["status_rastreador"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    resultado = conversor_rastreadores.listar_templates_e_status(entry["registros"], templates_ssx, status_ssx)
+    return jsonify(ok=True, **resultado)
+
+
+@app.route("/api/conversor-rastreadores/exportar/<file_id>/<modo>")
+def conversor_rastreadores_exportar(file_id, modo):
+    if modo not in ("todos", "validos"):
+        return jsonify(ok=False, error="Modo inválido."), 400
+
+    with CONVERSOR_RASTREADORES_LOCK:
+        entry = CONVERSOR_RASTREADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    if modo == "validos":
+        por_posicao = conversor_rastreadores.validar_registros(registros)
+        posicoes_com_erro = {pos for pos, p in por_posicao.items() if p["erros"]}
+        registros_exportar = [r for i, r in enumerate(registros) if i not in posicoes_com_erro]
+    else:
+        registros_exportar = registros
+
+    conteudo = conversor_rastreadores.gerar_arquivo_oficial(registros_exportar).encode("ascii", errors="ignore")
+    nome_arquivo = f"{entry['nome_base']}_SSX_Rastreadores_{modo}.txt"
+    return Response(
+        conteudo,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
+
+
+# --- CONVERSOR DE PLANILHA DE SIM CARDS (importação para a SSX) ---
+# Mesmo fluxo e mesmo molde dos blocos acima, reaproveitando
+# validador_importacao/ (TIPO_SIMCARD) como única fonte de verdade das
+# regras (ver conversor_simcards.py). Domínio sem nenhum campo de
+# "referência que deveria já existir" (ver conversor_simcards.py) — por
+# isso não tem rota de "listar-templates" nem /verificar-duplicidade faz
+# duas checagens, só uma (duplicidade de ICCID).
+CONVERSOR_SIMCARDS_UPLOADS = {}
+CONVERSOR_SIMCARDS_LOCK = threading.Lock()
+
+# Campos liberados pra "preencher pra todas as linhas" (Domínio da APN/Dia
+# de corte — uma leva de chips importada de uma vez costuma ser do mesmo
+# plano/operadora). Checado no servidor pra não aceitar um "campo" qualquer
+# vindo do corpo da requisição.
+CONVERSOR_SIMCARDS_CAMPOS_PREENCHIVEIS = {"apn_dominio", "dia_corte"}
+
+
+@app.route("/api/conversor-simcards/campos")
+def conversor_simcards_campos():
+    campos = []
+    for campo in conversor_simcards.CAMPOS_SIMCARD:
+        obrigatorio = "condicional" if callable(campo.obrigatorio) else bool(campo.obrigatorio)
+        campos.append({
+            "chave": campo.chave, "rotulo": campo.rotulo, "obrigatorio": obrigatorio,
+            "tipo": campo.tipo, "tamanho_max": campo.tamanho_max,
+        })
+    return jsonify(ok=True, campos=campos)
+
+
+@app.route("/api/conversor-simcards/upload", methods=["POST"])
+def conversor_simcards_upload():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    arquivo = request.files["arquivo"]
+    try:
+        df = _ler_planilha_validador(arquivo)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler o arquivo: {e}"), 400
+    if df.empty:
+        return jsonify(ok=False, error="A planilha está vazia."), 400
+
+    file_id = uuid.uuid4().hex
+    nome_base = os.path.splitext(arquivo.filename or "simcards")[0]
+    with CONVERSOR_SIMCARDS_LOCK:
+        CONVERSOR_SIMCARDS_UPLOADS[file_id] = {"df": df, "nome_base": nome_base, "registros": None}
+    return jsonify(ok=True, file_id=file_id, colunas=list(df.columns), total_linhas=len(df))
+
+
+@app.route("/api/conversor-simcards/mapear", methods=["POST"])
+def conversor_simcards_mapear():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    mapping = body.get("mapping") or {}  # {chave_destino: coluna_origem}
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+    if entry is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+    if not mapping:
+        return jsonify(ok=False, error="Mapeie ao menos uma coluna antes de continuar."), 400
+
+    df = entry["df"]
+    colunas_validas = set(df.columns)
+    mapping_valido = {chave: col for chave, col in mapping.items() if col in colunas_validas}
+
+    registros = []
+    for pos, row in enumerate(df.itertuples(index=False), start=1):
+        row_dict = dict(zip(df.columns, row))
+        dados = {}
+        for chave, col in mapping_valido.items():
+            valor = row_dict.get(col)
+            dados[chave] = "" if (valor is None or str(valor).strip().lower() == "nan") else str(valor).strip()
+        registros.append({"indice": pos, "original": dict(dados), "dados": dict(dados)})
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry["registros"] = registros
+
+    return jsonify(ok=True, total=len(registros), registros=registros)
+
+
+@app.route("/api/conversor-simcards/usar-como-upload", methods=["POST"])
+def conversor_simcards_usar_como_upload():
+    """Transforma os registros JÁ carregados/editados no Conversor de SIM
+    Cards num "upload" do modal de importação genérico (UPLOADS, o mesmo
+    dict usado por /api/import/upload) — pro botão "Importar via API" não
+    obrigar a pessoa a exportar e re-enviar o arquivo que ela já tem na
+    tela. Mesmo padrão de conversor_veiculos_usar_como_upload."""
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Carregue e mapeie uma planilha no Conversor de SIM Cards antes."), 400
+
+    registros = entry["registros"]
+    rotulo_por_chave = {c.chave: c.rotulo for c in conversor_simcards.CAMPOS_SIMCARD}
+    chaves = list(registros[0]["dados"].keys())
+    colunas = [rotulo_por_chave.get(chave, chave) for chave in chaves]
+
+    linhas = [
+        {rotulo_por_chave.get(chave, chave): r["dados"].get(chave, "") for chave in chaves}
+        for r in registros
+    ]
+    df = pd.DataFrame(linhas, columns=colunas, dtype=str)
+
+    novo_file_id = uuid.uuid4().hex
+    with UPLOADS_LOCK:
+        UPLOADS[novo_file_id] = df
+
+    mapeamento_sugerido = {}
+    for chave in chaves:
+        campo_api = CONVERSOR_SIMCARDS_PARA_API.get(chave)
+        if campo_api:
+            mapeamento_sugerido[campo_api] = rotulo_por_chave.get(chave, chave)
+
+    return jsonify(
+        ok=True, file_id=novo_file_id, colunas=colunas, total_linhas=len(df),
+        mapeamento_sugerido=mapeamento_sugerido,
+    )
+
+
+@app.route("/api/conversor-simcards/editar", methods=["POST"])
+def conversor_simcards_editar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+    campo = body.get("campo")
+    valor = body.get("valor", "")
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+    campos_validos = {c.chave for c in conversor_simcards.CAMPOS_SIMCARD}
+    if campo not in campos_validos:
+        return jsonify(ok=False, error="Campo desconhecido."), 400
+
+    registro = next((r for r in entry["registros"] if r["indice"] == indice), None)
+    if registro is None:
+        return jsonify(ok=False, error="Registro não encontrado."), 404
+    registro["dados"][campo] = str(valor).strip()
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-simcards/excluir-linha", methods=["POST"])
+def conversor_simcards_excluir_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+        if entry is None or not entry.get("registros"):
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if r["indice"] != indice]
+        if len(entry["registros"]) == tamanho_antes:
+            return jsonify(ok=False, error="Linha não encontrada."), 404
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-simcards/adicionar-linha", methods=["POST"])
+def conversor_simcards_adicionar_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        proximo_indice = max((r["indice"] for r in registros), default=0) + 1
+        chaves = list(registros[0]["dados"].keys()) if registros else [c.chave for c in conversor_simcards.CAMPOS_SIMCARD]
+        dados_vazios = {chave: "" for chave in chaves}
+        novo = {"indice": proximo_indice, "original": dict(dados_vazios), "dados": dict(dados_vazios)}
+        registros.append(novo)
+    return jsonify(ok=True, registro=novo)
+
+
+@app.route("/api/conversor-simcards/limpar-vazias", methods=["POST"])
+def conversor_simcards_limpar_vazias():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if any((v or "").strip() for v in r["dados"].values())]
+        removidos = tamanho_antes - len(entry["registros"])
+    return jsonify(ok=True, removidos=removidos)
+
+
+@app.route("/api/conversor-simcards/transformar", methods=["POST"])
+def conversor_simcards_transformar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    acao = body.get("acao")
+    params = body.get("params") or {}
+    indices_alvo = body.get("indices")  # lista de int, ou None/omitido = todas as linhas
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+    alterados = set()
+    extra = {}
+
+    if acao == "limpar_campo":
+        campo = params.get("campo")
+        if campo != "iccid":
+            return jsonify(ok=False, error="Campo inválido para limpeza."), 400
+        extra = conversor_simcards.limpar_campo_iccid(alvo, alterados)
+
+    elif acao == "ajustar_telefone":
+        ddd_padrao = "".join(c for c in str(params.get("ddd_padrao") or "55") if c.isdigit()) or "55"
+        if len(ddd_padrao) != 2:
+            return jsonify(ok=False, error="Informe um DDD padrão com 2 dígitos."), 400
+        extra = conversor_simcards.ajustar_telefone(alvo, alterados, ddd_padrao)
+
+    elif acao == "preencher_campo":
+        campo = params.get("campo")
+        valor = (params.get("valor") or "").strip()
+        if campo not in CONVERSOR_SIMCARDS_CAMPOS_PREENCHIVEIS:
+            return jsonify(ok=False, error="Campo inválido para preenchimento em massa."), 400
+        if not valor:
+            return jsonify(ok=False, error="Informe o valor a ser preenchido."), 400
+        extra = conversor_simcards.preencher_campo_todas_linhas(alvo, alterados, campo, valor)
+
+    else:
+        return jsonify(ok=False, error="Ação de transformação desconhecida."), 400
+
+    registros_alterados = [r for r in registros if r["indice"] in alterados]
+    resposta = dict(ok=True, total_alterados=len(alterados), registros=registros_alterados)
+    resposta.update(extra)
+    return jsonify(**resposta)
+
+
+@app.route("/api/conversor-simcards/validar", methods=["POST"])
+def conversor_simcards_validar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    por_posicao = conversor_simcards.validar_registros(registros)
+    por_indice_interna = conversor_simcards.verificar_duplicidade_interna(registros)
+
+    problemas = []
+    n_erro = 0
+    for pos, registro in enumerate(registros):
+        problema = por_posicao.get(pos, {"erros": [], "avisos": []})
+        extra = por_indice_interna.get(registro["indice"])
+        erros = list(problema["erros"])
+        avisos = list(problema["avisos"]) + (extra["avisos"] if extra else [])
+        if not erros and not avisos:
+            continue
+        if erros:
+            n_erro += 1
+        problemas.append({"indice": registro["indice"], "erros": erros, "avisos": avisos})
+
+    return jsonify(ok=True, total=len(registros), n_ok=len(registros) - n_erro, n_erro=n_erro, problemas=problemas)
+
+
+# Verificação na SSX (opcional — exige login na própria API): só duplicidade
+# de ICCID (ver conversor_simcards.py pra por que não tem checagem de
+# referências aqui, diferente de Veículo/Rastreador). Mesmo padrão de
+# conversor_veiculos_verificar_duplicidade.
+@app.route("/api/conversor-simcards/verificar-duplicidade", methods=["POST"])
+def conversor_simcards_verificar_duplicidade():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indices_alvo = body.get("indices")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+
+    try:
+        simcards_ssx = requisicao_padrao(LISTAGENS["simcards"]["endpoint"], LISTAGENS["simcards"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar SIM cards na SSX: {e}"), 400
+
+    por_indice = conversor_simcards.verificar_duplicidade_ssx(alvo, simcards_ssx)
+    problemas = [{"indice": idx, "erros": p["erros"], "avisos": p["avisos"]} for idx, p in por_indice.items()]
+    return jsonify(
+        ok=True, total_verificados=len(alvo), total_duplicados=len(problemas), problemas=problemas,
+    )
+
+
+@app.route("/api/conversor-simcards/exportar/<file_id>/<modo>")
+def conversor_simcards_exportar(file_id, modo):
+    if modo not in ("todos", "validos"):
+        return jsonify(ok=False, error="Modo inválido."), 400
+
+    with CONVERSOR_SIMCARDS_LOCK:
+        entry = CONVERSOR_SIMCARDS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    if modo == "validos":
+        por_posicao = conversor_simcards.validar_registros(registros)
+        posicoes_com_erro = {pos for pos, p in por_posicao.items() if p["erros"]}
+        registros_exportar = [r for i, r in enumerate(registros) if i not in posicoes_com_erro]
+    else:
+        registros_exportar = registros
+
+    conteudo = conversor_simcards.gerar_arquivo_oficial(registros_exportar).encode("ascii", errors="ignore")
+    nome_arquivo = f"{entry['nome_base']}_SSX_SimCards_{modo}.txt"
+    return Response(
+        conteudo,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
+
+
+# --- CONVERSOR DE PLANILHA DE ÁREAS (importação para a SSX) ---
+# Mesmo fluxo e mesmo molde dos blocos acima, reaproveitando
+# validador_importacao/ (TIPO_AREA) como única fonte de verdade das regras
+# (ver conversor_areas.py). Caminho "via planilha" — complementa o
+# Conversor KML -> SSX (conversorkml.py, 100% client-side), que cobre o
+# caminho "via arquivo de mapa"; os dois exportam o mesmo layout de arquivo.
+# Sem rota de duplicidade de verdade contra a SSX: não existe
+# "Geography/List" no Swagger (só Insert/Update/Delete/ListCategories/
+# ListGroups) — só dá pra conferir se Categoria/Grupo já estão cadastrados
+# (verificar_referencias_ssx), não se a própria área já existe.
+CONVERSOR_AREAS_UPLOADS = {}
+CONVERSOR_AREAS_LOCK = threading.Lock()
+
+# Campos liberados pra "preencher pra todas as linhas" (Categoria/Grupo/Cor
+# costumam valer o mesmo pra toda uma leva de áreas importada de uma vez).
+# Checado no servidor pra não aceitar um "campo" qualquer vindo do corpo da
+# requisição.
+CONVERSOR_AREAS_CAMPOS_PREENCHIVEIS = {"categoria", "grupo", "cor", "tolerancia"}
+
+
+@app.route("/api/conversor-areas/campos")
+def conversor_areas_campos():
+    campos = []
+    for campo in conversor_areas.CAMPOS_AREA:
+        obrigatorio = "condicional" if callable(campo.obrigatorio) else bool(campo.obrigatorio)
+        campos.append({
+            "chave": campo.chave, "rotulo": campo.rotulo, "obrigatorio": obrigatorio,
+            "tipo": campo.tipo, "tamanho_max": campo.tamanho_max,
+        })
+    return jsonify(ok=True, campos=campos)
+
+
+@app.route("/api/conversor-areas/upload", methods=["POST"])
+def conversor_areas_upload():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    arquivo = request.files["arquivo"]
+    try:
+        df = _ler_planilha_validador(arquivo)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler o arquivo: {e}"), 400
+    if df.empty:
+        return jsonify(ok=False, error="A planilha está vazia."), 400
+
+    file_id = uuid.uuid4().hex
+    nome_base = os.path.splitext(arquivo.filename or "areas")[0]
+    with CONVERSOR_AREAS_LOCK:
+        CONVERSOR_AREAS_UPLOADS[file_id] = {"df": df, "nome_base": nome_base, "registros": None}
+    return jsonify(ok=True, file_id=file_id, colunas=list(df.columns), total_linhas=len(df))
+
+
+@app.route("/api/conversor-areas/mapear", methods=["POST"])
+def conversor_areas_mapear():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    mapping = body.get("mapping") or {}  # {chave_destino: coluna_origem}
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+    if entry is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+    if not mapping:
+        return jsonify(ok=False, error="Mapeie ao menos uma coluna antes de continuar."), 400
+
+    df = entry["df"]
+    colunas_validas = set(df.columns)
+    mapping_valido = {chave: col for chave, col in mapping.items() if col in colunas_validas}
+
+    registros = []
+    for pos, row in enumerate(df.itertuples(index=False), start=1):
+        row_dict = dict(zip(df.columns, row))
+        dados = {}
+        for chave, col in mapping_valido.items():
+            valor = row_dict.get(col)
+            dados[chave] = "" if (valor is None or str(valor).strip().lower() == "nan") else str(valor).strip()
+        registros.append({"indice": pos, "original": dict(dados), "dados": dict(dados)})
+
+    with CONVERSOR_AREAS_LOCK:
+        entry["registros"] = registros
+
+    return jsonify(ok=True, total=len(registros), registros=registros)
+
+
+@app.route("/api/conversor-areas/usar-como-upload", methods=["POST"])
+def conversor_areas_usar_como_upload():
+    """Transforma os registros JÁ carregados/editados no Conversor de Áreas
+    num "upload" do modal de importação genérico (UPLOADS, o mesmo dict
+    usado por /api/import/upload) — pro botão "Importar via API" não
+    obrigar a pessoa a exportar e re-enviar o arquivo que ela já tem na
+    tela. Mesmo padrão de conversor_simcards_usar_como_upload, mais dois
+    ajustes só deste domínio: a API (Geography/Insert) espera "Type" como
+    código (1/2/3), não o rótulo "Área"/"Rota"/"Ponto" editado na tela; e
+    exige "Tolerance" sempre, mesmo quando o manual de arquivo só pede pra
+    Ponto — linha sem tolerância preenchida manda 0."""
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Carregue e mapeie uma planilha no Conversor de Áreas antes."), 400
+
+    registros = entry["registros"]
+    rotulo_por_chave = {c.chave: c.rotulo for c in conversor_areas.CAMPOS_AREA}
+    chaves = list(registros[0]["dados"].keys())
+    colunas = [rotulo_por_chave.get(chave, chave) for chave in chaves]
+
+    linhas = []
+    for r in registros:
+        dados = dict(r["dados"])
+        dados["tipo"] = conversor_areas._TIPO_PARA_CODIGO.get(dados.get("tipo", ""), dados.get("tipo", ""))
+        if not str(dados.get("tolerancia", "")).strip():
+            dados["tolerancia"] = "0"
+        linhas.append({rotulo_por_chave.get(chave, chave): dados.get(chave, "") for chave in chaves})
+    df = pd.DataFrame(linhas, columns=colunas, dtype=str)
+
+    novo_file_id = uuid.uuid4().hex
+    with UPLOADS_LOCK:
+        UPLOADS[novo_file_id] = df
+
+    mapeamento_sugerido = {}
+    for chave in chaves:
+        campo_api = CONVERSOR_AREAS_PARA_API.get(chave)
+        if campo_api:
+            mapeamento_sugerido[campo_api] = rotulo_por_chave.get(chave, chave)
+
+    return jsonify(
+        ok=True, file_id=novo_file_id, colunas=colunas, total_linhas=len(df),
+        mapeamento_sugerido=mapeamento_sugerido,
+    )
+
+
+@app.route("/api/conversor-areas/editar", methods=["POST"])
+def conversor_areas_editar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+    campo = body.get("campo")
+    valor = body.get("valor", "")
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+    campos_validos = {c.chave for c in conversor_areas.CAMPOS_AREA}
+    if campo not in campos_validos:
+        return jsonify(ok=False, error="Campo desconhecido."), 400
+
+    registro = next((r for r in entry["registros"] if r["indice"] == indice), None)
+    if registro is None:
+        return jsonify(ok=False, error="Registro não encontrado."), 404
+    registro["dados"][campo] = str(valor).strip()
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-areas/excluir-linha", methods=["POST"])
+def conversor_areas_excluir_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+        if entry is None or not entry.get("registros"):
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if r["indice"] != indice]
+        if len(entry["registros"]) == tamanho_antes:
+            return jsonify(ok=False, error="Linha não encontrada."), 404
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-areas/adicionar-linha", methods=["POST"])
+def conversor_areas_adicionar_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        proximo_indice = max((r["indice"] for r in registros), default=0) + 1
+        chaves = list(registros[0]["dados"].keys()) if registros else [c.chave for c in conversor_areas.CAMPOS_AREA]
+        dados_vazios = {chave: "" for chave in chaves}
+        novo = {"indice": proximo_indice, "original": dict(dados_vazios), "dados": dict(dados_vazios)}
+        registros.append(novo)
+    return jsonify(ok=True, registro=novo)
+
+
+@app.route("/api/conversor-areas/limpar-vazias", methods=["POST"])
+def conversor_areas_limpar_vazias():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if any((v or "").strip() for v in r["dados"].values())]
+        removidos = tamanho_antes - len(entry["registros"])
+    return jsonify(ok=True, removidos=removidos)
+
+
+@app.route("/api/conversor-areas/transformar", methods=["POST"])
+def conversor_areas_transformar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    acao = body.get("acao")
+    params = body.get("params") or {}
+    indices_alvo = body.get("indices")  # lista de int, ou None/omitido = todas as linhas
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+    alterados = set()
+    extra = {}
+
+    if acao == "preencher_campo":
+        campo = params.get("campo")
+        valor = (params.get("valor") or "").strip()
+        if campo not in CONVERSOR_AREAS_CAMPOS_PREENCHIVEIS:
+            return jsonify(ok=False, error="Campo inválido para preenchimento em massa."), 400
+        # "tolerancia" é o único campo onde valor vazio é uma ação válida
+        # (limpa a tolerância de todas as linhas) — pedido explícito da
+        # usuária, já que Tolerância deixa de ser obrigatória quando o
+        # Tipo muda de Ponto pra Área/Rota. Categoria/Grupo/Cor continuam
+        # exigindo valor, pra não disparar uma limpeza em massa por engano.
+        if not valor and campo != "tolerancia":
+            return jsonify(ok=False, error="Informe o valor a ser preenchido."), 400
+        extra = conversor_areas.preencher_campo_todas_linhas(alvo, alterados, campo, valor)
+
+    elif acao == "fechar_anel":
+        extra = conversor_areas.fechar_anel(alvo, alterados)
+
+    elif acao == "padronizar_coordenadas":
+        extra = conversor_areas.padronizar_coordenadas(alvo, alterados)
+
+    elif acao == "inverter_lat_long":
+        extra = conversor_areas.inverter_lat_long(alvo, alterados)
+
+    else:
+        return jsonify(ok=False, error="Ação de transformação desconhecida."), 400
+
+    registros_alterados = [r for r in registros if r["indice"] in alterados]
+    resposta = dict(ok=True, total_alterados=len(alterados), registros=registros_alterados)
+    resposta.update(extra)
+    return jsonify(**resposta)
+
+
+@app.route("/api/conversor-areas/validar", methods=["POST"])
+def conversor_areas_validar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    por_posicao = conversor_areas.validar_registros(registros)
+
+    problemas = []
+    n_erro = 0
+    for pos, registro in enumerate(registros):
+        problema = por_posicao.get(pos, {"erros": [], "avisos": []})
+        erros = list(problema["erros"])
+        avisos = list(problema["avisos"])
+        if not erros and not avisos:
+            continue
+        if erros:
+            n_erro += 1
+        problemas.append({"indice": registro["indice"], "erros": erros, "avisos": avisos})
+
+    return jsonify(ok=True, total=len(registros), n_ok=len(registros) - n_erro, n_erro=n_erro, problemas=problemas)
+
+
+# Verificação na SSX (opcional — exige login na própria API): só referências
+# de Categoria/Grupo (ver conversor_areas.py pra por que não tem checagem de
+# duplicidade aqui — não existe Geography/List no Swagger). Mesmo padrão de
+# conversor_rastreadores_verificar_duplicidade.
+@app.route("/api/conversor-areas/verificar-duplicidade", methods=["POST"])
+def conversor_areas_verificar_duplicidade():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indices_alvo = body.get("indices")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+
+    try:
+        categorias_ssx = requisicao_padrao(LISTAGENS["categorias_area"]["endpoint"], LISTAGENS["categorias_area"]["payload"], token)
+        grupos_ssx = requisicao_padrao(LISTAGENS["grupos_area"]["endpoint"], LISTAGENS["grupos_area"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    por_indice = conversor_areas.verificar_referencias_ssx(alvo, categorias_ssx, grupos_ssx)
+    problemas = [{"indice": idx, "erros": p["erros"], "avisos": p["avisos"]} for idx, p in por_indice.items()]
+    return jsonify(
+        ok=True, total_verificados=len(alvo), total_duplicados=len(problemas), problemas=problemas,
+    )
+
+
+# Botão "Categorias/Grupos": checklist do que a planilha usa — os 2
+# cadastros que precisam existir na SSX ANTES da importação funcionar —
+# com quem já está cadastrado e quem falta. Mesma sessão/token de
+# "Verificar na SSX". Mesmo padrão de
+# conversor_rastreadores_listar_templates_status.
+@app.route("/api/conversor-areas/listar-categorias-grupos", methods=["POST"])
+def conversor_areas_listar_categorias_grupos():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    try:
+        categorias_ssx = requisicao_padrao(LISTAGENS["categorias_area"]["endpoint"], LISTAGENS["categorias_area"]["payload"], token)
+        grupos_ssx = requisicao_padrao(LISTAGENS["grupos_area"]["endpoint"], LISTAGENS["grupos_area"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    resultado = conversor_areas.listar_categorias_e_grupos(entry["registros"], categorias_ssx, grupos_ssx)
+    return jsonify(ok=True, **resultado)
+
+
+@app.route("/api/conversor-areas/exportar/<file_id>/<modo>")
+def conversor_areas_exportar(file_id, modo):
+    if modo not in ("todos", "validos"):
+        return jsonify(ok=False, error="Modo inválido."), 400
+
+    with CONVERSOR_AREAS_LOCK:
+        entry = CONVERSOR_AREAS_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    if modo == "validos":
+        por_posicao = conversor_areas.validar_registros(registros)
+        posicoes_com_erro = {pos for pos, p in por_posicao.items() if p["erros"]}
+        registros_exportar = [r for i, r in enumerate(registros) if i not in posicoes_com_erro]
+    else:
+        registros_exportar = registros
+
+    conteudo = conversor_areas.gerar_arquivo_oficial(registros_exportar).encode("ascii", errors="ignore")
+    nome_arquivo = f"{entry['nome_base']}_SSX_Areas_{modo}.csv"
+    return Response(
+        conteudo,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
+
+
+# --- CONVERSOR DE PLANILHA DE UNIDADES ORGANIZACIONAIS (importação para a SSX) ---
+# Mesmo fluxo e mesmo molde dos blocos acima, reaproveitando
+# validador_importacao/ (TIPO_UO) como única fonte de verdade das regras
+# (ver conversor_uo.py). ÚNICO dos 5 conversores SEM rota de "exportar": a
+# SSX não tem layout de arquivo pra Unidade Organizacional, só a API
+# (`OrganizationalUnit/Insert`, confirmado no Swagger) — por isso "Importar
+# via API" é a única forma de concluir aqui, nunca "Baixar arquivo".
+CONVERSOR_UO_UPLOADS = {}
+CONVERSOR_UO_LOCK = threading.Lock()
+
+# Campos liberados pra "preencher pra todas as linhas" — Tipo, Cliente e
+# Unidade pai normalmente valem o mesmo pra toda uma leva de UOs importada
+# de uma vez (mesmo cliente/hierarquia). Checado no servidor pra não
+# aceitar um "campo" qualquer vindo do corpo da requisição.
+CONVERSOR_UO_CAMPOS_PREENCHIVEIS = {"tipo", "codigo_integracao_cliente", "unidade_pai"}
+
+
+@app.route("/api/conversor-uo/campos")
+def conversor_uo_campos():
+    campos = []
+    for campo in conversor_uo.CAMPOS_UO:
+        obrigatorio = "condicional" if callable(campo.obrigatorio) else bool(campo.obrigatorio)
+        campos.append({
+            "chave": campo.chave, "rotulo": campo.rotulo, "obrigatorio": obrigatorio,
+            "tipo": campo.tipo, "tamanho_max": campo.tamanho_max,
+        })
+    return jsonify(ok=True, campos=campos)
+
+
+@app.route("/api/conversor-uo/upload", methods=["POST"])
+def conversor_uo_upload():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    arquivo = request.files["arquivo"]
+    try:
+        df = _ler_planilha_validador(arquivo)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler o arquivo: {e}"), 400
+    if df.empty:
+        return jsonify(ok=False, error="A planilha está vazia."), 400
+
+    file_id = uuid.uuid4().hex
+    nome_base = os.path.splitext(arquivo.filename or "unidades_organizacionais")[0]
+    with CONVERSOR_UO_LOCK:
+        CONVERSOR_UO_UPLOADS[file_id] = {"df": df, "nome_base": nome_base, "registros": None}
+    return jsonify(ok=True, file_id=file_id, colunas=list(df.columns), total_linhas=len(df))
+
+
+@app.route("/api/conversor-uo/mapear", methods=["POST"])
+def conversor_uo_mapear():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    mapping = body.get("mapping") or {}  # {chave_destino: coluna_origem}
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+    if entry is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+    if not mapping:
+        return jsonify(ok=False, error="Mapeie ao menos uma coluna antes de continuar."), 400
+
+    df = entry["df"]
+    colunas_validas = set(df.columns)
+    mapping_valido = {chave: col for chave, col in mapping.items() if col in colunas_validas}
+
+    registros = []
+    for pos, row in enumerate(df.itertuples(index=False), start=1):
+        row_dict = dict(zip(df.columns, row))
+        dados = {}
+        for chave, col in mapping_valido.items():
+            valor = row_dict.get(col)
+            dados[chave] = "" if (valor is None or str(valor).strip().lower() == "nan") else str(valor).strip()
+        registros.append({"indice": pos, "original": dict(dados), "dados": dict(dados)})
+
+    with CONVERSOR_UO_LOCK:
+        entry["registros"] = registros
+
+    return jsonify(ok=True, total=len(registros), registros=registros)
+
+
+@app.route("/api/conversor-uo/usar-como-upload", methods=["POST"])
+def conversor_uo_usar_como_upload():
+    """Transforma os registros JÁ carregados/editados no Conversor de UO
+    num "upload" do modal de importação genérico (UPLOADS, o mesmo dict
+    usado por /api/import/upload) — pro botão "Importar via API" não
+    obrigar a pessoa a exportar e re-enviar o arquivo que ela já tem na
+    tela. Mesmo padrão de conversor_rastreadores_usar_como_upload (sem
+    nenhum ajuste de valor, diferente de Áreas: todo campo de PARAMS["uo"]
+    já nasce no formato que a API espera)."""
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Carregue e mapeie uma planilha no Conversor de Unidades Organizacionais antes."), 400
+
+    registros = entry["registros"]
+    rotulo_por_chave = {c.chave: c.rotulo for c in conversor_uo.CAMPOS_UO}
+    chaves = list(registros[0]["dados"].keys())
+    colunas = [rotulo_por_chave.get(chave, chave) for chave in chaves]
+
+    linhas = [
+        {rotulo_por_chave.get(chave, chave): r["dados"].get(chave, "") for chave in chaves}
+        for r in registros
+    ]
+    df = pd.DataFrame(linhas, columns=colunas, dtype=str)
+
+    novo_file_id = uuid.uuid4().hex
+    with UPLOADS_LOCK:
+        UPLOADS[novo_file_id] = df
+
+    mapeamento_sugerido = {}
+    for chave in chaves:
+        campo_api = CONVERSOR_UO_PARA_API.get(chave)
+        if campo_api:
+            mapeamento_sugerido[campo_api] = rotulo_por_chave.get(chave, chave)
+
+    return jsonify(
+        ok=True, file_id=novo_file_id, colunas=colunas, total_linhas=len(df),
+        mapeamento_sugerido=mapeamento_sugerido,
+    )
+
+
+@app.route("/api/conversor-uo/editar", methods=["POST"])
+def conversor_uo_editar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+    campo = body.get("campo")
+    valor = body.get("valor", "")
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+    campos_validos = {c.chave for c in conversor_uo.CAMPOS_UO}
+    if campo not in campos_validos:
+        return jsonify(ok=False, error="Campo desconhecido."), 400
+
+    registro = next((r for r in entry["registros"] if r["indice"] == indice), None)
+    if registro is None:
+        return jsonify(ok=False, error="Registro não encontrado."), 404
+    registro["dados"][campo] = str(valor).strip()
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-uo/excluir-linha", methods=["POST"])
+def conversor_uo_excluir_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+        if entry is None or not entry.get("registros"):
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if r["indice"] != indice]
+        if len(entry["registros"]) == tamanho_antes:
+            return jsonify(ok=False, error="Linha não encontrada."), 404
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-uo/adicionar-linha", methods=["POST"])
+def conversor_uo_adicionar_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        proximo_indice = max((r["indice"] for r in registros), default=0) + 1
+        chaves = list(registros[0]["dados"].keys()) if registros else [c.chave for c in conversor_uo.CAMPOS_UO]
+        dados_vazios = {chave: "" for chave in chaves}
+        novo = {"indice": proximo_indice, "original": dict(dados_vazios), "dados": dict(dados_vazios)}
+        registros.append(novo)
+    return jsonify(ok=True, registro=novo)
+
+
+@app.route("/api/conversor-uo/limpar-vazias", methods=["POST"])
+def conversor_uo_limpar_vazias():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if any((v or "").strip() for v in r["dados"].values())]
+        removidos = tamanho_antes - len(entry["registros"])
+    return jsonify(ok=True, removidos=removidos)
+
+
+@app.route("/api/conversor-uo/transformar", methods=["POST"])
+def conversor_uo_transformar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    acao = body.get("acao")
+    params = body.get("params") or {}
+    indices_alvo = body.get("indices")  # lista de int, ou None/omitido = todas as linhas
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+    alterados = set()
+    extra = {}
+
+    if acao == "preencher_campo":
+        campo = params.get("campo")
+        valor = (params.get("valor") or "").strip()
+        if campo not in CONVERSOR_UO_CAMPOS_PREENCHIVEIS:
+            return jsonify(ok=False, error="Campo inválido para preenchimento em massa."), 400
+        if not valor:
+            return jsonify(ok=False, error="Informe o valor a ser preenchido."), 400
+        extra = conversor_uo.preencher_campo_todas_linhas(alvo, alterados, campo, valor)
+
+    else:
+        return jsonify(ok=False, error="Ação de transformação desconhecida."), 400
+
+    registros_alterados = [r for r in registros if r["indice"] in alterados]
+    resposta = dict(ok=True, total_alterados=len(alterados), registros=registros_alterados)
+    resposta.update(extra)
+    return jsonify(**resposta)
+
+
+@app.route("/api/conversor-uo/validar", methods=["POST"])
+def conversor_uo_validar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    por_posicao = conversor_uo.validar_registros(registros)
+
+    problemas = []
+    n_erro = 0
+    for pos, registro in enumerate(registros):
+        problema = por_posicao.get(pos, {"erros": [], "avisos": []})
+        erros = list(problema["erros"])
+        avisos = list(problema["avisos"])
+        if not erros and not avisos:
+            continue
+        if erros:
+            n_erro += 1
+        problemas.append({"indice": registro["indice"], "erros": erros, "avisos": avisos})
+
+    return jsonify(ok=True, total=len(registros), n_ok=len(registros) - n_erro, n_erro=n_erro, problemas=problemas)
+
+
+# Verificação na SSX (opcional — exige login na própria API): duas
+# checagens na mesma sessão/token — mesmo padrão de
+# conversor_rastreadores_verificar_duplicidade. 1) Duplicidade
+# (verificar_duplicidade_ssx): código que NÃO deveria já existir. 2)
+# Referências (verificar_referencias_ssx): Unidade pai e cliente que
+# DEVERIAM já existir — senão a API rejeita a linha na importação de
+# verdade ("Tipo" fica de fora: o próprio Swagger documenta criação
+# automática, ver conversor_uo.verificar_referencias_ssx).
+@app.route("/api/conversor-uo/verificar-duplicidade", methods=["POST"])
+def conversor_uo_verificar_duplicidade():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indices_alvo = body.get("indices")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_UO_LOCK:
+        entry = CONVERSOR_UO_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+
+    try:
+        uos_ssx = requisicao_padrao(LISTAGENS["uos"]["endpoint"], LISTAGENS["uos"]["payload"], token)
+        clientes_ssx = requisicao_padrao(LISTAGENS["clientes"]["endpoint"], LISTAGENS["clientes"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    por_indice_dup = conversor_uo.verificar_duplicidade_ssx(alvo, uos_ssx)
+    por_indice_ref = conversor_uo.verificar_referencias_ssx(alvo, uos_ssx, clientes_ssx)
+
+    por_indice = {}
+    for origem in (por_indice_dup, por_indice_ref):
+        for idx, p in origem.items():
+            entrada = por_indice.setdefault(idx, {"erros": [], "avisos": []})
+            entrada["erros"].extend(p["erros"])
+            entrada["avisos"].extend(p["avisos"])
+
+    problemas = [{"indice": idx, "erros": p["erros"], "avisos": p["avisos"]} for idx, p in por_indice.items()]
+    return jsonify(
+        ok=True, total_verificados=len(alvo), total_duplicados=len(problemas), problemas=problemas,
+    )
+
+
+# --- CONVERSOR DE PLANILHA DE COLABORADORES (importação para a SSX) ---
+# Mesmo fluxo e mesmo molde dos blocos acima, reaproveitando
+# validador_importacao/ (TIPO_COLABORADOR) como única fonte de verdade das
+# regras (ver conversor_colaboradores.py). Mesmo molde de "CONVERSOR DE
+# PLANILHA DE CLIENTES" — vários botões/ações são diretamente análogos aos
+# de lá (ver comentário de conversor_colaboradores.py).
+CONVERSOR_COLABORADORES_UPLOADS = {}
+CONVERSOR_COLABORADORES_LOCK = threading.Lock()
+
+# Campos liberados pra "preencher pra todas as linhas" — Cargo/Perfil de
+# acesso/Unidade organizacional normalmente valem o mesmo pra toda uma leva
+# de colaboradores importada de uma vez (mesmo padrão de Template do
+# cliente/Perfil de acesso em conversor_clientes). Checado no servidor pra
+# não aceitar um "campo" qualquer vindo do corpo da requisição.
+CONVERSOR_COLABORADORES_CAMPOS_PREENCHIVEIS = {"cargo", "perfil_acesso", "unidade_organizacional"}
+
+
+@app.route("/api/conversor-colaboradores/campos")
+def conversor_colaboradores_campos():
+    campos = []
+    for campo in conversor_colaboradores.CAMPOS_COLABORADOR:
+        obrigatorio = "condicional" if callable(campo.obrigatorio) else bool(campo.obrigatorio)
+        campos.append({
+            "chave": campo.chave, "rotulo": campo.rotulo, "obrigatorio": obrigatorio,
+            "tipo": campo.tipo, "tamanho_max": campo.tamanho_max,
+        })
+    return jsonify(ok=True, campos=campos)
+
+
+@app.route("/api/conversor-colaboradores/upload", methods=["POST"])
+def conversor_colaboradores_upload():
+    if "arquivo" not in request.files:
+        return jsonify(ok=False, error="Nenhum arquivo enviado."), 400
+    arquivo = request.files["arquivo"]
+    try:
+        df = _ler_planilha_validador(arquivo)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Falha ao ler o arquivo: {e}"), 400
+    if df.empty:
+        return jsonify(ok=False, error="A planilha está vazia."), 400
+
+    file_id = uuid.uuid4().hex
+    nome_base = os.path.splitext(arquivo.filename or "colaboradores")[0]
+    with CONVERSOR_COLABORADORES_LOCK:
+        CONVERSOR_COLABORADORES_UPLOADS[file_id] = {"df": df, "nome_base": nome_base, "registros": None}
+    return jsonify(ok=True, file_id=file_id, colunas=list(df.columns), total_linhas=len(df))
+
+
+@app.route("/api/conversor-colaboradores/mapear", methods=["POST"])
+def conversor_colaboradores_mapear():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    mapping = body.get("mapping") or {}  # {chave_destino: coluna_origem}
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+    if entry is None:
+        return jsonify(ok=False, error="Arquivo não encontrado. Envie novamente."), 400
+    if not mapping:
+        return jsonify(ok=False, error="Mapeie ao menos uma coluna antes de continuar."), 400
+
+    df = entry["df"]
+    colunas_validas = set(df.columns)
+    mapping_valido = {chave: col for chave, col in mapping.items() if col in colunas_validas}
+
+    registros = []
+    for pos, row in enumerate(df.itertuples(index=False), start=1):
+        row_dict = dict(zip(df.columns, row))
+        dados = {}
+        for chave, col in mapping_valido.items():
+            valor = row_dict.get(col)
+            dados[chave] = "" if (valor is None or str(valor).strip().lower() == "nan") else str(valor).strip()
+        registros.append({"indice": pos, "original": dict(dados), "dados": dict(dados)})
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry["registros"] = registros
+
+    return jsonify(ok=True, total=len(registros), registros=registros)
+
+
+@app.route("/api/conversor-colaboradores/usar-como-upload", methods=["POST"])
+def conversor_colaboradores_usar_como_upload():
+    """Transforma os registros JÁ carregados/editados no Conversor de
+    Colaboradores num "upload" do modal de importação genérico (UPLOADS, o
+    mesmo dict usado por /api/import/upload) — pro botão "Importar via API"
+    não obrigar a pessoa a exportar e re-enviar o arquivo que ela já tem na
+    tela. Mesmo padrão de conversor_clientes_usar_como_upload — inclusive o
+    ajuste de "Senha" vazia virar "0" (só nesse caminho da API, o .txt
+    exportado continua em branco)."""
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Carregue e mapeie uma planilha no Conversor de Colaboradores antes."), 400
+
+    registros = entry["registros"]
+    rotulo_por_chave = {c.chave: c.rotulo for c in conversor_colaboradores.CAMPOS_COLABORADOR}
+    chaves = list(registros[0]["dados"].keys())
+    colunas = [rotulo_por_chave.get(chave, chave) for chave in chaves]
+
+    linhas = []
+    for r in registros:
+        dados = dict(r["dados"])
+        if "senha" in dados and not str(dados.get("senha", "")).strip():
+            dados["senha"] = "0"
+        linhas.append({rotulo_por_chave.get(chave, chave): dados.get(chave, "") for chave in chaves})
+    df = pd.DataFrame(linhas, columns=colunas, dtype=str)
+
+    novo_file_id = uuid.uuid4().hex
+    with UPLOADS_LOCK:
+        UPLOADS[novo_file_id] = df
+
+    mapeamento_sugerido = {}
+    for chave in chaves:
+        campo_api = CONVERSOR_COLABORADORES_PARA_API.get(chave)
+        if campo_api:
+            mapeamento_sugerido[campo_api] = rotulo_por_chave.get(chave, chave)
+
+    return jsonify(
+        ok=True, file_id=novo_file_id, colunas=colunas, total_linhas=len(df),
+        mapeamento_sugerido=mapeamento_sugerido,
+    )
+
+
+@app.route("/api/conversor-colaboradores/editar", methods=["POST"])
+def conversor_colaboradores_editar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+    campo = body.get("campo")
+    valor = body.get("valor", "")
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+    campos_validos = {c.chave for c in conversor_colaboradores.CAMPOS_COLABORADOR}
+    if campo not in campos_validos:
+        return jsonify(ok=False, error="Campo desconhecido."), 400
+
+    registro = next((r for r in entry["registros"] if r["indice"] == indice), None)
+    if registro is None:
+        return jsonify(ok=False, error="Registro não encontrado."), 404
+    registro["dados"][campo] = str(valor).strip()
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-colaboradores/excluir-linha", methods=["POST"])
+def conversor_colaboradores_excluir_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indice = body.get("indice")
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+        if entry is None or not entry.get("registros"):
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if r["indice"] != indice]
+        if len(entry["registros"]) == tamanho_antes:
+            return jsonify(ok=False, error="Linha não encontrada."), 404
+    return jsonify(ok=True)
+
+
+@app.route("/api/conversor-colaboradores/adicionar-linha", methods=["POST"])
+def conversor_colaboradores_adicionar_linha():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        proximo_indice = max((r["indice"] for r in registros), default=0) + 1
+        chaves = list(registros[0]["dados"].keys()) if registros else [c.chave for c in conversor_colaboradores.CAMPOS_COLABORADOR]
+        dados_vazios = {chave: "" for chave in chaves}
+        novo = {"indice": proximo_indice, "original": dict(dados_vazios), "dados": dict(dados_vazios)}
+        registros.append(novo)
+    return jsonify(ok=True, registro=novo)
+
+
+@app.route("/api/conversor-colaboradores/limpar-vazias", methods=["POST"])
+def conversor_colaboradores_limpar_vazias():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+        if entry is None or entry.get("registros") is None:
+            return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+        registros = entry["registros"]
+        tamanho_antes = len(registros)
+        entry["registros"] = [r for r in registros if any((v or "").strip() for v in r["dados"].values())]
+        removidos = tamanho_antes - len(entry["registros"])
+    return jsonify(ok=True, removidos=removidos)
+
+
+@app.route("/api/conversor-colaboradores/transformar", methods=["POST"])
+def conversor_colaboradores_transformar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    acao = body.get("acao")
+    params = body.get("params") or {}
+    indices_alvo = body.get("indices")  # lista de int, ou None/omitido = todas as linhas
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+    alterados = set()
+    extra = {}
+
+    if acao == "limpar_cpf":
+        for r in alvo:
+            anterior = r["dados"].get("cpf", "")
+            novo = conversor_colaboradores.limpar_cpf(anterior)
+            if novo != anterior:
+                r["dados"]["cpf"] = novo
+                alterados.add(r["indice"])
+
+    elif acao == "ajustar_telefone":
+        ddd_padrao = "".join(c for c in str(params.get("ddd_padrao") or "55") if c.isdigit()) or "55"
+        if len(ddd_padrao) != 2:
+            return jsonify(ok=False, error="Informe um DDD padrão com 2 dígitos."), 400
+        extra = conversor_colaboradores.ajustar_telefone(alvo, alterados, ddd_padrao)
+
+    elif acao == "preencher_campo":
+        campo = params.get("campo")
+        valor = (params.get("valor") or "").strip()
+        if campo not in CONVERSOR_COLABORADORES_CAMPOS_PREENCHIVEIS:
+            return jsonify(ok=False, error="Campo inválido para preenchimento em massa."), 400
+        if not valor:
+            return jsonify(ok=False, error="Informe o valor a ser preenchido."), 400
+        extra = conversor_colaboradores.preencher_campo_todas_linhas(alvo, alterados, campo, valor)
+
+    elif acao == "preencher_senhas":
+        senha = params.get("senha") or ""
+        sobrescrever = bool(params.get("sobrescrever"))
+        if not senha:
+            return jsonify(ok=False, error="Informe a senha a ser preenchida."), 400
+        for r in alvo:
+            anterior = r["dados"].get("senha", "")
+            novo = conversor_colaboradores.preencher_senha(anterior, senha, sobrescrever)
+            if novo != anterior:
+                r["dados"]["senha"] = novo
+                alterados.add(r["indice"])
+
+    else:
+        return jsonify(ok=False, error="Ação de transformação desconhecida."), 400
+
+    registros_alterados = [r for r in registros if r["indice"] in alterados]
+    resposta = dict(ok=True, total_alterados=len(alterados), registros=registros_alterados)
+    resposta.update(extra)
+    return jsonify(**resposta)
+
+
+@app.route("/api/conversor-colaboradores/validar", methods=["POST"])
+def conversor_colaboradores_validar():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    por_posicao = conversor_colaboradores.validar_registros(registros)
+    por_indice_interna = conversor_colaboradores.verificar_duplicidade_interna(registros)
+
+    problemas = []
+    n_erro = 0
+    for pos, registro in enumerate(registros):
+        problema = por_posicao.get(pos, {"erros": [], "avisos": []})
+        extra = por_indice_interna.get(registro["indice"])
+        erros = list(problema["erros"])
+        avisos = list(problema["avisos"]) + (extra["avisos"] if extra else [])
+        if not erros and not avisos:
+            continue
+        if erros:
+            n_erro += 1
+        problemas.append({"indice": registro["indice"], "erros": erros, "avisos": avisos})
+
+    return jsonify(ok=True, total=len(registros), n_ok=len(registros) - n_erro, n_erro=n_erro, problemas=problemas)
+
+
+# Verificação na SSX (opcional — exige login na própria API): duas
+# checagens na mesma sessão/token — mesmo padrão de
+# conversor_uo_verificar_duplicidade. 1) Duplicidade
+# (verificar_duplicidade_ssx): código/CPF/login que NÃO deveriam já
+# existir. 2) Referências (verificar_referencias_ssx): Unidade
+# organizacional e Perfil de acesso que DEVERIAM já existir — senão a API
+# rejeita a linha na importação de verdade.
+@app.route("/api/conversor-colaboradores/verificar-duplicidade", methods=["POST"])
+def conversor_colaboradores_verificar_duplicidade():
+    body = request.get_json(force=True) or {}
+    file_id = body.get("file_id")
+    indices_alvo = body.get("indices")
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    alvo = registros if not indices_alvo else [r for r in registros if r["indice"] in set(indices_alvo)]
+
+    try:
+        pessoas_ssx = requisicao_padrao(LISTAGENS["pessoas"]["endpoint"], LISTAGENS["pessoas"]["payload"], token)
+        uos_ssx = requisicao_padrao(LISTAGENS["uos"]["endpoint"], LISTAGENS["uos"]["payload"], token)
+        perfis_ssx = requisicao_padrao(LISTAGENS["perfis_acesso"]["endpoint"], LISTAGENS["perfis_acesso"]["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    por_indice_dup = conversor_colaboradores.verificar_duplicidade_ssx(alvo, pessoas_ssx)
+    por_indice_ref = conversor_colaboradores.verificar_referencias_ssx(alvo, uos_ssx, perfis_ssx)
+
+    por_indice = {}
+    for origem in (por_indice_dup, por_indice_ref):
+        for idx, p in origem.items():
+            entrada = por_indice.setdefault(idx, {"erros": [], "avisos": []})
+            entrada["erros"].extend(p["erros"])
+            entrada["avisos"].extend(p["avisos"])
+
+    problemas = [{"indice": idx, "erros": p["erros"], "avisos": p["avisos"]} for idx, p in por_indice.items()]
+    return jsonify(
+        ok=True, total_verificados=len(alvo), total_duplicados=len(problemas), problemas=problemas,
+    )
+
+
+@app.route("/api/conversor-colaboradores/exportar/<file_id>/<modo>")
+def conversor_colaboradores_exportar(file_id, modo):
+    if modo not in ("todos", "validos"):
+        return jsonify(ok=False, error="Modo inválido."), 400
+
+    with CONVERSOR_COLABORADORES_LOCK:
+        entry = CONVERSOR_COLABORADORES_UPLOADS.get(file_id)
+    if entry is None or not entry.get("registros"):
+        return jsonify(ok=False, error="Planilha não encontrada ou ainda não mapeada."), 400
+
+    registros = entry["registros"]
+    if modo == "validos":
+        por_posicao = conversor_colaboradores.validar_registros(registros)
+        posicoes_com_erro = {pos for pos, p in por_posicao.items() if p["erros"]}
+        registros_exportar = [r for i, r in enumerate(registros) if i not in posicoes_com_erro]
+    else:
+        registros_exportar = registros
+
+    conteudo = conversor_colaboradores.gerar_arquivo_oficial(registros_exportar).encode("ascii", errors="ignore")
+    nome_arquivo = f"{entry['nome_base']}_SSX_Colaboradores_{modo}.txt"
+    return Response(
+        conteudo,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
+
+
+# --- ATALHOS (OPERAÇÕES EM MASSA, Central de Importação SSX) ---
+# Só a etapa de listagem/seleção da Exclusão em massa por enquanto (ver
+# pedido original) — reaproveita LISTAGENS/_token_para/requisicao_padrao já
+# usados pelos Conversores. Confirmado no Swagger (Delete de cada tipo): só
+# dá pra excluir um registro que já tem o campo abaixo preenchido —
+# "campo_codigo" é exatamente o que os endpoints Client/Delete,
+# Vehicle/Delete, Tracker/Delete e SimCard/Delete pedem (SimCard usa o
+# próprio ICCID, não tem um "código de integração" separado). "area" fica
+# de fora de propósito: não existe Geography/List no Swagger (só
+# Insert/Update/Delete/ListCategories/ListGroups), então não tem como listar
+# área nenhuma pra montar o checklist.
+ATALHOS_TIPOS = {
+    "cliente": {"titulo": "Clientes", "listagem": "clientes", "campo_codigo": "ClientIntegrationCode", "campo_nome": "TradingName", "endpoint_delete": "/Administration/Client/Delete"},
+    "veiculo": {"titulo": "Veículos", "listagem": "veiculos", "campo_codigo": "VehicleIntegrationCode", "campo_nome": "Identification", "endpoint_delete": "/Administration/Vehicle/Delete"},
+    "rastreador": {"titulo": "Rastreadores", "listagem": "rastreadores", "campo_codigo": "TrackerIntegrationCode", "campo_nome": "IdTracker", "endpoint_delete": "/Administration/Tracker/Delete"},
+    "simcard": {"titulo": "SIM Cards", "listagem": "simcards", "campo_codigo": "ICCID", "campo_nome": "ICCID", "endpoint_delete": "/Administration/SimCard/Delete"},
+}
+
+
+@app.route("/api/atalhos/listar/<tipo>", methods=["POST"])
+def atalhos_listar(tipo):
+    if tipo == "area":
+        return jsonify(ok=False, error="Não é possível listar Áreas — a SSX não tem endpoint de consulta (List) pra esse cadastro, só Insert/Update/Delete."), 400
+    config = ATALHOS_TIPOS.get(tipo)
+    if not config:
+        return jsonify(ok=False, error="Tipo desconhecido."), 400
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    listagem = LISTAGENS[config["listagem"]]
+    try:
+        registros_ssx = requisicao_padrao(listagem["endpoint"], listagem["payload"], token)
+    except requests.exceptions.RequestException as e:
+        return jsonify(ok=False, error=f"Falha ao consultar a SSX: {e}"), 400
+
+    registros = []
+    for r in registros_ssx or []:
+        codigo = str(r.get(config["campo_codigo"]) or "").strip()
+        nome = str(r.get(config["campo_nome"]) or "").strip() or "(sem nome)"
+        registros.append({"codigo": codigo, "nome": nome, "elegivel": bool(codigo)})
+
+    return jsonify(ok=True, titulo=config["titulo"], total=len(registros), registros=registros)
+
+
+# Exclusão de verdade: mesmo padrão de job/thread/polling de
+# _executar_deletar_veiculos (Área de Importação) — generalizado pros 4
+# tipos via ATALHOS_TIPOS["endpoint_delete"], e usando a sessão avulsa desta
+# tela (_token_para(None), mesma dos outros endpoints de /api/atalhos/*) em
+# vez do idcentral multi-cliente do deletar-veiculos antigo. O corpo de
+# cada chamada Delete é o CÓDIGO em si (string crua), não um objeto — assim
+# que o Swagger documenta Client/Delete, Vehicle/Delete, Tracker/Delete e
+# SimCard/Delete. Uma linha que falha é registrada e não trava as demais.
+ATALHOS_EXCLUSAO_JOBS = {}
+ATALHOS_EXCLUSAO_JOBS_LOCK = threading.Lock()
+
+
+def _executar_atalhos_exclusao(job_id, endpoint_delete, codigos, token):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    sucessos = erros = 0
+    for i, codigo in enumerate(codigos):
+        try:
+            r = requests.post(f"{BASE_URL}{endpoint_delete}", json=codigo, headers=headers, timeout=20)
+            if r.status_code in (200, 201):
+                sucessos += 1
+                mensagem = f"{i + 1}/{len(codigos)}: código {codigo} excluído."
+            else:
+                erros += 1
+                mensagem = f"Erro {i + 1}/{len(codigos)} (código {codigo}): HTTP {r.status_code} — {r.text[:200]}"
+        except requests.exceptions.RequestException as e:
+            erros += 1
+            mensagem = f"Erro {i + 1}/{len(codigos)} (código {codigo}): {e}"
+
+        with ATALHOS_EXCLUSAO_JOBS_LOCK:
+            job = ATALHOS_EXCLUSAO_JOBS[job_id]
+            job["logs"].append(mensagem)
+            job["atual"] = i + 1
+            job["sucessos"] = sucessos
+            job["erros"] = erros
+
+    with ATALHOS_EXCLUSAO_JOBS_LOCK:
+        ATALHOS_EXCLUSAO_JOBS[job_id]["status"] = "concluido"
+
+
+@app.route("/api/atalhos/excluir/executar", methods=["POST"])
+def atalhos_excluir_executar():
+    body = request.get_json(force=True) or {}
+    tipo = body.get("tipo")
+    codigos = body.get("codigos") or []
+
+    config = ATALHOS_TIPOS.get(tipo)
+    if not config:
+        return jsonify(ok=False, error="Tipo inválido para exclusão."), 400
+    codigos = [str(c).strip() for c in codigos if str(c).strip()]
+    if not codigos:
+        return jsonify(ok=False, error="Nenhum código selecionado."), 400
+
+    token, erro_resp, status = _token_para(None)
+    if erro_resp:
+        return erro_resp, status
+
+    job_id = uuid.uuid4().hex
+    with ATALHOS_EXCLUSAO_JOBS_LOCK:
+        ATALHOS_EXCLUSAO_JOBS[job_id] = {
+            "status": "rodando", "atual": 0, "total": len(codigos),
+            "sucessos": 0, "erros": 0, "logs": [],
+        }
+
+    threading.Thread(
+        target=_executar_atalhos_exclusao,
+        args=(job_id, config["endpoint_delete"], codigos, token),
+        daemon=True,
+    ).start()
+
+    return jsonify(ok=True, job_id=job_id, total=len(codigos))
+
+
+@app.route("/api/atalhos/excluir/status/<job_id>")
+def atalhos_excluir_status(job_id):
+    with ATALHOS_EXCLUSAO_JOBS_LOCK:
+        job = ATALHOS_EXCLUSAO_JOBS.get(job_id)
+        if not job:
+            return jsonify(ok=False, error="Job não encontrado."), 404
+        resultado = dict(job)
+    return jsonify(ok=True, **resultado)
+
+
 # --- ENVIO DE COMANDO (SMS Market) ---
 # Portado do "Configurador de rastreadores V5.0" (tkinter). A lógica de geração
 # de comando por modelo/comando e o fluxo de envio (único, livre, em massa)
@@ -4808,9 +7912,13 @@ def conversor_converter():
             return jsonify(ok=False, error="Cor deve ser um código de 1 a 13 (ver tabela do manual)."), 400
 
     try:
-        kml_text = arquivo.read().decode("utf-8")
+        kml_text = conversorkml.extrair_texto_kml(arquivo.read())
     except UnicodeDecodeError:
         return jsonify(ok=False, error="Arquivo KML não está em UTF-8."), 400
+    except zipfile.BadZipFile:
+        return jsonify(ok=False, error="Arquivo KMZ corrompido ou inválido."), 400
+    except ValueError as e:
+        return jsonify(ok=False, error=str(e)), 400
 
     config = conversorkml.Config(
         categoria=categoria,
@@ -4956,6 +8064,7 @@ def _feed_serializar_post(doc):
         "autor_nome": dados.get("autor_nome", ""),
         "cliente_id": dados.get("cliente_id", ""),
         "cliente_nome": dados.get("cliente_nome", ""),
+        "tipo": dados.get("tipo", ""),
         "criado_em": _feed_iso(criado_em),
         "curtidas_total": len(curtidas),
         "curtido_por_mim": session.get("app_usuario_id", "") in curtidas,
@@ -4983,11 +8092,47 @@ def _feed_texto_valido(data):
     return texto if texto and len(texto) <= FEED_TEXTO_MAX else None
 
 
+#  "autor_id" fixo (não é o id de nenhum app_usuario real) — o post sai como
+# publicado por uma espécie de mascote do sistema, não pela própria pessoa
+# aniversariante, então só admin apaga (ver _feed_pode_excluir).
+SASHA_AUTOR_ID = "sasha-robo"
+SASHA_AUTOR_NOME = "Sasha Robô"
+
+
+def _gerar_posts_aniversario_hoje():
+    """Publica automaticamente no feed quem faz aniversário hoje (campo
+    "aniversario" de Minha Conta), assinado pela Sasha Robô. "aniversario_post_em"
+    (Usuario, Postgres) guarda a última data (YYYY-MM-DD) em que já postou —
+    sem isso, cada carregamento do feed no dia criaria um post novo."""
+    hoje = _hoje_mm_dd()
+    hoje_iso = _hoje_iso()
+    for usuario in usuarios_sql.usuarios_aniversariantes_hoje(hoje):
+        if usuario.get("aniversario_post_em") == hoje_iso:
+            continue
+        nome = f"{usuario.get('nome', '')} {usuario.get('sobrenome', '')}".strip() or usuario.get("usuario", "")
+        db.collection(FEED_POSTS_COLLECTION).document().set({
+            "texto": f"🎉 Hoje é aniversário de {nome}! A equipe deseja um feliz aniversário!",
+            "autor_id": SASHA_AUTOR_ID,
+            "autor_nome": SASHA_AUTOR_NOME,
+            "cliente_id": "",
+            "cliente_nome": "",
+            "criado_em": _feed_agora(),
+            "curtidas": [],
+            "comentarios_total": 0,
+            "tipo": "aniversario",
+        })
+        usuarios_sql.marcar_aniversario_postado(usuario["id"], hoje_iso)
+
+
 @app.route("/api/feed", methods=["GET"])
 def listar_feed():
     """Publicações mais recentes primeiro, paginadas pelo `criado_em` da última
     (cursor `antes_de`). `limite` deixa o front recarregar tudo que já está na
     tela de uma vez, sem perder as páginas já carregadas."""
+    if not request.args.get("antes_de", "").strip():
+        # Só na primeira página (não em "carregar mais") — ponto natural em
+        # que todo mundo que abre o Feed passa, sem precisar de agendador.
+        _gerar_posts_aniversario_hoje()
     try:
         limite = min(max(int(request.args.get("limite", FEED_PAGINA)), 1), FEED_PAGINA_MAX)
     except ValueError:
