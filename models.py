@@ -72,24 +72,20 @@ class LogAuditoriaMudanca(Base):
 class Usuario(Base):
     """Login da própria ferramenta (não confundir com credencial da SSX).
 
-    PRONTA MAS NÃO ATIVA — app.py continua lendo/escrevendo isso no Firestore
-    (coleção "app_usuarios") por enquanto. Produção hoje é o Render, sem
-    Postgres provisionado lá; o destino combinado pra esta tabela é o
-    Postgres do servidor da empresa, ainda sem data. Quando esse banco
-    existir: trocar as funções em app.py (_sem_usuarios_cadastrados,
-    _buscar_usuario_app, _buscar_usuario_por_id, _criar_usuario_app,
-    _contar_admins e as rotas /api/app-usuario*) pra usar obter_sessao()/
-    este model, criar a migration com `alembic revision --autogenerate`, e
-    rodar migrar_usuarios_para_postgres.py --apply uma vez pra copiar quem já
-    tem conta no Firestore.
+    ATIVA — fonte de verdade de login, substituindo a coleção "app_usuarios"
+    do Firestore (mantida intacta lá só como backup, sem prazo de remoção).
 
-    `id` usa o MESMO valor que o documento tem no Firestore (não um Integer
+    `id` usa o MESMO valor que o documento tinha no Firestore (não um Integer
     auto-incremento) — tarefas.responsavel_id/criado_por, log_auditoria.usuario_id,
     historico_cliente.autor_id e o cookie de sessão guardam essa mesma string
-    solta, então trocar o formato do id aqui exigiria remapear tudo isso
-    também (fora do escopo desta migração). Usuário novo criado depois da
-    migração ganha um id novo via uuid.uuid4().hex, no mesmo formato "opaco"
-    que o Firestore já gerava."""
+    solta. Usuário novo criado depois da migração ganha um id novo via
+    uuid.uuid4().hex, no mesmo formato "opaco" que o Firestore já gerava.
+
+    Foto do perfil fica em tabela própria (`UsuarioFoto`), não aqui — é um
+    blob base64 que pode chegar a ~700KB e só é lido em poucos pontos
+    (login, tela de Minha Conta, endpoint de avatar); mantê-la fora evita
+    carregar esse peso em listagens em massa (lista de usuários, dropdown de
+    responsável, mapa de telefones, aniversariantes do dia)."""
 
     __tablename__ = "usuarios"
 
@@ -114,7 +110,24 @@ class Usuario(Base):
     aniversario: Mapped[str] = mapped_column(default="")  # "MM-DD"
     telefone_profissional: Mapped[str] = mapped_column(default="")
     email: Mapped[str] = mapped_column(default="")
-    foto: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
+
+    # "YYYY-MM-DD" da última vez que o post automático de aniversário (feed)
+    # rodou pra este usuário — None/nunca é diferente de string vazia, por
+    # isso nullable em vez de default="" como os outros campos de texto.
+    aniversario_post_em: Mapped[str | None] = mapped_column(nullable=True, default=None)
+
+
+class UsuarioFoto(Base):
+    """Extensão 1:1 de Usuario, só pra foto de perfil (ver docstring de
+    Usuario). Sem linha = sem foto — mais simples que coluna nullable, e
+    ON DELETE CASCADE já limpa isso sozinho ao excluir o usuário."""
+
+    __tablename__ = "usuario_foto"
+
+    usuario_id: Mapped[str] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True
+    )
+    foto: Mapped[str] = mapped_column(Text)
 
 
 class HistoricoCliente(Base):

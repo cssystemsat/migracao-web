@@ -3,6 +3,7 @@ valor) e devolve a lista de erros encontrados. Não sabe ler Excel/CSV nem
 nada de Flask — isso fica pra fora (ver app.py), justamente pra esse motor
 poder ser reaproveitado em qualquer outro programa Python.
 """
+from datetime import datetime
 from typing import Iterable, List
 
 from .campos import CampoSpec, ErroValidacao, TipoImportacao
@@ -46,10 +47,28 @@ def _valida_bool(texto: str) -> bool:
     return texto in ("0", "1")
 
 
+def _valida_decimal(texto: str) -> bool:
+    try:
+        float(texto)
+        return True
+    except ValueError:
+        return False
+
+
+def _valida_data_iso(texto: str) -> bool:
+    try:
+        datetime.strptime(texto, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
 _VALIDADORES_TIPO = {
     "byte": _valida_byte,
     "bool": _valida_bool,
     "inteiro": _valida_inteiro,
+    "decimal": _valida_decimal,
+    "data": _valida_data_iso,
 }
 
 

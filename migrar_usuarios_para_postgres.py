@@ -1,9 +1,5 @@
-"""AINDA NÃO É PRA RODAR EM PRODUÇÃO — guardado pronto pra quando o Postgres do
-servidor da empresa existir (produção hoje é Render, sem Postgres provisionado
-lá; app.py continua 100% Firestore pra usuários por enquanto).
-
-Migra os logins da ferramenta de "app_usuarios" (Firestore) pra "usuarios"
-(Postgres) — Fase 1 do schema_relacional_alvo_v3.
+"""Migra os logins da ferramenta de "app_usuarios" (Firestore) pra "usuarios"
+(Postgres) — login/usuários agora são Postgres (ver docs/HISTORICO_DECISOES.md).
 
 Preserva o ID do documento Firestore como chave primária em Postgres (não gera
 um id novo) — é o mesmo valor que tarefas.responsavel_id/criado_por,
@@ -13,6 +9,8 @@ guardam, então nada mais precisa remapear id nenhum.
 `area` sai sempre vazia (ninguém tem área ainda — a Fase 0 do pedido é só
 poder cadastrar; atribuir área pra cada usuário existente é manual, depois,
 em Gerenciar Usuários).
+
+Foto vai pra tabela separada (UsuarioFoto) — sem linha = sem foto.
 
 Por segurança, é uma CÓPIA aditiva/idempotente — não apaga nada do Firestore,
 e rodar de novo não duplica (mesmo id, sobrescreve).
@@ -26,7 +24,8 @@ app.py normalmente):
 import sys
 
 import app
-from models import Usuario
+from db_sql import obter_sessao
+from models import Usuario, UsuarioFoto
 
 APLICAR = "--apply" in sys.argv
 
@@ -36,7 +35,7 @@ print()
 
 total = 0
 ja_existentes = 0
-with app.obter_sessao() as sessao:
+with obter_sessao() as sessao:
     for d in docs:
         usuario_id = d.id
         dados = d.to_dict() or {}
@@ -48,7 +47,8 @@ with app.obter_sessao() as sessao:
             ja_existentes += 1
 
         nome_usuario = dados.get("usuario", "(sem nome)")
-        print(f"  - {usuario_id}  {nome_usuario!r}  perfil={perfil}  [{status_txt}]")
+        foto = dados.get("foto") or ""
+        print(f"  - {usuario_id}  {nome_usuario!r}  perfil={perfil}  foto={'sim' if foto else 'nao'}  [{status_txt}]")
         total += 1
 
         if not APLICAR:
@@ -66,9 +66,18 @@ with app.obter_sessao() as sessao:
         alvo.aniversario = dados.get("aniversario", "")
         alvo.telefone_profissional = dados.get("telefone_profissional", "")
         alvo.email = dados.get("email", "")
-        alvo.foto = dados.get("foto", "")
+        alvo.aniversario_post_em = dados.get("aniversario_post_em")
         if not existente:
             sessao.add(alvo)
+
+        foto_existente = sessao.get(UsuarioFoto, usuario_id)
+        if foto:
+            if foto_existente:
+                foto_existente.foto = foto
+            else:
+                sessao.add(UsuarioFoto(usuario_id=usuario_id, foto=foto))
+        elif foto_existente:
+            sessao.delete(foto_existente)
 
 print()
 print(f"Total: {total} usuários, {ja_existentes} já existiam no Postgres.")

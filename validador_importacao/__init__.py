@@ -12,10 +12,20 @@ from .campos import CampoSpec, ErroValidacao, TipoImportacao
 from .motor import validar_campo, validar_linha, validar_planilha
 from .tipo_cliente import TIPO_CLIENTE
 from .tipo_veiculo import TIPO_VEICULO
+from .tipo_rastreador import TIPO_RASTREADOR
+from .tipo_simcard import TIPO_SIMCARD
+from .tipo_area import TIPO_AREA
+from .tipo_uo import TIPO_UO
+from .tipo_colaborador import TIPO_COLABORADOR
 
 TIPOS = {
     "cliente": TIPO_CLIENTE,
     "veiculo": TIPO_VEICULO,
+    "rastreador": TIPO_RASTREADOR,
+    "simcard": TIPO_SIMCARD,
+    "area": TIPO_AREA,
+    "uo": TIPO_UO,
+    "colaborador": TIPO_COLABORADOR,
 }
 
 
