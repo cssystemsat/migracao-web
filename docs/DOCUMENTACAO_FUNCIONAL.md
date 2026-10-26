@@ -46,6 +46,11 @@ Implantação, Controle de Migração e Ferramentas Auxiliares.
 - Credencial da SSX do cliente, para autenticar operações na plataforma em
   nome dele quando necessário.
 - E-mail de boas-vindas.
+- Documentos do cliente (sub-aba "Informações do Cliente" da Ficha): PDF da
+  ficha de entrada assinada e do contrato, um de cada por cliente (enviar de
+  novo substitui o anterior). Guardado em tabela própria (`cliente_documentos`),
+  não na linha do cliente — mantém a consulta do cadastro leve mesmo com
+  PDFs anexados (ver `docs/DOCUMENTACAO_TECNICA.md`).
 
 ## Controle de Migração
 

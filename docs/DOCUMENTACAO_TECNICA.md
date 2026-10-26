@@ -36,6 +36,12 @@
 - Os IDs entre os dois bancos (`cliente_id`, `usuario_id`, `tarefa_id`) são
   referências soltas (string), não FK de verdade — FK real só existe dentro
   do próprio banco relacional.
+- Arquivo anexado (foto de perfil, documentos do cliente) fica em base64 numa
+  **tabela própria** (`usuario_foto`, `cliente_documentos`), nunca como coluna
+  na tabela principal (`usuarios`, `clientes`) — assim listar/buscar o
+  registro principal não carrega o blob, só quem busca o anexo em si paga
+  esse custo. FK de verdade (`ON DELETE CASCADE`) liga o anexo ao registro
+  principal.
 - `DATABASE_URL` não definida → cai para SQLite local (`local_dev.db`), sem
   exigir infraestrutura para rodar/testar localmente.
 
@@ -54,6 +60,62 @@
 - **API da SSX** (`BASE_URL`) — importação de cadastros, consultas,
   autenticação em nome do cliente.
 - **SMS Market** — envio de comando em massa aos rastreadores.
+- **API de Integrações do ssxdesk** (`ssxdesk_api.py`) — chamados de suporte
+  do cliente, buscados pelo IdCentral (bloco "Chamados abertos" na Visão
+  Geral da Ficha + sub-aba Suporte do Histórico). Chave fixa
+  (`SSXDESK_API_KEY`, Bearer token), gerada em
+  ssxdesk.ssatx.com.br/settings — não por usuário. Carregado pelo front em
+  segundo plano, DEPOIS da Ficha já estar renderizada (rota
+  `/api/clientes/<id>/chamados`): uma falha ou lentidão dessa API externa
+  nunca pode atrasar a abertura da Ficha. IdCentral não é um filtro direto
+  da API nem é único do lado do ssxdesk (duas empresas podem compartilhar o
+  mesmo IdCentral) — o módulo resolve isso buscando todas as empresas
+  (`GET /companies`, cacheado 10 min em processo) e casando pelo IdCentral
+  antes de buscar os chamados (`GET /tickets?companyId=...`).
+- **API REST da Wootric** (`wootric_api.py` + `wootric_sql.py`) — avaliações
+  de NPS do cliente (bloco "Avaliações NPS" na Visão Geral da Ficha +
+  eventos sintéticos de setor "NPS" na Timeline/Detalhado do Histórico, ver
+  `construirEventosSinteticosWootric` em script.js). Autenticação OAuth
+  `client_credentials` (`WOOTRIC_CLIENT_ID`/`WOOTRIC_CLIENT_SECRET`, token
+  Bearer cacheado em processo, ~2h de validade).
+
+  **Persistido em tabela própria** (`wootric_avaliacoes`, ver models.py) —
+  a Ficha NUNCA chama a API da Wootric na hora de abrir a tela
+  (`/api/clientes/<id>/wootric` só lê do Postgres, instantâneo); quem
+  alimenta a tabela é uma sincronização incremental que roda em thread de
+  fundo, disparada (sem bloquear) toda vez que alguém abre uma Ficha, no
+  máximo 1x a cada 5 min por worker do gunicorn (ver
+  `_disparar_sync_wootric_em_segundo_plano`/`sincronizar_avaliacoes_wootric`
+  em app.py). Isso substituiu uma abordagem anterior que consultava a
+  Wootric ao vivo a cada Ficha aberta (varredura de `/v1/end_users`,
+  7-8s mesmo com cache) — ver `docs/HISTORICO_DECISOES.md`.
+
+  IdCentral: nesta conta Wootric (confirmado consultando a API diretamente —
+  mesma conta usada pelo projeto irmão `kanban_dashboard_dev`), o end_user
+  NÃO tem `external_id` preenchido — o IdCentral vem no final do e-mail do
+  end_user (ex. `"(SSX) contato@dominio.com - 997"`), igual ao mecanismo de
+  `centralIdFromEmail` em `kanban_dashboard_dev` (`server/wootric.ts`). Esse
+  código bate com `Cliente.codigo_idcentral` (mesmo fallback
+  `codigo_idcentral` → `idcentral` da integração ssxdesk), não
+  necessariamente com `Cliente.idcentral`.
+
+  Sincronização via `GET /v1/responses` — diferente de `/v1/end_users`, essa
+  rota já devolve o end_user (com e-mail) embutido em cada resposta, então
+  não precisa varrer toda a base de end_users pra achar o IdCentral de cada
+  avaliação. Incremental com cursor (`created[gte]`, timestamp da avaliação
+  mais recente já salva, com 5 min de folga): cada rodada normal busca só
+  o que mudou, rápido, nunca esbarra em limite de paginação. **Carga
+  inicial** (tabela vazia): sem cursor, busca em ordem **decrescente**
+  (mais recentes primeiro) até o teto documentado de 30 páginas/1500
+  respostas da API — ordem importa aqui: a primeira versão trazia em ordem
+  crescente (mais antigas primeiro) e, numa conta com anos de histórico,
+  nunca chegava nas avaliações recentes dentro do teto de 1500 (bug real,
+  corrigido antes de ir pra produção — ver `docs/HISTORICO_DECISOES.md`).
+  **Limitação que continua existindo:** histórico mais antigo que as 1500
+  respostas mais recentes da conta inteira nunca é importado — resolver de
+  verdade exigiria paginação por outro eixo (ex. por end_user) ou backfill
+  manual; não é um problema no dia a dia porque a sincronização incremental
+  mantém tudo que importa (o que é recente) sempre em dia.
 - **Google Sheets/Drive API** (`planilha_migracao.py`) — geração/leitura da
   planilha de migração por cliente. Reusa a mesma credencial de service
   account do Firebase (`FIREBASE_CREDENTIALS_JSON`), só com escopo próprio.
@@ -116,6 +178,12 @@ aplicação.
 
 - `FIREBASE_CREDENTIALS_JSON` é obrigatória (conteúdo da service account,
   via variável de ambiente — não arquivo), tanto local quanto em produção.
+- `SSXDESK_API_KEY` é opcional: sem ela, o bloco de chamados da Ficha
+  simplesmente mostra "não foi possível carregar" (ver `ssxdesk_api.py`) —
+  não derruba o resto do app.
+- `WOOTRIC_CLIENT_ID`/`WOOTRIC_CLIENT_SECRET` são opcionais, mesmo padrão:
+  sem elas, o bloco "Avaliações NPS" da Ficha mostra "não foi possível
+  carregar" (ver `wootric_api.py`) — não derruba o resto do app.
 - Versões de `google-cloud-firestore`, `google-api-core`, `grpcio`,
   `google-auth` e `protobuf` estão **fixadas deliberadamente** em
   `requirements.txt` — uma atualização automática dessas libs já quebrou

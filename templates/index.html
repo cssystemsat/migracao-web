@@ -2057,13 +2057,17 @@
       </div>
       <div class="modal-body">
         <form id="form-implantacao-cliente" class="form-migracao form-implantacao-cliente-grid">
+          <label class="campo-migracao campo-migracao-full">
+            <span>Cliente</span>
+            <input type="text" id="implantacao-cliente-nome">
+          </label>
           <label class="campo-migracao">
             <span>IdCentral</span>
             <input type="text" id="implantacao-cliente-idcentral" required>
           </label>
-          <label class="campo-migracao">
-            <span>Cliente</span>
-            <input type="text" id="implantacao-cliente-nome">
+          <label class="campo-migracao hidden" id="implantacao-cliente-codigo-idcentral-wrap">
+            <span>Código IdCentral</span>
+            <input type="text" id="implantacao-cliente-codigo-idcentral">
           </label>
           <label class="campo-migracao">
             <span>Data de entrada</span>
@@ -2306,6 +2310,9 @@
               <option value="Sugestão de desenvolvimento">Sugestão de desenvolvimento</option>
               <option value="Travamento">Travamento</option>
               <option value="Problema">Problema</option>
+              <option value="Comercial">Comercial</option>
+              <option value="Treinamento">Treinamento</option>
+              <option value="Financeiro">Financeiro</option>
             </select>
           </label>
           <label class="campo-migracao">
@@ -2349,6 +2356,8 @@
                 <option value="Migração">Migração</option>
                 <option value="Suporte">Suporte</option>
                 <option value="Comercial">Comercial</option>
+                <option value="Treinamento">Treinamento</option>
+                <option value="Financeiro">Financeiro</option>
               </select>
             </label>
             <label class="campo-migracao">
@@ -2361,6 +2370,9 @@
                 <option value="Sugestão de desenvolvimento">Sugestão de desenvolvimento</option>
                 <option value="Travamento">Travamento</option>
                 <option value="Problema">Problema</option>
+                <option value="Comercial">Comercial</option>
+                <option value="Treinamento">Treinamento</option>
+                <option value="Financeiro">Financeiro</option>
               </select>
             </label>
             <label class="campo-migracao">

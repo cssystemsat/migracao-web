@@ -827,6 +827,8 @@ const inputImplantacaoClienteVendedor = el("implantacao-cliente-vendedor");
 const inputImplantacaoClientePersona = el("implantacao-cliente-persona");
 const inputImplantacaoClienteDecisorNome = el("implantacao-cliente-decisor-nome");
 const inputImplantacaoClienteDecisorWhatsapp = el("implantacao-cliente-decisor-whatsapp");
+const inputImplantacaoClienteCodigoIdcentral = el("implantacao-cliente-codigo-idcentral");
+const wrapImplantacaoClienteCodigoIdcentral = el("implantacao-cliente-codigo-idcentral-wrap");
 const wrapImplantacaoClienteComplementares = el("implantacao-cliente-campos-complementares");
 const btnSalvarImplantacaoCliente = el("btn-salvar-implantacao-cliente");
 const inputImplantacaoClienteImplantado = el("implantacao-cliente-implantado");
@@ -1689,6 +1691,16 @@ async function abrirModalImplantacaoCliente(cliente) {
   const idcentralTravadoImpl = !!cliente && USUARIO_PERFIL_ATUAL !== "adm";
   inputImplantacaoClienteIdcentral.disabled = idcentralTravadoImpl;
   inputImplantacaoClienteIdcentral.title = idcentralTravadoImpl ? "Só administradores podem alterar o IdCentral." : "";
+  // Código de associação com sistemas externos (ex. Suporte) — só admin
+  // mexe, independente de ser cliente novo ou edição.
+  const codigoIdcentralTravado = USUARIO_PERFIL_ATUAL !== "adm";
+  inputImplantacaoClienteCodigoIdcentral.value = cliente ? cliente.codigo_idcentral || "" : "";
+  inputImplantacaoClienteCodigoIdcentral.disabled = codigoIdcentralTravado;
+  inputImplantacaoClienteCodigoIdcentral.title = codigoIdcentralTravado
+    ? "Só administradores podem alterar o código do IdCentral." : "";
+  // Mesma regra dos campos complementares: só aparece editando um cliente
+  // já existente, nunca no cadastro rápido (Adicionar cliente).
+  wrapImplantacaoClienteCodigoIdcentral.classList.toggle("hidden", !cliente);
   inputImplantacaoClienteNome.value = cliente ? cliente.cliente : "";
   inputImplantacaoClienteData.value = cliente ? cliente.data_entrada || "" : "";
   await popularSelectUsuariosPorArea(inputImplantacaoClienteCsm, cliente ? cliente.csm || "" : "", "area_prefix=CS");
@@ -1786,6 +1798,7 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     decisor_whatsapp: inputImplantacaoClienteDecisorWhatsapp.value.trim(),
     decisor_estado: comboDecisorEstado.valor,
     decisor_cidade: comboDecisorCidade.valor || comboDecisorCidade.input.value.trim(),
+    codigo_idcentral: inputImplantacaoClienteCodigoIdcentral.value.trim(),
   };
   if (!payload.idcentral) return alert("Informe o IdCentral do cliente.");
   // Trava o botão enquanto salva — duplo clique mandava dois POSTs e podia
@@ -2540,12 +2553,19 @@ btnImportarClientesConfirmar.addEventListener("click", async () => {
 // --- LINHA DO TEMPO DO CLIENTE EM IMPLANTAÇÃO ---
 // 4 setores fixos, cada um com cards de acontecimento (título/descrição/data/responsável)
 // ordenados cronologicamente. A ordem aqui precisa bater com IMPLANTACAO_SETORES no app.py.
-const IMPLANTACAO_SETORES = ["Implantação", "Migração", "Suporte", "Comercial"];
+const IMPLANTACAO_SETORES = ["Implantação", "Migração", "Suporte", "Comercial", "Treinamento", "Financeiro", "NPS"];
 
-// Tag opcional do acontecimento (mesmas 6 + cores do "Acompanhamento de
-// cliente" do kanban_dashboard_dev — replicado aqui pra manter o mesmo
-// formato visual na Timeline da Ficha). A ordem aqui precisa bater com
-// EVENTO_TAGS no app.py.
+// Tag opcional do acontecimento (cores do "Acompanhamento de cliente" do
+// kanban_dashboard_dev — replicado aqui pra manter o mesmo formato visual na
+// Timeline da Ficha). A ordem aqui precisa bater com EVENTO_TAGS no app.py
+// — exceto "Suporte", ver nota abaixo.
+// "Suporte"/"NPS" não são selecionáveis no formulário de acontecimento
+// manual (ver template ficha-chat-evento-tag, lista fixa própria) — só
+// existem aqui pra dar cor/legenda ao vínculo automático setor->tag dos
+// eventos sintéticos (chamados do ssxdesk/avaliações da Wootric — ver
+// construirEventosSinteticosChamados/construirEventosSinteticosWootric). Por
+// isso NÃO precisam entrar também no EVENTO_TAGS de app.py (que só valida
+// tag de evento manual).
 const EVENTO_TAGS = [
   ["Operação", "#2563EB"],
   ["Migração", "#16A34A"],
@@ -2553,18 +2573,38 @@ const EVENTO_TAGS = [
   ["Sugestão de desenvolvimento", "#D1D5DB"],
   ["Travamento", "#FCA5A5"],
   ["Problema", "#991B1B"],
+  ["Comercial", "#1D4ED8"],
+  ["Treinamento", "#0D9488"],
+  ["Financeiro", "#B45309"],
+  ["Suporte", "#6D28D9"],
+  ["NPS", "#DB2777"],
 ];
 const EVENTO_TAG_COR = Object.fromEntries(EVENTO_TAGS);
 const EVENTO_TAG_COR_PADRAO = "#94A3B8"; // acontecimento sem tag
 
+// Tags que existem só pra dar cor ao vínculo automático setor<->tag
+// (ver IMPLANTACAO_SETOR_COR/construirEventosSinteticosChamados) — já
+// aparecem no filtro de Setor da Timeline, então repetir como Tag na
+// legenda/filtro de Tags é redundante. Continuam valendo pra tudo o resto
+// (cor, EVENTO_TAG_COR, seleção manual no formulário de acontecimento) —
+// só ficam de fora da legenda e do filtro de Tags especificamente.
+const EVENTO_TAGS_OCULTAS_DO_FILTRO = new Set(["Suporte", "Comercial", "Treinamento", "Financeiro", "NPS"]);
+const EVENTO_TAGS_FILTRAVEIS = EVENTO_TAGS.filter(([nome]) => !EVENTO_TAGS_OCULTAS_DO_FILTRO.has(nome));
+
 // Cor de apoio pro acontecimento sem Tag (chat da aba Detalhado) — mesma
 // paleta por setor já usada em .timeline-setor[data-setor=...], só que como
-// valor de JS pra virar border-left da mensagem.
+// valor de JS pra virar border-left da mensagem. Todo setor que tem uma tag
+// homônima reusa a MESMA cor dela (EVENTO_TAG_COR) de propósito — é o
+// "vínculo automático" setor<->tag: os dois sempre aparecem com a cor igual,
+// nunca dessincronizam porque não tem 2 definições de cor pra manter juntas.
 const IMPLANTACAO_SETOR_COR = {
   "Implantação": "var(--amarelo-escuro)",
-  "Migração": "var(--violeta)",
-  "Suporte": "var(--turquesa)",
-  "Comercial": "var(--azul)",
+  "Migração": EVENTO_TAG_COR["Migração"],
+  "Suporte": EVENTO_TAG_COR["Suporte"],
+  "Comercial": EVENTO_TAG_COR["Comercial"],
+  "Treinamento": EVENTO_TAG_COR["Treinamento"],
+  "Financeiro": EVENTO_TAG_COR["Financeiro"],
+  "NPS": EVENTO_TAG_COR["NPS"],
 };
 
 // Versão "pastel" das Tags (fundo claro + texto na própria cor) só pro chip
@@ -2578,6 +2618,11 @@ const EVENTO_TAG_CHIP = {
   "Sugestão de desenvolvimento": { bg: "#F3F4F6", fg: "#4B5563" },
   "Travamento": { bg: "#FEE2E2", fg: "#B91C1C" },
   "Problema": { bg: "#FEE2E2", fg: "#7F1D1D" },
+  "Comercial": { bg: "#DBEAFE", fg: "#1D4ED8" },
+  "Treinamento": { bg: "#CCFBF1", fg: "#0F766E" },
+  "Financeiro": { bg: "#FEF3C7", fg: "#92400E" },
+  "Suporte": { bg: "#EDE9FE", fg: "#6D28D9" },
+  "NPS": { bg: "#FCE7F3", fg: "#BE185D" },
 };
 
 const overlayImplantacaoTimeline = el("overlay-implantacao-timeline");
@@ -18569,6 +18614,90 @@ el("form-tarefa").addEventListener("submit", async (e) => {
 let fichaClienteAtual = null; // { idcentral, implantacao, migracao } cru da API
 let fichaAbaAtual = "geral";
 
+// Chamados de suporte (ssxdesk), buscados pelo IdCentral — carregados em
+// segundo plano DEPOIS da Ficha já estar aberta (ver carregarChamadosFicha),
+// nunca junto com /api/ficha: uma API externa lenta ou fora do ar não pode
+// atrasar a abertura da Ficha. null = ainda não chegou/não pedido;
+// "erro" = pedido mas falhou; senão {abertos, concluidos}.
+let fichaChamadosAtual = null;
+let fichaChamadosClienteId = null; // de qual cliente é fichaChamadosAtual, pra não misturar com outro aberto em seguida
+
+async function carregarChamadosFicha(clienteId) {
+  fichaChamadosAtual = null;
+  fichaChamadosClienteId = clienteId;
+  try {
+    const r = await fetch(`/api/clientes/${clienteId}/chamados`);
+    const data = await parseJsonResponse(r);
+    if (fichaChamadosClienteId !== clienteId) return; // ficha já trocou de cliente, descarta
+    fichaChamadosAtual = data.ok ? { abertos: data.abertos, concluidos: data.concluidos } : "erro";
+  } catch (err) {
+    if (fichaChamadosClienteId !== clienteId) return;
+    fichaChamadosAtual = "erro";
+  }
+  // Só redesenha se a pessoa ainda estiver numa aba que mostra chamados —
+  // evita re-render brusco se ela já foi pra Implantação/Marcos/Migração.
+  // "timeline"/"detalhado" também dependem (chamados concluídos entram
+  // misturados nos acontecimentos, ver construirEventosSinteticosChamados).
+  const AREAS_HISTORICO_COM_CHAMADOS = ["suporte", "timeline", "detalhado"];
+  if (fichaChamadosClienteId === clienteId
+    && (fichaAbaAtual === "geral" || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_CHAMADOS.includes(fichaHistoricoAreaAtual)))) {
+    mostrarFichaAba(fichaAbaAtual);
+  }
+}
+
+// Chamados CONCLUÍDOS já carregados pra esse cliente, ou [] se ainda não
+// chegaram/falharam — usado por quem mistura chamados nos acontecimentos
+// (Timeline, Detalhado). "Chamados abertos" (Visão Geral) é tratado à parte,
+// direto por fichaChamadosAtual (ver construirFichaChamadosAbertosCard).
+function fichaChamadosConcluidosAtuais(clienteId) {
+  if (fichaChamadosClienteId !== clienteId || !fichaChamadosAtual || fichaChamadosAtual === "erro") return [];
+  return fichaChamadosAtual.concluidos || [];
+}
+
+// A Timeline ("Caminho do cliente") só recebe chamados "Geral" — "Atendimento
+// Chat" é registro automático de conversa, não um acontecimento no sentido
+// de marco/caminho do cliente; esses só entram no Detalhado (ver
+// CHAMADO_CATEGORIA_GERAL/CHAMADO_CATEGORIA_ATENDIMENTO_CHAT).
+function fichaChamadosConcluidosGeralAtuais(clienteId) {
+  return fichaChamadosConcluidosAtuais(clienteId).filter((c) => c.category === CHAMADO_CATEGORIA_GERAL);
+}
+
+// Avaliações de NPS (Wootric), buscadas pelo IdCentral — mesmo padrão de
+// carregarChamadosFicha: carregadas em segundo plano DEPOIS da Ficha já
+// estar aberta, nunca junto com /api/ficha. null = ainda não chegou/não
+// pedido; "erro" = pedido mas falhou; senão a lista de avaliações.
+let fichaWootricAtual = null;
+let fichaWootricClienteId = null; // de qual cliente é fichaWootricAtual, pra não misturar com outro aberto em seguida
+
+async function carregarWootricFicha(clienteId) {
+  fichaWootricAtual = null;
+  fichaWootricClienteId = clienteId;
+  try {
+    const r = await fetch(`/api/clientes/${clienteId}/wootric`);
+    const data = await parseJsonResponse(r);
+    if (fichaWootricClienteId !== clienteId) return; // ficha já trocou de cliente, descarta
+    fichaWootricAtual = data.ok ? data.avaliacoes : "erro";
+  } catch (err) {
+    if (fichaWootricClienteId !== clienteId) return;
+    fichaWootricAtual = "erro";
+  }
+  // "timeline"/"detalhado" também dependem (avaliações entram misturadas
+  // nos acontecimentos, ver construirEventosSinteticosWootric).
+  const AREAS_HISTORICO_COM_WOOTRIC = ["timeline", "detalhado"];
+  if (fichaWootricClienteId === clienteId
+    && (fichaAbaAtual === "geral" || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_WOOTRIC.includes(fichaHistoricoAreaAtual)))) {
+    mostrarFichaAba(fichaAbaAtual);
+  }
+}
+
+// Avaliações de NPS já carregadas pra esse cliente, ou [] se ainda não
+// chegaram/falharam — usado por quem mistura avaliações nos acontecimentos
+// (Timeline, Detalhado), mesmo racional de fichaChamadosConcluidosAtuais.
+function fichaWootricAtuaisValidas(clienteId) {
+  if (fichaWootricClienteId !== clienteId || !fichaWootricAtual || fichaWootricAtual === "erro") return [];
+  return fichaWootricAtual;
+}
+
 function construirFichaHeader(implantacao, migracao, comEngrenagem) {
   const header = document.createElement("div");
   header.className = "ficha-header";
@@ -18913,6 +19042,200 @@ function coletarFichaAlertas(implantacao, migracao) {
   return alertas;
 }
 
+// Classe de cor da bolinha de prioridade do chamado — mesma lógica de
+// "quanto mais urgente, mais vermelho" das flags do cliente.
+const CLASSE_PRIORIDADE_CHAMADO = {
+  Urgente: "chamado-prioridade-urgente",
+  Alta: "chamado-prioridade-alta",
+  Média: "chamado-prioridade-media",
+  Baixa: "chamado-prioridade-baixa",
+};
+
+function formatarDataHoraChamado(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${formatarDataBR(d)} às ${formatarHoraBR(d).slice(0, 5)}`;
+}
+
+// Um chamado por linha: título + status + prioridade, clicável pra
+// expandir/recolher a descrição inline (sem link pra fora — a API de
+// integração não expõe uma URL de abrir o chamado no ssxdesk).
+function construirLinhaChamado(chamado) {
+  const linha = document.createElement("div");
+  linha.className = "ficha-chamado-item";
+
+  const cabecalho = document.createElement("button");
+  cabecalho.type = "button";
+  cabecalho.className = "ficha-chamado-cabecalho";
+
+  const titulo = document.createElement("span");
+  titulo.className = "ficha-chamado-titulo";
+  titulo.textContent = chamado.title || "(sem título)";
+  cabecalho.appendChild(titulo);
+
+  const meta = document.createElement("span");
+  meta.className = "ficha-chamado-meta";
+  if (chamado.priority) {
+    const bolinha = document.createElement("span");
+    bolinha.className = `ficha-chamado-prioridade ${CLASSE_PRIORIDADE_CHAMADO[chamado.priority] || ""}`;
+    bolinha.title = `Prioridade: ${chamado.priority}`;
+    meta.appendChild(bolinha);
+  }
+  const status = document.createElement("span");
+  status.className = "ficha-chamado-status";
+  status.textContent = chamado.status || "";
+  meta.appendChild(status);
+  cabecalho.appendChild(meta);
+
+  const detalhe = document.createElement("div");
+  detalhe.className = "ficha-chamado-detalhe hidden";
+  const info = document.createElement("div");
+  info.className = "ficha-chamado-info";
+  info.textContent = [
+    chamado.category, chamado.ticketNumber ? `#${chamado.ticketNumber}` : null, formatarDataHoraChamado(chamado.createdAt),
+  ].filter(Boolean).join(" · ");
+  detalhe.appendChild(info);
+  if (chamado.description) {
+    const desc = document.createElement("p");
+    desc.className = "ficha-chamado-descricao";
+    desc.textContent = chamado.description;
+    detalhe.appendChild(desc);
+  }
+
+  cabecalho.addEventListener("click", () => detalhe.classList.toggle("hidden"));
+  linha.appendChild(cabecalho);
+  linha.appendChild(detalhe);
+  return linha;
+}
+
+function construirListaChamados(chamados, textoVazio) {
+  const lista = document.createElement("div");
+  lista.className = "ficha-chamados-lista";
+  if (!chamados.length) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = textoVazio;
+    lista.appendChild(p);
+    return lista;
+  }
+  chamados.forEach((c) => lista.appendChild(construirLinhaChamado(c)));
+  return lista;
+}
+
+// "Chamados abertos" da Visão Geral — null enquanto carrega (chega em
+// segundo plano, ver carregarChamadosFicha), "erro" se a API do ssxdesk
+// falhou. Card simplesmente não aparece se não há nada e não está carregando
+// nem com erro (cliente sem chamado algum não precisa de bloco vazio).
+function construirFichaChamadosAbertosCard(chamadosState) {
+  if (chamadosState === null) {
+    const card = document.createElement("div");
+    card.className = "ficha-painel ficha-chamados";
+    const h = document.createElement("h3");
+    h.textContent = "Chamados abertos";
+    card.appendChild(h);
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Carregando...";
+    card.appendChild(p);
+    return card;
+  }
+  if (chamadosState === "erro") {
+    const card = document.createElement("div");
+    card.className = "ficha-painel ficha-chamados";
+    const h = document.createElement("h3");
+    h.textContent = "Chamados abertos";
+    card.appendChild(h);
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Não foi possível carregar os chamados do ssxdesk agora.";
+    card.appendChild(p);
+    return card;
+  }
+  if (!chamadosState.abertos.length) return null;
+  const card = document.createElement("div");
+  card.className = "ficha-painel ficha-chamados";
+  const h = document.createElement("h3");
+  h.textContent = `Chamados abertos (${chamadosState.abertos.length})`;
+  card.appendChild(h);
+  card.appendChild(construirListaChamados(chamadosState.abertos, "Nenhum chamado em aberto."));
+  return card;
+}
+
+// Faixa de cor do score NPS: 0-6 detrator, 7-8 neutro, 9-10 promotor (escala
+// oficial Wootric/NPS).
+function classeScoreWootric(score) {
+  if (score <= 6) return "wootric-score-detrator";
+  if (score <= 8) return "wootric-score-neutro";
+  return "wootric-score-promotor";
+}
+
+function construirLinhaAvaliacaoWootric(avaliacao) {
+  const classeScore = classeScoreWootric(avaliacao.score);
+  const linha = document.createElement("div");
+  linha.className = `ficha-wootric-item ${classeScore}`;
+
+  const topo = document.createElement("div");
+  topo.className = "ficha-wootric-topo";
+  const score = document.createElement("span");
+  score.className = `ficha-wootric-score ${classeScore}`;
+  score.textContent = avaliacao.score;
+  const unidade = document.createElement("span");
+  unidade.className = "ficha-wootric-score-unidade";
+  unidade.textContent = "/10";
+  score.appendChild(unidade);
+  topo.appendChild(score);
+  const data = document.createElement("span");
+  data.className = "ficha-wootric-data";
+  data.textContent = formatarDataHoraChamado(avaliacao.created_at) || "Data não informada";
+  topo.appendChild(data);
+  linha.appendChild(topo);
+
+  const texto = document.createElement("p");
+  texto.className = "ficha-wootric-comentario";
+  texto.textContent = (avaliacao.text || "").trim() || "O cliente não deixou comentário.";
+  linha.appendChild(texto);
+
+  return linha;
+}
+
+// "Avaliações NPS" da Visão Geral — null enquanto carrega (chega em segundo
+// plano, ver carregarWootricFicha), "erro" se a API da Wootric falhou. Card
+// não aparece se o cliente não tem nenhuma avaliação (nem carregando nem com
+// erro) — não precisa de bloco vazio.
+function construirFichaWootricCard(wootricState) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel ficha-wootric";
+  const h = document.createElement("h3");
+
+  if (wootricState === null) {
+    h.textContent = "Avaliações NPS";
+    card.appendChild(h);
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Carregando...";
+    card.appendChild(p);
+    return card;
+  }
+  if (wootricState === "erro") {
+    h.textContent = "Avaliações NPS";
+    card.appendChild(h);
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Não foi possível carregar as avaliações da Wootric agora.";
+    card.appendChild(p);
+    return card;
+  }
+  if (!wootricState.length) return null;
+  h.textContent = `Avaliações NPS (${wootricState.length})`;
+  card.appendChild(h);
+  const lista = document.createElement("div");
+  lista.className = "ficha-wootric-lista";
+  wootricState.forEach((a) => lista.appendChild(construirLinhaAvaliacaoWootric(a)));
+  card.appendChild(lista);
+  return card;
+}
+
 function construirFichaAlertasCard(implantacao, migracao) {
   const card = document.createElement("div");
   card.className = "ficha-painel ficha-alertas";
@@ -19063,33 +19386,51 @@ function construirBlocoMotivoAtraso(implantacao) {
 
 // "Resumo do cliente" — mesmos dados do grid antigo, só que agora com título
 // próprio e emparelhado com a sidebar de Tarefas (construirFichaTarefasPainel).
+// Agrupado em seções com subtítulo (em vez de um info-grid só) — dá a
+// hierarquia de formulário/ficha de ERP que o dado pede: identificação
+// separada de comercial, sem misturar tudo num grid só.
 function construirFichaResumoCard(implantacao, migracao) {
   const card = document.createElement("div");
-  card.className = "ficha-painel";
+  card.className = "ficha-painel ficha-dados-cadastrais";
   const h = document.createElement("h3");
-  h.textContent = "Resumo do cliente";
+  h.textContent = "Dados cadastrais";
   card.appendChild(h);
 
-  const grid = document.createElement("div");
-  grid.className = "info-grid";
   if (implantacao) {
-    grid.appendChild(criarInfoItem("IdCentral", implantacao.idcentral));
-    grid.appendChild(criarInfoItem("Responsável", implantacao.csm));
+    const gridId = document.createElement("div");
+    gridId.className = "info-grid";
+    gridId.appendChild(criarInfoItem("IdCentral", implantacao.idcentral));
+    gridId.appendChild(criarInfoItem("Responsável (CSM)", implantacao.csm));
+    card.appendChild(gridId);
+
     // Resto é da jornada de Implantação (data de entrada, objetivo, valor de
     // contrato...) — não existe pra um cliente que só tem Migração.
     if (implantacao.tem_implantacao !== false) {
-      grid.appendChild(criarInfoItem("Data de entrada", implantacao.data_entrada));
+      const h4 = document.createElement("h4");
+      h4.textContent = "Comercial";
+      card.appendChild(h4);
+      const gridComercial = document.createElement("div");
+      gridComercial.className = "info-grid";
+      gridComercial.appendChild(criarInfoItem("Vendedor", implantacao.vendedor));
+      gridComercial.appendChild(criarInfoItem("Data de entrada", implantacao.data_entrada));
       const dias = diasDesdeEntrada(implantacao.data_entrada);
-      grid.appendChild(criarInfoItem("Dias desde a entrada", dias === null ? "" : `${dias} dia${dias === 1 ? "" : "s"}`));
+      gridComercial.appendChild(criarInfoItem("Dias desde a entrada", dias === null ? "" : `${dias} dia${dias === 1 ? "" : "s"}`));
       const diasSemAcao = diasSemAtividade(implantacao);
-      grid.appendChild(criarInfoItem("Dias sem atividade", diasSemAcao === null ? "Sem registro" : `${diasSemAcao} dia${diasSemAcao === 1 ? "" : "s"}`));
-      grid.appendChild(criarInfoItem("Vendedor", implantacao.vendedor));
-      grid.appendChild(criarInfoItem("Objetivo", implantacao.objetivo));
-      grid.appendChild(criarInfoItem("Valor de contrato", formatarMoeda(implantacao.valor_contrato)));
+      gridComercial.appendChild(criarInfoItem("Dias sem atividade", diasSemAcao === null ? "Sem registro" : `${diasSemAcao} dia${diasSemAcao === 1 ? "" : "s"}`));
+      gridComercial.appendChild(criarInfoItem("Valor de contrato", formatarMoeda(implantacao.valor_contrato)));
+      gridComercial.appendChild(criarInfoItem("Objetivo", implantacao.objetivo));
+      card.appendChild(gridComercial);
     }
   }
-  if (migracao) grid.appendChild(criarInfoItem("Plataforma de origem (Migração)", migracao.plataforma_origem));
-  card.appendChild(grid);
+  if (migracao) {
+    const h4 = document.createElement("h4");
+    h4.textContent = "Migração";
+    card.appendChild(h4);
+    const gridMigracao = document.createElement("div");
+    gridMigracao.className = "info-grid";
+    gridMigracao.appendChild(criarInfoItem("Plataforma de origem", migracao.plataforma_origem));
+    card.appendChild(gridMigracao);
+  }
   return card;
 }
 
@@ -19383,6 +19724,147 @@ function construirFichaOperacionalCard(idcentral, implantacao, credencialConfigu
   return det;
 }
 
+// --- DOCUMENTOS DA FICHA (ficha de entrada assinada, contrato) ---
+// PDF anexado ao cadastro — guardado em base64 no Postgres (mesmo padrão da
+// foto de perfil), sem servidor de arquivo próprio. Chaves iguais a
+// TIPOS_DOCUMENTO_CLIENTE em app.py.
+const TIPOS_DOCUMENTO_CLIENTE = [
+  ["ficha_entrada", "Ficha de entrada"],
+  ["contrato", "Contrato"],
+];
+const DOCUMENTO_CLIENTE_MAX_BYTES = 12 * 1024 * 1024;
+const ICONE_PDF_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>';
+
+function formatarTamanhoArquivo(bytes) {
+  bytes = Number(bytes) || 0;
+  if (!bytes) return "";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function enviarDocumentoFicha(implantacao, tipo, rotulo, arquivo) {
+  if (arquivo.type !== "application/pdf") return alert("Envie um arquivo em PDF.");
+  if (arquivo.size > DOCUMENTO_CLIENTE_MAX_BYTES) return alert("Esse PDF é muito grande — envie um arquivo de até 12MB.");
+  const leitor = new FileReader();
+  leitor.onload = async () => {
+    try {
+      const r = await fetch(`/api/clientes/${implantacao.id}/documentos/${tipo}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome_arquivo: arquivo.name, conteudo: leitor.result, tamanho: arquivo.size }),
+      });
+      const data = await parseJsonResponse(r);
+      if (!data.ok) return alert(`Erro ao enviar "${rotulo}": ${data.error || "falha desconhecida"}`);
+      fichaClienteAtual.documentos = { ...(fichaClienteAtual.documentos || {}), [tipo]: data.documento };
+      mostrarFichaAba("geral");
+    } catch (err) {
+      alert(`Erro ao enviar "${rotulo}": ${String(err)}`);
+    }
+  };
+  leitor.onerror = () => alert("Não foi possível ler esse arquivo.");
+  leitor.readAsDataURL(arquivo);
+}
+
+async function removerDocumentoFicha(implantacao, tipo, rotulo) {
+  if (!confirm(`Remover o PDF de "${rotulo}" deste cliente?`)) return;
+  try {
+    const r = await fetch(`/api/clientes/${implantacao.id}/documentos/${tipo}`, { method: "DELETE" });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return alert(`Erro ao remover: ${data.error || "falha desconhecida"}`);
+    const documentos = { ...(fichaClienteAtual.documentos || {}) };
+    delete documentos[tipo];
+    fichaClienteAtual.documentos = documentos;
+    mostrarFichaAba("geral");
+  } catch (err) {
+    alert(`Erro ao remover: ${String(err)}`);
+  }
+}
+
+function construirFichaDocumentoLinha(implantacao, tipo, rotulo, meta) {
+  const linha = document.createElement("div");
+  linha.className = "ficha-documento-linha";
+
+  const info = document.createElement("div");
+  info.className = "ficha-documento-info";
+  const topo = document.createElement("div");
+  topo.className = "ficha-documento-topo";
+  topo.innerHTML = ICONE_PDF_SVG;
+  const r = document.createElement("span");
+  r.textContent = rotulo;
+  topo.appendChild(r);
+  info.appendChild(topo);
+
+  const status = document.createElement("div");
+  status.className = "ficha-documento-status" + (meta ? "" : " ficha-documento-vazio");
+  status.textContent = meta
+    ? `${meta.nome_arquivo} · ${formatarTamanhoArquivo(meta.tamanho)} · enviado em ${meta.enviado_em}${meta.enviado_por ? ` por ${meta.enviado_por}` : ""}`
+    : "Nenhum arquivo enviado";
+  info.appendChild(status);
+  linha.appendChild(info);
+
+  const acoes = document.createElement("div");
+  acoes.className = "ficha-documento-acoes";
+
+  if (meta) {
+    const btnVer = document.createElement("a");
+    btnVer.className = "btn-secondary";
+    btnVer.textContent = "Ver";
+    btnVer.href = `/api/clientes/${implantacao.id}/documentos/${tipo}/arquivo`;
+    btnVer.target = "_blank";
+    btnVer.rel = "noopener";
+    acoes.appendChild(btnVer);
+  }
+
+  if (USUARIO_PERFIL_ATUAL !== "visualizacao") {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/pdf";
+    input.className = "hidden";
+    input.addEventListener("change", () => {
+      const arquivo = input.files[0];
+      input.value = "";
+      if (arquivo) enviarDocumentoFicha(implantacao, tipo, rotulo, arquivo);
+    });
+    const btnEnviar = document.createElement("button");
+    btnEnviar.type = "button";
+    btnEnviar.className = "btn-secondary";
+    btnEnviar.textContent = meta ? "Substituir" : "Enviar PDF";
+    btnEnviar.addEventListener("click", () => input.click());
+    acoes.appendChild(btnEnviar);
+    acoes.appendChild(input);
+
+    if (meta) {
+      const btnRemover = document.createElement("button");
+      btnRemover.type = "button";
+      btnRemover.className = "btn-secondary btn-documento-remover";
+      btnRemover.textContent = "Remover";
+      btnRemover.addEventListener("click", () => removerDocumentoFicha(implantacao, tipo, rotulo));
+      acoes.appendChild(btnRemover);
+    }
+  }
+
+  linha.appendChild(acoes);
+  return linha;
+}
+
+// Card de Documentos — ficha de entrada assinada + contrato, únicos 2 tipos
+// hoje (ver TIPOS_DOCUMENTO_CLIENTE). Sem implantação não tem cliente_id pra
+// anexar nada, então o card nem aparece (ver chamada em "informacoes").
+function construirFichaDocumentosCard(implantacao, documentos) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel";
+  const h = document.createElement("h3");
+  h.textContent = "Documentos";
+  card.appendChild(h);
+  const lista = document.createElement("div");
+  lista.className = "ficha-documentos-lista";
+  TIPOS_DOCUMENTO_CLIENTE.forEach(([tipo, rotulo]) => {
+    lista.appendChild(construirFichaDocumentoLinha(implantacao, tipo, rotulo, (documentos || {})[tipo] || null));
+  });
+  card.appendChild(lista);
+  return card;
+}
+
 // Sub-abas acima do nome do cliente, dentro da Visão Geral. Cada uma mostra um
 // recorte: "Geral" é o painel completo; as outras separam o que é cadastro e
 // andamento (Histórico tem aba própria no sidebar, fora da Visão Geral).
@@ -19420,7 +19902,111 @@ function construirFichaSubAbas(ativa) {
 // cliente da própria Ficha (implantacao.id). Eventos vêm do mesmo
 // /api/clientes/<id>/eventos já usado pela linha do tempo em modal
 // (abrirTimelineImplantacao) — não duplica cadastro, só a visualização.
-let fichaTimelineFiltroTag = "";
+
+// Filtro "por exclusão" (igual ao AutoFiltro do Excel): tudo marcado = mostra
+// tudo; desmarcar um valor some só com ele. O conjunto guarda o que está
+// DESMARCADO (vazio = nenhum filtro ativo) — não reseta ao trocar de
+// cliente, de propósito (é preferência de quem está navegando, não do
+// cliente específico). Sentinela "" representa "(Sem tag)" — evento sem tag
+// (ex.: chamado do ssxdesk).
+let fichaTimelineTagsExcluidas = new Set();
+let fichaTimelineSetoresExcluidos = new Set();
+const FICHA_TIMELINE_SEM_TAG = "";
+
+// Monta um filtro "Excel" genérico: botão que abre um popover com checkbox
+// "Selecionar todos" + um checkbox por valor distinto. `excluidos` é o Set
+// mutado em place (mesma referência guardada no estado do módulo);
+// `aoMudar` é chamado a cada alteração pra redesenhar a Timeline.
+function construirFiltroExcelCheckbox(rotuloBotao, opcoes, excluidos, aoMudar) {
+  const wrap = document.createElement("div");
+  wrap.className = "filtro-excel-wrap";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn-secondary filtro-excel-btn";
+  const iconeFunil = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h18l-7 8v6l-4 2v-8z"></path></svg>';
+  const atualizarRotuloBtn = () => {
+    const ativos = opcoes.length - excluidos.size;
+    btn.innerHTML = `${iconeFunil}<span>${rotuloBotao}${excluidos.size ? ` (${ativos}/${opcoes.length})` : ""}</span>`;
+  };
+  atualizarRotuloBtn();
+
+  const popover = document.createElement("div");
+  popover.className = "filtro-excel-popover hidden";
+
+  const linhaTodos = document.createElement("label");
+  linhaTodos.className = "filtro-excel-item filtro-excel-item-todos";
+  const checkTodos = document.createElement("input");
+  checkTodos.type = "checkbox";
+  linhaTodos.appendChild(checkTodos);
+  linhaTodos.appendChild(document.createTextNode("Selecionar todos"));
+  popover.appendChild(linhaTodos);
+  popover.appendChild(Object.assign(document.createElement("div"), { className: "filtro-excel-separador" }));
+
+  const atualizarCheckTodos = () => {
+    checkTodos.checked = excluidos.size === 0;
+    checkTodos.indeterminate = excluidos.size > 0 && excluidos.size < opcoes.length;
+  };
+  atualizarCheckTodos();
+
+  const checksIndividuais = [];
+  opcoes.forEach(([valor, rotuloOpcao, cor]) => {
+    const linha = document.createElement("label");
+    linha.className = "filtro-excel-item";
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.checked = !excluidos.has(valor);
+    check.addEventListener("change", () => {
+      if (check.checked) excluidos.delete(valor); else excluidos.add(valor);
+      atualizarCheckTodos();
+      atualizarRotuloBtn();
+      aoMudar();
+    });
+    linha.appendChild(check);
+    if (cor) {
+      const bolinha = document.createElement("span");
+      bolinha.className = "filtro-excel-bolinha";
+      bolinha.style.backgroundColor = cor;
+      linha.appendChild(bolinha);
+    }
+    linha.appendChild(document.createTextNode(rotuloOpcao));
+    popover.appendChild(linha);
+    checksIndividuais.push(check);
+  });
+
+  checkTodos.addEventListener("change", () => {
+    if (checkTodos.checked) {
+      excluidos.clear();
+    } else {
+      opcoes.forEach(([valor]) => excluidos.add(valor));
+    }
+    checksIndividuais.forEach((check, i) => { check.checked = !excluidos.has(opcoes[i][0]); });
+    atualizarCheckTodos();
+    atualizarRotuloBtn();
+    aoMudar();
+  });
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    document.querySelectorAll(".filtro-excel-popover").forEach((p) => { if (p !== popover) p.classList.add("hidden"); });
+    popover.classList.toggle("hidden");
+  });
+
+  wrap.appendChild(btn);
+  wrap.appendChild(popover);
+  return wrap;
+}
+
+// Fecha qualquer popover de filtro aberto ao clicar fora dele — um listener
+// só, registrado uma vez (os popovers em si são recriados a cada render da
+// Timeline, mas a busca abaixo é sempre pelo que está no DOM agora).
+document.addEventListener("click", (e) => {
+  document.querySelectorAll(".filtro-excel-popover").forEach((pop) => {
+    if (!pop.classList.contains("hidden") && !pop.parentElement.contains(e.target)) {
+      pop.classList.add("hidden");
+    }
+  });
+});
 let fichaTimelineClienteIdCache = null;
 let fichaTimelineEventosCache = [];
 
@@ -19467,7 +20053,7 @@ function construirFichaTimelineItem(ev) {
   const bolinha = document.createElement("button");
   bolinha.type = "button";
   bolinha.className = "ficha-timeline-item-bolinha";
-  bolinha.style.backgroundColor = (ev.tag && EVENTO_TAG_COR[ev.tag]) || EVENTO_TAG_COR_PADRAO;
+  bolinha.style.backgroundColor = ev.cor || (ev.tag && EVENTO_TAG_COR[ev.tag]) || EVENTO_TAG_COR_PADRAO;
   bolinha.setAttribute("aria-expanded", "false");
   bolinha.title = `Abrir detalhes: ${ev.titulo}`;
   item.appendChild(bolinha);
@@ -19507,71 +20093,322 @@ function construirFichaTimelineItem(ev) {
   return item;
 }
 
-const FICHA_TIMELINE_ITENS_POR_LINHA = 4;
+// Largura "ocupada" por um acontecimento na linha, pra decidir quantos cabem
+// por linha a partir da largura REAL do container (em vez de um número fixo
+// que ou sobrava espaço vazio enorme numa tela larga — o que estica os
+// pontos pra extremidades e quebra o efeito "cobrinha" — ou não cabia numa
+// tela estreita). min-width do item (.ficha-timeline-item) é 77px; soma-se
+// o gap da linha (5px) e uma margem pro badge "N dias" entre itens.
+const FICHA_TIMELINE_LARGURA_POR_ITEM = 108;
+const FICHA_TIMELINE_ITENS_POR_LINHA_MIN = 2;
+const FICHA_TIMELINE_ITENS_POR_LINHA_MAX = 6;
+
+// Calcula quantos acontecimentos cabem por linha a partir da largura real
+// disponível no container (chamada no render e de novo a cada resize, pra
+// recalcular a distribuição — nunca um valor fixo pra todas as larguras).
+function calcularFichaTimelineItensPorLinha(larguraContainer) {
+  if (!larguraContainer || larguraContainer <= 0) return 4;
+  const cabem = Math.floor(larguraContainer / FICHA_TIMELINE_LARGURA_POR_ITEM);
+  return Math.max(FICHA_TIMELINE_ITENS_POR_LINHA_MIN, Math.min(FICHA_TIMELINE_ITENS_POR_LINHA_MAX, cabem));
+}
+
+// Cria (ou reaproveita) o <svg> que desenha o traçado "cobrinha" — fica
+// sempre como primeiro filho do container, atrás de tudo (z-index 0).
+function obterOuCriarSvgCobrinha(container) {
+  let svg = container.querySelector(":scope > svg.ficha-timeline-cobrinha-svg");
+  if (!svg) {
+    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "ficha-timeline-cobrinha-svg");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("class", "ficha-timeline-cobrinha-path");
+    svg.appendChild(path);
+    container.prepend(svg);
+  }
+  return svg;
+}
+
+function pontoNaDistancia(de, para, distancia) {
+  const dx = para.x - de.x, dy = para.y - de.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const t = Math.min(distancia, d) / d;
+  return { x: de.x + dx * t, y: de.y + dy * t };
+}
+
+// Prolonga a reta de "de" até "para" por mais "distancia" ALÉM de "para" —
+// ao contrário de pontoNaDistancia (que nunca passa de "para"), este
+// extrapola na mesma direção. Usado pro respiro horizontal depois do
+// último ponto de uma linha.
+function pontoAlemDe(de, para, distancia) {
+  const dx = para.x - de.x, dy = para.y - de.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const t = distancia / d;
+  return { x: para.x + dx * t, y: para.y + dy * t };
+}
+
+// Distância horizontal de "respiro" entre o último ponto de uma linha e o
+// início da curva de descida pra próxima — sem isso a curva nasce colada
+// em cima do último ponto, sobrepondo a bolinha/título.
+const FICHA_TIMELINE_RESPIRO_VIRADA = 22;
+
+// Monta o "d" de um path reto entre todos os pontos, arredondando cada
+// vértice (onde o traçado muda de direção) com uma curva — é isso que dá o
+// efeito "cobrinha" de uma linha única e contínua em vez de segmentos soltos.
+// `viradas` é um Set com os índices i tais que pontos[i] é o ÚLTIMO ponto de
+// uma linha e pontos[i+1] é o PRIMEIRO da linha seguinte. Nesses casos, em
+// vez de curvar em cima do próprio ponto (que sobrepõe a bolinha/título), o
+// traçado continua reto na mesma direção por um respiro configurável e só
+// DEPOIS curva pra baixo — o ponto do evento vira uma passagem reta (sem
+// arredondar), e quem recebe a curva é um ponto virtual logo além dele.
+function montarCaminhoSvgArredondado(pontos, raio, viradas) {
+  if (pontos.length < 2) return "";
+  viradas = viradas || new Set();
+
+  // Expande a lista real de pontos inserindo, depois de cada "último ponto
+  // de linha", um ponto virtual de respiro na mesma direção do traçado que
+  // vinha — é nele que a curva de descida vai nascer, nunca em cima do
+  // ponto do evento.
+  const expandido = [];
+  for (let k = 0; k < pontos.length; k++) {
+    const atual = pontos[k];
+    const ehVirada = viradas.has(k) && k > 0 && k < pontos.length - 1;
+    expandido.push({ pt: atual, reto: ehVirada });
+    if (ehVirada) {
+      const respiro = pontoAlemDe(pontos[k - 1], atual, FICHA_TIMELINE_RESPIRO_VIRADA);
+      expandido.push({ pt: respiro, reto: false });
+    }
+  }
+
+  let d = `M ${expandido[0].pt.x} ${expandido[0].pt.y}`;
+  for (let i = 1; i < expandido.length - 1; i++) {
+    const atual = expandido[i].pt;
+    if (expandido[i].reto) {
+      // Passagem reta (sem mudança de direção): o ponto do evento fica
+      // exatamente em cima do traçado, sem arredondar.
+      d += ` L ${atual.x} ${atual.y}`;
+      continue;
+    }
+    const anterior = expandido[i - 1].pt, proximo = expandido[i + 1].pt;
+    const distAnterior = Math.hypot(atual.x - anterior.x, atual.y - anterior.y);
+    const distProximo = Math.hypot(proximo.x - atual.x, proximo.y - atual.y);
+    // O raio nunca passa de metade da distância pros vizinhos — é isso que
+    // garante que a curva de virada de linha nunca estoure o espaço vertical
+    // real disponível entre as linhas (gap menor → raio menor, automático).
+    const r = Math.min(raio, distAnterior / 2, distProximo / 2);
+    const entrada = pontoNaDistancia(atual, anterior, r);
+    const saida = pontoNaDistancia(atual, proximo, r);
+    d += ` L ${entrada.x} ${entrada.y} Q ${atual.x} ${atual.y} ${saida.x} ${saida.y}`;
+  }
+  const ultimo = expandido[expandido.length - 1].pt;
+  d += ` L ${ultimo.x} ${ultimo.y}`;
+  return d;
+}
+
+// Redesenha o traçado "cobrinha" (Início + todos os acontecimentos, na ordem
+// em que aparecem no DOM — que já é a ordem cronológica do caminho, mesmo
+// nas linhas invertidas em row-reverse) e reposiciona os badges "N dias"
+// entre linhas, medindo a posição REAL de cada bolinha via
+// getBoundingClientRect — não um valor fixo em CSS, que quebrava sempre que
+// o container mudava de largura (ex.: sidebar retrátil abrindo/fechando).
+// Chamada no render e pelo ResizeObserver sempre que o container mudar de
+// tamanho (ver final de renderFichaTimelineCaminho), pra nunca ficar
+// desalinhada do layout de verdade.
+function atualizarTimelineCaminhoVisual(container) {
+  // Agrupadas por .ficha-timeline-linha (em vez de uma busca única "achatada")
+  // pra saber exatamente onde cada linha termina — é essa fronteira que marca
+  // uma "virada" (último ponto da linha → primeiro da próxima), sem alterar
+  // a ordem cronológica dos pontos.
+  const linhasEls = container.querySelectorAll(".ficha-timeline-linha");
+  const bolinhasPorLinha = Array.from(linhasEls).map((linha) =>
+    Array.from(linha.querySelectorAll(".ficha-timeline-inicio-bolinha, .ficha-timeline-item-bolinha"))
+  );
+  const bolinhas = bolinhasPorLinha.flat();
+  const svg = obterOuCriarSvgCobrinha(container);
+  const path = svg.querySelector("path");
+  if (!bolinhas.length) {
+    path.setAttribute("d", "");
+    return;
+  }
+  const baseRect = container.getBoundingClientRect();
+  const centro = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - baseRect.left, y: r.top + r.height / 2 - baseRect.top };
+  };
+  const pontos = Array.from(bolinhas).map(centro);
+
+  const viradas = new Set();
+  let acumulado = -1;
+  bolinhasPorLinha.forEach((itensDaLinha) => {
+    acumulado += itensDaLinha.length;
+    if (acumulado < pontos.length - 1) viradas.add(acumulado);
+  });
+
+  svg.setAttribute("width", baseRect.width);
+  svg.setAttribute("height", baseRect.height);
+  svg.setAttribute("viewBox", `0 0 ${baseRect.width} ${baseRect.height}`);
+  path.setAttribute("d", montarCaminhoSvgArredondado(pontos, 16, viradas));
+
+  container.querySelectorAll(".ficha-timeline-gap-entre-linhas").forEach((gap) => {
+    if (!gap._anchorA || !gap._anchorB) return;
+    const a = centro(gap._anchorA);
+    const b = centro(gap._anchorB);
+    gap.style.left = `${(a.x + b.x) / 2}px`;
+    gap.style.top = `${(a.y + b.y) / 2}px`;
+  });
+}
 
 // Monta o "Caminho do cliente": linhas de N eventos em zigue-zague (linha par
 // → esquerda pra direita, ímpar → invertida), com o marcador "Início" antes
 // do primeiro evento, um badge de dias entre cada par de eventos consecutivos
-// (dentro da linha ou no conector entre linhas) e detalhe que expande ao
-// clicar na bolinha.
-function renderFichaTimelineCaminho(container, contadorEl, eventosTodos, filtroTag) {
+// (dentro da linha ou entre linhas) e detalhe que expande ao clicar na
+// bolinha. O traçado "cobrinha" entre as bolinhas é desenhado à parte, por
+// atualizarTimelineCaminhoVisual, no final desta função.
+function renderFichaTimelineCaminho(container, contadorEl, eventosTodos, tagsExcluidas, setoresExcluidos, dataEntrada) {
+  // Guardado no próprio container pra o ResizeObserver (no final desta
+  // função) conseguir chamar renderFichaTimelineCaminho de novo — com os
+  // MESMOS dados/filtros — quando a largura mudar o suficiente pra alterar
+  // quantos acontecimentos cabem por linha. Sem isso, um resize só redesenha
+  // o traçado por cima da distribuição antiga (fixa), que é o motivo de a
+  // "cobrinha" ficar errada ao redimensionar.
+  container._cobrinhaArgsRender = { contadorEl, eventosTodos, tagsExcluidas, setoresExcluidos, dataEntrada };
+
+  const filtroAtivo = tagsExcluidas.size > 0 || setoresExcluidos.size > 0;
   const eventos = (eventosTodos || [])
-    .filter((ev) => !filtroTag || ev.tag === filtroTag)
+    .filter((ev) => !tagsExcluidas.has(ev.tag || FICHA_TIMELINE_SEM_TAG))
+    .filter((ev) => !ev.setor || !setoresExcluidos.has(ev.setor))
     .slice()
     .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
 
   contadorEl.textContent = `${eventos.length} acontecimento${eventos.length === 1 ? "" : "s"}`;
 
+  // Largura real do container ANTES de reconstruir o conteúdo (innerHTML =
+  // "" não muda a largura, já que ela vem do pai via flex column / block,
+  // não do conteúdo) — é a partir dela que se decide quantos acontecimentos
+  // cabem por linha, nunca um número fixo.
+  const larguraContainer = container.getBoundingClientRect().width;
+  const itensPorLinha = calcularFichaTimelineItensPorLinha(larguraContainer);
+  container._cobrinhaItensPorLinha = itensPorLinha;
+  container._cobrinhaLarguraRender = larguraContainer;
+
   container.innerHTML = "";
   if (!eventos.length) {
     container.appendChild(construirFichaHistoricoVazio(
       "Nenhum acontecimento ainda",
-      filtroTag ? `Nenhum acontecimento com a tag "${filtroTag}" registrado.` : 'Clique em "Editar acontecimentos" pra começar a registrar.'
+      filtroAtivo ? "Nenhum acontecimento bate com os filtros marcados." : 'Clique em "Editar acontecimentos" pra começar a registrar.'
     ));
     return;
   }
 
   const linhas = [];
-  for (let i = 0; i < eventos.length; i += FICHA_TIMELINE_ITENS_POR_LINHA) {
-    linhas.push(eventos.slice(i, i + FICHA_TIMELINE_ITENS_POR_LINHA));
+  for (let i = 0; i < eventos.length; i += itensPorLinha) {
+    linhas.push(eventos.slice(i, i + itensPorLinha));
   }
+
+  // Badge "N dias" entre a linha atual e a próxima, criado logo após a linha
+  // atual (pra manter a ordem certa no DOM no fallback mobile, que volta a
+  // posição estática) — a âncora B (primeira bolinha da próxima linha) só é
+  // preenchida na iteração seguinte, antes de atualizarTimelineCaminhoVisual
+  // rodar.
+  let gapEntreLinhasPendente = null;
 
   linhas.forEach((eventosDaLinha, idxLinha) => {
     const invertida = idxLinha % 2 === 1;
     const linha = document.createElement("div");
     linha.className = "ficha-timeline-linha" + (invertida ? " invertida" : "");
+    let primeiraBolinha = null;
+    let ultimaBolinha = null;
 
     if (idxLinha === 0) {
       const inicio = document.createElement("div");
       inicio.className = "ficha-timeline-inicio";
+      // Mesmo padrão dos itens normais (data em cima, bolinha, rótulo
+      // embaixo) — "Início" vira o rótulo, no lugar do título do evento.
+      if (dataEntrada) {
+        const dataInicio = document.createElement("span");
+        dataInicio.className = "ficha-timeline-inicio-data";
+        dataInicio.textContent = formatarDataBRSimples(dataEntrada) || "";
+        inicio.appendChild(dataInicio);
+      }
+      const bolinhaInicio = document.createElement("span");
+      bolinhaInicio.className = "ficha-timeline-inicio-bolinha";
+      inicio.appendChild(bolinhaInicio);
       const rotuloInicio = document.createElement("span");
       rotuloInicio.className = "ficha-timeline-inicio-rotulo";
       rotuloInicio.textContent = "Início";
-      const bolinhaInicio = document.createElement("span");
-      bolinhaInicio.className = "ficha-timeline-inicio-bolinha";
       inicio.appendChild(rotuloInicio);
-      inicio.appendChild(bolinhaInicio);
       linha.appendChild(inicio);
+      primeiraBolinha = bolinhaInicio;
     }
 
     eventosDaLinha.forEach((ev, idxNaLinha) => {
       if (idxNaLinha > 0) {
         linha.appendChild(construirFichaTimelineGap(diasEntreDatasIso(eventosDaLinha[idxNaLinha - 1].data, ev.data)));
       }
-      linha.appendChild(construirFichaTimelineItem(ev));
+      const item = construirFichaTimelineItem(ev);
+      linha.appendChild(item);
+      const bolinha = item.querySelector(".ficha-timeline-item-bolinha");
+      if (!primeiraBolinha) primeiraBolinha = bolinha;
+      ultimaBolinha = bolinha;
     });
 
+    if (gapEntreLinhasPendente) {
+      gapEntreLinhasPendente._anchorB = primeiraBolinha;
+      gapEntreLinhasPendente = null;
+    }
     container.appendChild(linha);
 
     const proximaLinha = linhas[idxLinha + 1];
     if (proximaLinha) {
-      const conector = document.createElement("div");
-      conector.className = "ficha-timeline-conector " + (invertida ? "esquerda" : "direita");
       const ultimoDaLinha = eventosDaLinha[eventosDaLinha.length - 1];
-      conector.appendChild(construirFichaTimelineGap(diasEntreDatasIso(ultimoDaLinha.data, proximaLinha[0].data)));
-      container.appendChild(conector);
+      const gap = construirFichaTimelineGap(diasEntreDatasIso(ultimoDaLinha.data, proximaLinha[0].data));
+      gap.classList.add("ficha-timeline-gap-entre-linhas");
+      gap._anchorA = ultimaBolinha;
+      container.appendChild(gap);
+      gapEntreLinhasPendente = gap;
     }
   });
+
+  atualizarTimelineCaminhoVisual(container);
+
+  // Redesenha o traçado sempre que o container mudar de tamanho — inclusive
+  // ao recolher/expandir o sidebar retrátil, que muda a largura da área de
+  // conteúdo e, por consequência, a posição de cada bolinha. Observer é
+  // criado uma única vez por container (guardado nele mesmo) e sobrevive a
+  // re-renders (filtro de tag/setor, por exemplo), já que container.innerHTML
+  // = "" não apaga propriedades JS do próprio elemento.
+  if (typeof ResizeObserver !== "undefined" && !container._cobrinhaResizeObserver) {
+    const ro = new ResizeObserver(() => {
+      // Bloqueio de reentrância: um reflow completo (innerHTML = "" +
+      // reconstrução) pode por si só mudar a altura do container e,
+      // por tabela, fazer a barra de rolagem aparecer/desaparecer — o que
+      // dispara ESTE MESMO observer de novo. Sem essa trava, isso oscila
+      // indefinidamente e congela a aba inteira (foi o que travou o
+      // carregamento do SSXDesk). Ignora qualquer notificação que chegue
+      // enquanto um reflow nosso ainda está assentando.
+      if (container._cobrinhaReflowTravado) return;
+      const larguraAtual = container.getBoundingClientRect().width;
+      const itensPorLinhaAtual = calcularFichaTimelineItensPorLinha(larguraAtual);
+      // Só refaz a distribuição inteira se a largura mudou o bastante (> 40px
+      // — bem maior que uma barra de rolagem, ~15-17px) E isso de fato muda
+      // quantos acontecimentos cabem por linha. Resize pequeno só redesenha
+      // o traçado por cima do layout atual.
+      const larguraAnterior = container._cobrinhaLarguraRender || larguraAtual;
+      const mudouBastante = Math.abs(larguraAtual - larguraAnterior) > 40;
+      if (mudouBastante && itensPorLinhaAtual !== container._cobrinhaItensPorLinha && container._cobrinhaArgsRender) {
+        container._cobrinhaReflowTravado = true;
+        const a = container._cobrinhaArgsRender;
+        renderFichaTimelineCaminho(container, a.contadorEl, a.eventosTodos, a.tagsExcluidas, a.setoresExcluidos, a.dataEntrada);
+        // Duas animation frames pra deixar o layout (e uma eventual
+        // barra de rolagem) assentar antes de voltar a reagir a resize.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          container._cobrinhaReflowTravado = false;
+        }));
+      } else {
+        atualizarTimelineCaminhoVisual(container);
+      }
+    });
+    ro.observe(container);
+    container._cobrinhaResizeObserver = ro;
+  }
 }
 
 async function carregarFichaTimeline(implantacao, forcarRecarga, card) {
@@ -19580,7 +20417,12 @@ async function carregarFichaTimeline(implantacao, forcarRecarga, card) {
   caminhoWrap.innerHTML = '<p class="placeholder">Carregando...</p>';
   try {
     const eventos = await obterFichaTimelineEventos(implantacao.id, forcarRecarga);
-    renderFichaTimelineCaminho(caminhoWrap, contadorEl, eventos, fichaTimelineFiltroTag);
+    const chamados = construirEventosSinteticosChamados(fichaChamadosConcluidosGeralAtuais(implantacao.id));
+    const wootric = construirEventosSinteticosWootric(fichaWootricAtuaisValidas(implantacao.id));
+    renderFichaTimelineCaminho(
+      caminhoWrap, contadorEl, eventos.concat(chamados).concat(wootric),
+      fichaTimelineTagsExcluidas, fichaTimelineSetoresExcluidos, implantacao.data_entrada
+    );
   } catch (err) {
     mostrarErroEmNode(caminhoWrap, String(err));
   }
@@ -19627,7 +20469,7 @@ function construirFichaTimelineCard(implantacao) {
   legendaTitulo.className = "ficha-timeline-legenda-titulo";
   legendaTitulo.textContent = "TAGS";
   legenda.appendChild(legendaTitulo);
-  EVENTO_TAGS.forEach(([nome, cor]) => {
+  EVENTO_TAGS_FILTRAVEIS.forEach(([nome, cor]) => {
     const item = document.createElement("span");
     item.className = "ficha-timeline-legenda-item";
     const bolinha = document.createElement("span");
@@ -19649,24 +20491,24 @@ function construirFichaTimelineCard(implantacao) {
   btnAtualizar.addEventListener("click", () => carregarFichaTimeline(implantacao, true, card));
   acoes.appendChild(btnAtualizar);
 
-  const selectTag = document.createElement("select");
-  selectTag.className = "ficha-timeline-filtro-tag";
-  const optTodas = document.createElement("option");
-  optTodas.value = "";
-  optTodas.textContent = "Todas as Tags";
-  selectTag.appendChild(optTodas);
-  EVENTO_TAGS.forEach(([nome]) => {
-    const opt = document.createElement("option");
-    opt.value = nome;
-    opt.textContent = nome;
-    selectTag.appendChild(opt);
-  });
-  selectTag.value = fichaTimelineFiltroTag;
-  selectTag.addEventListener("change", () => {
-    fichaTimelineFiltroTag = selectTag.value;
-    renderFichaTimelineCaminho(card._fichaTimelineCaminhoWrap, card._fichaTimelineContador, fichaTimelineEventosCache, fichaTimelineFiltroTag);
-  });
-  acoes.appendChild(selectTag);
+  // Filtros "por exclusão" (estilo AutoFiltro do Excel) — Tags e Setor,
+  // independentes entre si (ver construirFiltroExcelCheckbox). Sempre
+  // redesenha com eventos reais + chamados sintéticos juntos (mesma lista
+  // que alimenta o render inicial), senão o filtro "esquece" os chamados.
+  const rerenderTimelineFiltrada = () => {
+    const chamadosAtuais = construirEventosSinteticosChamados(fichaChamadosConcluidosGeralAtuais(implantacao.id));
+    const wootricAtuais = construirEventosSinteticosWootric(fichaWootricAtuaisValidas(implantacao.id));
+    renderFichaTimelineCaminho(
+      card._fichaTimelineCaminhoWrap, card._fichaTimelineContador,
+      fichaTimelineEventosCache.concat(chamadosAtuais).concat(wootricAtuais), fichaTimelineTagsExcluidas, fichaTimelineSetoresExcluidos,
+      implantacao.data_entrada
+    );
+  };
+  const opcoesTags = EVENTO_TAGS_FILTRAVEIS.map(([nome, cor]) => [nome, nome, cor])
+    .concat([[FICHA_TIMELINE_SEM_TAG, "(Sem tag)", EVENTO_TAG_COR_PADRAO]]);
+  acoes.appendChild(construirFiltroExcelCheckbox("Tags", opcoesTags, fichaTimelineTagsExcluidas, rerenderTimelineFiltrada));
+  const opcoesSetores = IMPLANTACAO_SETORES.map((nome) => [nome, nome, IMPLANTACAO_SETOR_COR[nome]]);
+  acoes.appendChild(construirFiltroExcelCheckbox("Setor", opcoesSetores, fichaTimelineSetoresExcluidos, rerenderTimelineFiltrada));
 
   const btnEditar = document.createElement("button");
   btnEditar.type = "button";
@@ -19702,7 +20544,12 @@ function construirFichaTimelineCard(implantacao) {
   card._fichaTimelineCaminhoWrap = caminhoWrap;
 
   if (fichaTimelineClienteIdCache === implantacao.id) {
-    renderFichaTimelineCaminho(caminhoWrap, contador, fichaTimelineEventosCache, fichaTimelineFiltroTag);
+    const chamados = construirEventosSinteticosChamados(fichaChamadosConcluidosGeralAtuais(implantacao.id));
+    const wootric = construirEventosSinteticosWootric(fichaWootricAtuaisValidas(implantacao.id));
+    renderFichaTimelineCaminho(
+      caminhoWrap, contador, fichaTimelineEventosCache.concat(chamados).concat(wootric),
+      fichaTimelineTagsExcluidas, fichaTimelineSetoresExcluidos, implantacao.data_entrada
+    );
   } else {
     caminhoWrap.innerHTML = '<p class="placeholder">Carregando...</p>';
     carregarFichaTimeline(implantacao, false, card);
@@ -19736,6 +20583,7 @@ function construirEventosSinteticosMigracao(migracoes) {
         data: m.data_inicio,
         responsavel: "",
         sintetico: true,
+        sinteticoRotulo: "registrado no cadastro de migração",
       });
     }
     if (m.data_fim) {
@@ -19748,15 +20596,76 @@ function construirEventosSinteticosMigracao(migracoes) {
         data: m.data_fim,
         responsavel: "",
         sintetico: true,
+        sinteticoRotulo: "registrado no cadastro de migração",
       });
     }
   });
   return eventos;
 }
 
-function montarFichaChatEventos(eventosReais, migracoes) {
+// As duas únicas categorias que a API do ssxdesk devolve hoje (conferido
+// direto na resposta real — não é um enum documentado à parte): "Geral" é
+// chamado de verdade (aberto por alguém, com título/descrição própria);
+// "Atendimento Chat" é registro automático de uma conversa de chat. Usado
+// pra filtrar a aba Suporte e pra decidir o que entra na Timeline (só Geral
+// — ver eventosTimelineComChamados) vs. no Detalhado (os dois).
+const CHAMADO_CATEGORIA_GERAL = "Geral";
+const CHAMADO_CATEGORIA_ATENDIMENTO_CHAT = "Atendimento Chat";
+
+// Chamados CONCLUÍDOS do ssxdesk viram "acontecimentos" de leitura do setor
+// Suporte (mesma ideia de construirEventosSinteticosMigracao — sem id real
+// no nosso backend, nunca editáveis/excluíveis por aqui) pra aparecerem
+// misturados com o resto na Timeline e no chat Detalhado. Os em aberto ficam
+// só no card da Visão Geral — aqui é histórico, então só os concluídos.
+//
+// Vínculo automático setor->tag: todo chamado vindo da API já nasce com
+// tag "Suporte" (mesma regra que os eventos sintéticos de Migração sempre
+// tiveram pra tag "Migração") — a cor vem de EVENTO_TAG_COR["Suporte"],
+// então nunca dessincroniza com a cor do setor Suporte (ver
+// IMPLANTACAO_SETOR_COR). Só "Atendimento Chat" ganha um `cor` PRÓPRIO,
+// mais claro, pra diferenciar dos "Geral" quando os dois aparecem juntos no
+// Detalhado (na Timeline só entra "Geral" — ver fichaChamadosConcluidosGeralAtuais).
+function construirEventosSinteticosChamados(chamadosConcluidos) {
+  return (chamadosConcluidos || []).map((c) => ({
+    id: `sintetico-chamado-${c.id}`,
+    setor: "Suporte",
+    tag: "Suporte",
+    titulo: c.title || "(sem título)",
+    descricao: [c.category, c.description].filter(Boolean).join(" — "),
+    data: String(c.createdAt || "").slice(0, 10), // ISO datetime -> "AAAA-MM-DD"
+    responsavel: "",
+    sintetico: true,
+    sinteticoRotulo: "importado do ssxdesk",
+    cor: c.category === CHAMADO_CATEGORIA_ATENDIMENTO_CHAT ? "var(--violeta-claro)" : null,
+  }));
+}
+
+// Avaliações de NPS da Wootric viram "acontecimentos" de leitura do setor
+// NPS (mesma ideia de construirEventosSinteticosChamados/Migração — sem id
+// real no nosso backend, nunca editáveis/excluíveis por aqui), pra
+// aparecerem misturados com o resto na Timeline e no chat Detalhado.
+// Vínculo automático setor->tag: toda avaliação já nasce com tag "NPS" —
+// a cor vem de EVENTO_TAG_COR["NPS"], nunca dessincroniza da cor do setor
+// NPS (ver IMPLANTACAO_SETOR_COR), mesmo racional do setor Suporte.
+function construirEventosSinteticosWootric(avaliacoes) {
+  return (avaliacoes || []).map((a) => ({
+    id: `sintetico-wootric-${a.wootric_id}`,
+    setor: "NPS",
+    tag: "NPS",
+    titulo: `Avaliação NPS: ${a.score}/10`,
+    descricao: (a.text || "").trim() || "O cliente não deixou comentário.",
+    data: String(a.created_at || "").slice(0, 10), // ISO datetime -> "AAAA-MM-DD"
+    responsavel: "",
+    sintetico: true,
+    sinteticoRotulo: "importado da Wootric",
+  }));
+}
+
+function montarFichaChatEventos(eventosReais, migracoes, chamadosConcluidos, avaliacoesWootric) {
   return (eventosReais || [])
     .concat(construirEventosSinteticosMigracao(migracoes))
+    .concat(construirEventosSinteticosChamados(chamadosConcluidos))
+    .concat(construirEventosSinteticosWootric(avaliacoesWootric))
     .slice()
     .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
 }
@@ -19764,6 +20673,7 @@ function montarFichaChatEventos(eventosReais, migracoes) {
 // Cor da bolinha do rail (timeline à esquerda do chat) — mesma lógica de
 // prioridade que antes virava borda do cartão: Tag primeiro, senão Setor.
 function corFichaChatEvento(ev) {
+  if (ev.cor) return ev.cor;
   return ev.tag ? (EVENTO_TAG_COR[ev.tag] || EVENTO_TAG_COR_PADRAO) : (IMPLANTACAO_SETOR_COR[ev.setor] || "var(--cinza-300)");
 }
 
@@ -19792,7 +20702,7 @@ function construirFichaChatMensagem(ev) {
   if (ev.sintetico) {
     const sinteticoSpan = document.createElement("span");
     sinteticoSpan.className = "ficha-chat-mensagem-sintetico-rotulo";
-    sinteticoSpan.textContent = "registrado no cadastro de migração";
+    sinteticoSpan.textContent = ev.sinteticoRotulo || "registrado no cadastro de migração";
     topo.appendChild(sinteticoSpan);
   }
   bolha.appendChild(topo);
@@ -19879,7 +20789,9 @@ async function carregarFichaDetalhadoChat(implantacao, forcarRecarga, card) {
   try {
     const eventosReais = await obterFichaTimelineEventos(implantacao.id, forcarRecarga);
     const migracoes = (fichaClienteAtual && fichaClienteAtual.migracoes) || [];
-    renderFichaChat(chatEl, montarFichaChatEventos(eventosReais, migracoes));
+    const chamadosConcluidos = fichaChamadosConcluidosAtuais(implantacao.id);
+    const avaliacoesWootric = fichaWootricAtuaisValidas(implantacao.id);
+    renderFichaChat(chatEl, montarFichaChatEventos(eventosReais, migracoes, chamadosConcluidos, avaliacoesWootric));
   } catch (err) {
     mostrarErroEmNode(chatEl, String(err));
   }
@@ -19971,7 +20883,9 @@ function construirFichaDetalhadoChat(implantacao) {
 
   if (fichaTimelineClienteIdCache === implantacao.id) {
     const migracoes = (fichaClienteAtual && fichaClienteAtual.migracoes) || [];
-    renderFichaChat(chat, montarFichaChatEventos(fichaTimelineEventosCache, migracoes));
+    const chamadosConcluidos = fichaChamadosConcluidosAtuais(implantacao.id);
+    const avaliacoesWootric = fichaWootricAtuaisValidas(implantacao.id);
+    renderFichaChat(chat, montarFichaChatEventos(fichaTimelineEventosCache, migracoes, chamadosConcluidos, avaliacoesWootric));
   } else {
     chat.innerHTML = '<p class="placeholder">Carregando...</p>';
     carregarFichaDetalhadoChat(implantacao, false, card);
@@ -19982,9 +20896,12 @@ function construirFichaDetalhadoChat(implantacao) {
 
 // Abas por área dentro da aba Histórico do sidebar — "Timeline" (padrão ao
 // abrir) é o atalho pra linha do tempo de Implantação, "Detalhado" é o
-// conteúdo que antes se chamava "Geral" (tentativas de migração). As áreas
-// CS/Treinamento/Suporte/Comercial ainda não têm uma fonte de registros
-// associada a elas; ficam com um placeholder até existir o que filtrar.
+// conteúdo que antes se chamava "Geral" (tentativas de migração). "Suporte"
+// mostra os chamados do ssxdesk (ver construirFichaHistoricoSuporte);
+// "Treinamento" e "Financeiro" mostram os acontecimentos reais desses
+// setores (ver construirFichaHistoricoSetor) — "CS"/"Comercial" ainda não
+// têm fonte de registros associada; ficam com um placeholder até existir o
+// que filtrar.
 const FICHA_HISTORICO_AREAS = [
   ["timeline", "Timeline"],
   ["detalhado", "Detalhado"],
@@ -19992,8 +20909,10 @@ const FICHA_HISTORICO_AREAS = [
   ["treinamento", "Treinamento"],
   ["suporte", "Suporte"],
   ["comercial", "Comercial"],
+  ["financeiro", "Financeiro"],
 ];
 let fichaHistoricoAreaAtual = "timeline";
+let fichaSuporteFiltroCategoria = ""; // "" = todos; senão CHAMADO_CATEGORIA_GERAL/CHAMADO_CATEGORIA_ATENDIMENTO_CHAT
 
 function construirFichaHistoricoAbas(ativa) {
   const nav = document.createElement("div");
@@ -20016,6 +20935,122 @@ function construirFichaHistoricoAbas(ativa) {
   return nav;
 }
 
+// Sub-aba "Suporte" do Histórico — chamados CONCLUÍDOS do ssxdesk (os em
+// aberto já aparecem na Visão Geral, ver construirFichaChamadosAbertosCard).
+// Mesmos 3 estados de fichaChamadosAtual: null (carregando), "erro", ou dado.
+const FICHA_SUPORTE_FILTROS_CATEGORIA = [
+  ["", "Todos os tipos"],
+  [CHAMADO_CATEGORIA_GERAL, "Geral"],
+  [CHAMADO_CATEGORIA_ATENDIMENTO_CHAT, "Atendimento Chat"],
+];
+
+function construirFichaHistoricoSuporte(implantacao) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel";
+  const deOutroCliente = fichaChamadosClienteId !== implantacao?.id;
+  if (deOutroCliente || fichaChamadosAtual === null) {
+    card.appendChild(construirFichaHistoricoVazio("Carregando...", "Buscando os chamados desse cliente no ssxdesk."));
+    return card;
+  }
+  if (fichaChamadosAtual === "erro") {
+    card.appendChild(construirFichaHistoricoVazio(
+      "Não foi possível carregar",
+      "Não consegui buscar os chamados desse cliente no ssxdesk agora. Tenta reabrir a Ficha em instantes."
+    ));
+    return card;
+  }
+
+  // Filtro por tipo (Geral / Atendimento Chat) — ver CHAMADO_CATEGORIA_*.
+  const toolbar = document.createElement("div");
+  toolbar.className = "ficha-suporte-toolbar";
+  const selectCategoria = document.createElement("select");
+  selectCategoria.className = "ficha-timeline-filtro-tag";
+  FICHA_SUPORTE_FILTROS_CATEGORIA.forEach(([valor, rotulo]) => {
+    const opt = document.createElement("option");
+    opt.value = valor;
+    opt.textContent = rotulo;
+    selectCategoria.appendChild(opt);
+  });
+  selectCategoria.value = fichaSuporteFiltroCategoria;
+  selectCategoria.addEventListener("change", () => {
+    fichaSuporteFiltroCategoria = selectCategoria.value;
+    mostrarFichaAba("historico");
+  });
+  toolbar.appendChild(selectCategoria);
+  card.appendChild(toolbar);
+
+  const filtrados = fichaChamadosAtual.concluidos.filter(
+    (c) => !fichaSuporteFiltroCategoria || c.category === fichaSuporteFiltroCategoria
+  );
+  if (!filtrados.length) {
+    card.appendChild(construirFichaHistoricoVazio(
+      "Nada por aqui",
+      fichaSuporteFiltroCategoria
+        ? `Esse cliente não tem chamado concluído do tipo "${fichaSuporteFiltroCategoria}".`
+        : "Esse cliente não tem chamado concluído no ssxdesk."
+    ));
+    return card;
+  }
+
+  const h = document.createElement("h3");
+  h.textContent = `Chamados concluídos (${filtrados.length})`;
+  card.appendChild(h);
+  card.appendChild(construirListaChamados(filtrados, "Nenhum chamado concluído."));
+  return card;
+}
+
+// Sub-aba genérica de Histórico por Setor (hoje só "Financeiro" — ver
+// construirFichaHistorico) — mostra os acontecimentos REAIS (não
+// sintéticos) desse setor, no mesmo formato de bolha do chat Detalhado.
+// Usa o mesmo cache/fonte de dados da Timeline (fichaTimelineEventosCache),
+// carregando sob demanda se a pessoa cair direto nessa sub-aba sem passar
+// por Timeline/Detalhado antes.
+function renderFichaHistoricoSetor(card, eventosTodos, setor) {
+  card.innerHTML = "";
+  const eventosDoSetor = (eventosTodos || [])
+    .filter((ev) => ev.setor === setor)
+    .slice()
+    .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+  if (!eventosDoSetor.length) {
+    card.appendChild(construirFichaHistoricoVazio("Nada por aqui ainda", `Esse cliente não tem acontecimento registrado em ${setor}.`));
+    return;
+  }
+  const h = document.createElement("h3");
+  h.textContent = `${setor} (${eventosDoSetor.length})`;
+  card.appendChild(h);
+  const lista = document.createElement("div");
+  lista.className = "ficha-chat-lista";
+  eventosDoSetor.forEach((ev) => lista.appendChild(construirFichaChatItem(ev)));
+  card.appendChild(lista);
+}
+
+async function carregarFichaHistoricoSetor(implantacao, setor, card) {
+  try {
+    const eventos = await obterFichaTimelineEventos(implantacao.id, false);
+    renderFichaHistoricoSetor(card, eventos, setor);
+  } catch (err) {
+    mostrarErroEmNode(card, String(err));
+  }
+}
+
+function construirFichaHistoricoSetor(implantacao, setor) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel";
+  if (!implantacao) {
+    card.appendChild(construirFichaHistoricoVazio(
+      "Sem Implantação", "Esse cliente não tem Implantação — não há acontecimentos pra mostrar."
+    ));
+    return card;
+  }
+  if (fichaTimelineClienteIdCache === implantacao.id) {
+    renderFichaHistoricoSetor(card, fichaTimelineEventosCache, setor);
+  } else {
+    card.innerHTML = '<p class="placeholder">Carregando...</p>';
+    carregarFichaHistoricoSetor(implantacao, setor, card);
+  }
+  return card;
+}
+
 function construirFichaHistorico(implantacao, migracao) {
   const wrap = document.createElement("div");
   wrap.className = "ficha-historico-wrap";
@@ -20025,6 +21060,12 @@ function construirFichaHistorico(implantacao, migracao) {
     wrap.appendChild(construirFichaTimelineCard(implantacao));
   } else if (fichaHistoricoAreaAtual === "detalhado") {
     wrap.appendChild(construirFichaDetalhadoChat(implantacao));
+  } else if (fichaHistoricoAreaAtual === "suporte") {
+    wrap.appendChild(construirFichaHistoricoSuporte(implantacao));
+  } else if (fichaHistoricoAreaAtual === "treinamento") {
+    wrap.appendChild(construirFichaHistoricoSetor(implantacao, "Treinamento"));
+  } else if (fichaHistoricoAreaAtual === "financeiro") {
+    wrap.appendChild(construirFichaHistoricoSetor(implantacao, "Financeiro"));
   } else {
     const nomeArea = (FICHA_HISTORICO_AREAS.find(([chave]) => chave === fichaHistoricoAreaAtual) || [])[1] || "";
     const card = document.createElement("div");
@@ -20038,13 +21079,14 @@ function construirFichaHistorico(implantacao, migracao) {
   return wrap;
 }
 
-function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin, subAba = "geral") {
+function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin, subAba = "geral", documentos) {
   const wrap = document.createElement("div");
   wrap.appendChild(construirFichaSubAbas(subAba));
 
   if (subAba === "informacoes") {
     if (implantacao) wrap.appendChild(construirFichaLinhaContato(implantacao));
     wrap.appendChild(construirFichaResumoCard(implantacao, migracao));
+    if (implantacao) wrap.appendChild(construirFichaDocumentosCard(implantacao, documentos));
     wrap.appendChild(construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin));
     return wrap;
   }
@@ -20089,6 +21131,21 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
   // Atenção/Pendências — concentra tudo que precisa de ação num só lugar, em
   // vez de espalhado pela tela.
   wrap.appendChild(construirFichaAlertasCard(implantacao, migracao));
+
+  // Chamados de suporte abertos (ssxdesk, buscados pelo IdCentral) — carrega
+  // em segundo plano (ver carregarChamadosFicha); fichaChamadosAtual só tem
+  // dado de verdade se for deste mesmo cliente.
+  if (fichaChamadosClienteId === implantacao?.id) {
+    const cardChamados = construirFichaChamadosAbertosCard(fichaChamadosAtual);
+    if (cardChamados) wrap.appendChild(cardChamados);
+  }
+
+  // Avaliações de NPS (Wootric, buscadas pelo IdCentral) — mesmo padrão de
+  // carregamento em segundo plano dos chamados do ssxdesk.
+  if (fichaWootricClienteId === implantacao?.id) {
+    const cardWootric = construirFichaWootricCard(fichaWootricAtual);
+    if (cardWootric) wrap.appendChild(cardWootric);
+  }
 
   // Resumo do cliente + Tarefas lado a lado — bloco principal de
   // acompanhamento do cliente.
@@ -20571,8 +21628,8 @@ function mostrarFichaAba(aba) {
   // normalmente. Ver regras em "Aba Detalhado (Histórico)" no style.css.
   el("tela-ficha-cliente").classList.toggle("ficha-historico-detalhado-ativo", aba === "historico" && fichaHistoricoAreaAtual === "detalhado");
   if (!fichaClienteAtual) return;
-  const { idcentral, implantacao, migracao, migracoes, credencial_configurada, credencial_login } = fichaClienteAtual;
-  if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login, fichaSubAbaAtual));
+  const { idcentral, implantacao, migracao, migracoes, credencial_configurada, credencial_login, documentos } = fichaClienteAtual;
+  if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login, fichaSubAbaAtual, documentos));
   if (aba === "implantacao") corpo.appendChild(construirFichaImplantacao(implantacao, migracao));
   if (aba === "marcos") corpo.appendChild(construirFichaMarcos(implantacao, migracao));
   if (aba === "migracao") corpo.appendChild(construirFichaMigracao(implantacao, migracao, migracoes));
@@ -20613,6 +21670,14 @@ async function carregarFichaCliente(idcentral, aba = "geral") {
     const abasEscondidas = semImplantacao ? ["implantacao", "marcos"] : [];
     const abaFinal = (aba === "migracao" && !data.migracao) || abasEscondidas.includes(aba) ? "geral" : aba;
     mostrarFichaAba(abaFinal);
+    // Chamados do ssxdesk: busca em segundo plano, nunca atrasa a Ficha —
+    // quando chegar, carregarChamadosFicha redesenha a aba sozinha se ainda
+    // fizer sentido (ver a função).
+    if (data.implantacao) carregarChamadosFicha(data.implantacao.id);
+    // Avaliações NPS da Wootric: mesmo padrão — busca em segundo plano,
+    // nunca atrasa a Ficha; carregarWootricFicha redesenha a aba sozinha
+    // quando chegar, se ainda fizer sentido.
+    if (data.implantacao) carregarWootricFicha(data.implantacao.id);
   } catch (err) {
     mostrarErroEmNode(corpo, String(err));
   }

@@ -66,3 +66,19 @@ def obter_sessao():
         raise
     finally:
         sessao.close()
+
+
+@contextmanager
+def obter_sessao_leitura():
+    """Igual a `obter_sessao`, só pra consultas que não escrevem nada — sem o
+    COMMIT no fim do bloco. Um SELECT não precisa confirmar transação
+    nenhuma; o COMMIT de `obter_sessao` nesse caso é uma viagem a mais até o
+    banco pra nada, e com o banco em outra região (produção no Render, longe
+    de quem testa local) isso dobra a latência de cada leitura. Fechar a
+    sessão sem commitar simplesmente descarta a transação implícita (nunca
+    houve nada pra perder)."""
+    sessao = SessionLocal()
+    try:
+        yield sessao
+    finally:
+        sessao.close()

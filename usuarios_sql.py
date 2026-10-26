@@ -15,7 +15,7 @@ import uuid
 from sqlalchemy import func
 from werkzeug.security import generate_password_hash
 
-from db_sql import obter_sessao
+from db_sql import obter_sessao, obter_sessao_leitura
 from models import Usuario, UsuarioFoto
 
 
@@ -39,14 +39,14 @@ def _usuario_para_dict(usuario, foto=None):
 
 
 def sem_usuarios_cadastrados():
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         return sessao.query(Usuario.id).first() is None
 
 
 def buscar_usuario(usuario):
     """Por usuario_norm — usado no login."""
     usuario_norm = usuario.strip().lower()
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         alvo = sessao.query(Usuario).filter_by(usuario_norm=usuario_norm).first()
         if not alvo:
             return None
@@ -57,7 +57,7 @@ def buscar_usuario(usuario):
 def buscar_usuario_por_id(usuario_id):
     if not usuario_id:
         return None
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         alvo = sessao.get(Usuario, usuario_id)
         if not alvo:
             return None
@@ -66,7 +66,7 @@ def buscar_usuario_por_id(usuario_id):
 
 
 def contar_admins(excluir_id=None):
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         consulta = sessao.query(func.count(Usuario.id)).filter(Usuario.perfil == "adm")
         if excluir_id:
             consulta = consulta.filter(Usuario.id != excluir_id)
@@ -147,14 +147,14 @@ def definir_foto(usuario_id, foto):
 
 
 def obter_foto(usuario_id):
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         existente = sessao.get(UsuarioFoto, usuario_id)
         return existente.foto if existente else None
 
 
 def listar_usuarios():
     """Sem foto — não é usada na listagem de Gerenciar Usuários."""
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         return [
             {
                 "id": u.id,
@@ -168,7 +168,7 @@ def listar_usuarios():
 
 
 def listar_usuarios_opcoes(area="", area_prefix=""):
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         lista = []
         for u in sessao.query(Usuario).all():
             area_usuario = u.area or ""
@@ -182,7 +182,7 @@ def listar_usuarios_opcoes(area="", area_prefix=""):
 
 
 def telefones_profissionais_por_nome():
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         mapa = {}
         for u in sessao.query(Usuario).all():
             nome = u.nome_responsavel or u.usuario or ""
@@ -194,7 +194,7 @@ def telefones_profissionais_por_nome():
 
 def usuarios_aniversariantes_hoje(hoje_mm_dd):
     """Sem foto — só usada pra montar o post do feed."""
-    with obter_sessao() as sessao:
+    with obter_sessao_leitura() as sessao:
         usuarios = sessao.query(Usuario).filter(Usuario.aniversario == hoje_mm_dd).all()
         return [_usuario_para_dict(u) for u in usuarios]
 

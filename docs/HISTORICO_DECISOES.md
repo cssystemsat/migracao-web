@@ -121,3 +121,37 @@ cadastro via API, então o fluxo importa direto. Motivo do padrão único:
 manter a curva de aprendizado baixa entre um conversor e outro, e permitir
 reaproveitar a mesma base de validação no Validador de Planilha de
 Importação.
+
+## Avaliações de NPS (Wootric) persistidas localmente, não consultadas ao vivo
+
+A integração com a Wootric (bloco "Avaliações NPS" da Ficha) começou
+consultando a API ao vivo a cada Ficha aberta (varredura paginada de
+`/v1/end_users`, casando o IdCentral pelo sufixo do e-mail — nessa conta o
+`external_id` do end_user não é preenchido). Mesmo com cache de 5 min e
+paralelização da varredura, a primeira consulta depois do cache expirar
+ficava em 7-8s, e um end_user sem atividade recente podia cair fora do teto
+de 30 páginas da API e nunca ser encontrado.
+
+Foi trocada por uma tabela própria (`wootric_avaliacoes`) sincronizada em
+segundo plano (disparada, sem bloquear, a cada Ficha aberta — no máximo 1x a
+cada 5 min por worker) a partir de `GET /v1/responses`, que já devolve o
+e-mail do end_user embutido em cada resposta — não precisa mais varrer
+`/v1/end_users`. A Ficha passou a ler só do Postgres (instantâneo). Motivo:
+eliminar a espera e resolver a limitação de alcance da varredura por
+end_user (ver `docs/DOCUMENTACAO_TECNICA.md` pros detalhes de
+sincronização incremental vs. carga inicial).
+
+**Bug real encontrado e corrigido antes de ir pra produção:** a primeira
+versão da carga inicial (tabela vazia, sem cursor) buscava em ordem
+crescente de data — numa conta com histórico desde 2020, isso significava
+trazer as respostas mais ANTIGAS dentro do teto de 1500 da API, nunca
+chegando nas recentes. Corrigido pra ordem decrescente (mais recentes
+primeiro) quando não há cursor; a sincronização incremental normal (com
+cursor) continua em ordem crescente, que é o certo pra não pular nada entre
+uma rodada e outra.
+
+As avaliações também viraram evento sintético na Timeline/Detalhado do
+Histórico da Ficha (setor/tag "NPS", mesmo padrão já usado pros chamados do
+ssxdesk e pras tentativas de migração — nunca um registro real em
+`cliente_eventos`, sempre montado em memória a partir da tabela de
+avaliações, igual a `construirEventosSinteticosChamados`).

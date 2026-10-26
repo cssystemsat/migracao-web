@@ -3,6 +3,7 @@
   --azul-escuro: #1e3a8a;
   --vermelho: #b91c1c;
   --violeta: #6d28d9;
+  --violeta-claro: #a78bfa;
   --verde: #15803d;
   --verde-escuro: #166534;
   --amarelo: #a16207;
@@ -38,6 +39,7 @@
   --azul-escuro: #60a5fa;
   --vermelho: #f87171;
   --violeta: #c4b5fd;
+  --violeta-claro: #ddd6fe;
   --verde-escuro: #4ade80;
   --amarelo: #fbbf24;
   --amarelo-escuro: #fbbf24;
@@ -1079,6 +1081,7 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .modal-implantacao-cliente { max-width: 688px; }
 .form-implantacao-cliente-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 13px; }
 .form-implantacao-cliente-grid button[type="submit"] { grid-column: 1 / -1; }
+.campo-migracao-full { grid-column: 1 / -1; }
 .implantacao-cliente-complementares {
   grid-column: 1 / -1;
   display: grid;
@@ -3081,6 +3084,54 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-alertas .alerta-item:last-child { border-bottom: none; }
 .ficha-alertas-vazio { color: var(--verde-escuro); font-size: 0.88rem; margin: 0; }
 
+/* Chamados de suporte (ssxdesk) — bloco "Chamados abertos" da Visão Geral e
+   sub-aba "Suporte" do Histórico (ver construirLinhaChamado em script.js). */
+.ficha-chamados-lista { display: flex; flex-direction: column; gap: 6px; }
+.ficha-chamado-item { border: 1px solid var(--cinza-200); border-radius: var(--radius); overflow: hidden; }
+.ficha-chamado-cabecalho {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  padding: 9px 11px; background: none; border: none; cursor: pointer; text-align: left; font: inherit; color: inherit;
+}
+.ficha-chamado-cabecalho:hover { background: #fafbfc; }
+:root[data-theme="dark"] .ficha-chamado-cabecalho:hover { background: var(--cinza-100); }
+.ficha-chamado-titulo { font-size: 0.88rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ficha-chamado-meta { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.ficha-chamado-status { font-size: 0.78rem; color: var(--cinza-500); white-space: nowrap; }
+.ficha-chamado-prioridade { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--cinza-500); }
+.ficha-chamado-prioridade.chamado-prioridade-urgente { background: var(--vermelho); }
+.ficha-chamado-prioridade.chamado-prioridade-alta { background: var(--laranja); }
+.ficha-chamado-prioridade.chamado-prioridade-media { background: var(--amarelo); }
+.ficha-chamado-prioridade.chamado-prioridade-baixa { background: var(--cinza-500); }
+.ficha-chamado-detalhe { padding: 0 11px 10px; border-top: 1px solid var(--cinza-200); }
+.ficha-chamado-info { padding-top: 8px; font-size: 0.78rem; color: var(--cinza-500); }
+.ficha-chamado-descricao { margin: 6px 0 0; font-size: 0.85rem; white-space: pre-wrap; }
+
+/* Avaliações de NPS (Wootric) — bloco "Avaliações NPS" da Visão Geral (ver
+   construirFichaWootricCard em script.js). Mesma família visual do
+   .stat-tile/.info-item (cantos arredondados, sombra leve, barra de
+   destaque à esquerda) — aqui a cor da barra e do score vêm da faixa NPS
+   (detrator/neutro/promotor) em vez de --tile-accent fixo. */
+.ficha-wootric-lista { display: flex; flex-direction: column; gap: 8px; }
+.ficha-wootric-item {
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-left: 3px solid var(--wootric-accent, var(--cinza-300));
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 11px 13px;
+}
+.ficha-wootric-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ficha-wootric-data { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cinza-500); }
+.ficha-wootric-score { font-size: 1.5rem; font-weight: 700; line-height: 1; flex-shrink: 0; }
+.ficha-wootric-score-unidade { font-size: 0.8rem; font-weight: 600; opacity: 0.7; }
+.ficha-wootric-item.wootric-score-promotor { --wootric-accent: var(--verde-escuro); }
+.ficha-wootric-item.wootric-score-neutro { --wootric-accent: var(--amarelo); }
+.ficha-wootric-item.wootric-score-detrator { --wootric-accent: var(--vermelho); }
+.ficha-wootric-score.wootric-score-promotor { color: var(--verde-escuro); }
+.ficha-wootric-score.wootric-score-neutro { color: var(--amarelo); }
+.ficha-wootric-score.wootric-score-detrator { color: var(--vermelho); }
+.ficha-wootric-comentario { margin: 8px 0 0; font-size: 0.85rem; color: var(--cinza-700); white-space: pre-wrap; }
+
 .ficha-progresso-bloco { margin-bottom: 16px; }
 .ficha-progresso-bloco:last-child { margin-bottom: 0; }
 .ficha-progresso-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
@@ -3094,6 +3145,36 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-operacional[open] summary::before { transform: rotate(90deg); }
 .ficha-operacional-bloco { margin-top: 11px; }
 .ficha-operacional-bloco h4 { margin: 0 0 6px; font-size: 0.85rem; color: var(--cinza-700); }
+
+/* Dados cadastrais (Resumo do cliente): seções com subtítulo em vez de um
+   grid só — "Identificação" fica sem h4 (é a primeira), "Comercial" e
+   "Migração" ganham o mesmo subtítulo usado em Informações operacionais. */
+.ficha-dados-cadastrais h4 { margin: 13px 0 6px; font-size: 0.85rem; color: var(--cinza-700); }
+.ficha-dados-cadastrais h4:first-of-type { margin-top: 13px; }
+
+/* Card de Documentos (ficha de entrada, contrato) — mesma linha ERP: ícone +
+   rótulo + status à esquerda, ações à direita; quebra em coluna no mobile. */
+.ficha-documentos-lista { display: flex; flex-direction: column; gap: 8px; }
+.ficha-documento-linha {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 11px; border-radius: var(--radius); background: #fafbfc; flex-wrap: wrap;
+}
+:root[data-theme="dark"] .ficha-documento-linha { background: var(--cinza-100); }
+.ficha-documento-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
+.ficha-documento-topo { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; font-weight: 600; color: var(--cinza-900); }
+.ficha-documento-topo svg { flex-shrink: 0; color: var(--azul-escuro); }
+.ficha-documento-status { font-size: 0.82rem; color: var(--cinza-500); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ficha-documento-status.ficha-documento-vazio { font-style: italic; }
+.ficha-documento-acoes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+.ficha-documento-acoes .btn-secondary, .ficha-documento-acoes a.btn-secondary {
+  width: auto; margin-top: 0; padding: 6px 11px; font-size: 0.82rem; text-decoration: none; display: inline-flex; align-items: center;
+}
+.btn-documento-remover:hover:not(:disabled) { background: #fee2e2; color: var(--vermelho); }
+:root[data-theme="dark"] .btn-documento-remover:hover:not(:disabled) { background: rgba(239, 68, 68, 0.18); }
+@media (max-width: 640px) {
+  .ficha-documento-linha { flex-direction: column; align-items: stretch; }
+  .ficha-documento-acoes { justify-content: flex-start; }
+}
 
 .credencial-compacta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.9rem; font-weight: 600; }
 .credencial-compacta button { width: auto; margin-top: 0; }
@@ -3221,6 +3302,26 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-timeline-toolbar-acoes button { width: auto; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 0.78rem; }
 .ficha-timeline-toolbar-acoes button svg { flex-shrink: 0; }
 .ficha-timeline-filtro-tag { width: auto; min-width: 0; padding: 4px 6px; font-size: 0.78rem; }
+.ficha-suporte-toolbar { margin-bottom: 10px; }
+
+/* Filtro "Excel" (AutoFiltro por exclusão, checkbox por valor) — usado nos
+   filtros de Tags/Setor da Timeline (ver construirFiltroExcelCheckbox). */
+.filtro-excel-wrap { position: relative; display: inline-block; }
+.filtro-excel-popover {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 190px; max-height: 260px;
+  overflow-y: auto; background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18); padding: 6px;
+}
+.filtro-excel-item {
+  display: flex; align-items: center; gap: 7px; padding: 5px 6px; border-radius: 5px; cursor: pointer;
+  font-size: 0.82rem; white-space: nowrap;
+}
+.filtro-excel-item:hover { background: #fafbfc; }
+:root[data-theme="dark"] .filtro-excel-item:hover { background: var(--cinza-100); }
+.filtro-excel-item input[type="checkbox"] { margin: 0; flex-shrink: 0; }
+.filtro-excel-item-todos { font-weight: 600; }
+.filtro-excel-separador { height: 1px; background: var(--cinza-200); margin: 4px 2px 6px; }
+.filtro-excel-bolinha { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
 /* Legenda e botões ficam na mesma linha (space-between no toolbar) — só
    quebra pra linha de baixo em telas estreitas, por causa do flex-wrap. */
@@ -3237,16 +3338,35 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-timeline-cabecalho-titulo svg { flex-shrink: 0; }
 .ficha-timeline-contador { font-size: 0.78rem; font-weight: 600; color: var(--cinza-500); background: var(--painel); border: 1px solid var(--cinza-200); border-radius: 999px; padding: 2px 8px; }
 
-.ficha-timeline-caminho { display: flex; flex-direction: column; }
+/* gap: 24px substitui o espaço que antes vinha de .ficha-timeline-conector
+   (height: 24px, removido — virou só um badge posicionado por cima do
+   traçado SVG, ver atualizarTimelineCaminhoVisual em script.js). */
+.ficha-timeline-caminho { display: flex; flex-direction: column; gap: 24px; position: relative; }
 .ficha-timeline-caminho > .placeholder { padding: 8px 0 13px; }
 
-.ficha-timeline-linha { position: relative; display: flex; align-items: flex-start; gap: 5px; padding: 6px 2px 3px; }
-.ficha-timeline-linha::before { content: ""; position: absolute; left: 16px; right: 16px; top: 28px; height: 2px; border-radius: 999px; background: linear-gradient(90deg, var(--cinza-200), var(--cinza-300), var(--cinza-200)); z-index: 0; }
+/* justify-content: space-between — sem isso, linhas com menos itens que o
+   máximo por linha (FICHA_TIMELINE_ITENS_POR_LINHA) não esticam até a borda
+   (cada item para no max-width e sobra espaço à direita). Com space-between,
+   o primeiro e o último item SEMPRE ficam encostados nas bordas (16px),
+   não importa quantos itens a linha tem. */
+.ficha-timeline-linha { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 5px; padding: 6px 2px 3px; }
 .ficha-timeline-linha.invertida { flex-direction: row-reverse; }
+
+/* Traçado único "cobrinha" conectando Início + todos os acontecimentos, na
+   ordem do caminho — substitui a barra fixa por linha + a linha vertical
+   calculada em pixels (que não se redesenhava quando o sidebar retrátil
+   mudava a largura do container). O "d" do path é montado em JS
+   (atualizarTimelineCaminhoVisual), medindo a posição REAL de cada bolinha
+   via getBoundingClientRect, com cantos arredondados nas curvas — e
+   recalculado sempre que o container muda de tamanho (ResizeObserver),
+   inclusive ao recolher/expandir o sidebar. */
+.ficha-timeline-cobrinha-svg { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; overflow: visible; }
+.ficha-timeline-cobrinha-path { fill: none; stroke: var(--cinza-300); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 .ficha-timeline-inicio { display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; position: relative; z-index: 1; padding-top: 1px; }
 .ficha-timeline-inicio-rotulo { font-size: 0.64rem; font-weight: 700; letter-spacing: 0.1em; color: var(--cinza-500); }
 .ficha-timeline-inicio-bolinha { width: 11px; height: 11px; border-radius: 50%; background: #f4b942; box-shadow: 0 0 0 3px #fdecc2; }
+.ficha-timeline-inicio-data { font-size: 0.7rem; font-weight: 700; color: var(--cinza-500); white-space: nowrap; }
 
 .ficha-timeline-item { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 5px; flex: 1 1 0; min-width: 77px; max-width: 128px; }
 .ficha-timeline-item-data { font-size: 0.7rem; font-weight: 700; color: var(--cinza-500); }
@@ -3264,19 +3384,21 @@ input:disabled, select:disabled, input.input-travado {
 
 .ficha-timeline-gap { align-self: center; margin-top: 23px; flex-shrink: 0; white-space: nowrap; font-size: 0.64rem; font-weight: 700; color: var(--cinza-500); background: var(--painel); border: 1px solid var(--cinza-200); border-radius: 999px; padding: 2px 6px; position: relative; z-index: 1; }
 
-.ficha-timeline-conector { display: flex; align-items: center; height: 24px; padding: 0 16px; }
-.ficha-timeline-conector.direita { justify-content: flex-end; }
-.ficha-timeline-conector.esquerda { justify-content: flex-start; }
-.ficha-timeline-conector .ficha-timeline-gap { margin-top: 0; }
+/* Badge "N dias" entre linhas do zigue-zague — mesma classe base
+   .ficha-timeline-gap acima, só que posicionado em cima do traçado SVG
+   (atualizarTimelineCaminhoVisual mede o ponto médio entre a última
+   bolinha de uma linha e a primeira da próxima e posiciona o badge ali). */
+.ficha-timeline-gap-entre-linhas { position: absolute; margin: 0; transform: translate(-50%, -50%); }
 
 :root[data-theme="dark"] .ficha-timeline-item-bolinha { border-color: var(--cinza-100); }
 :root[data-theme="dark"] .ficha-timeline-gap { background: var(--cinza-100); }
 
 @media (max-width: 760px) {
   .ficha-timeline-linha, .ficha-timeline-linha.invertida { flex-direction: column; align-items: stretch; }
-  .ficha-timeline-linha::before { display: none; }
+  .ficha-timeline-cobrinha-svg { display: none; }
   .ficha-timeline-item { flex-direction: row; max-width: none; text-align: left; align-items: center; gap: 8px; }
   .ficha-timeline-item-rotulo { -webkit-line-clamp: 2; }
+  .ficha-timeline-gap-entre-linhas { position: static; transform: none; }
   .ficha-timeline-gap { align-self: flex-start; margin: 0 0 0 12px; }
   .ficha-timeline-inicio { flex-direction: row; }
 }

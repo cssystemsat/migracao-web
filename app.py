@@ -1,5 +1,4 @@
 import base64
-import hashlib
 import io
 import json
 import os
@@ -10,7 +9,7 @@ import unicodedata
 import uuid
 import zipfile
 import zlib
-from datetime import datetime, timezone
+from datetime import datetime
 from functools import wraps
 from zoneinfo import ZoneInfo
 
@@ -19,7 +18,6 @@ import openpyxl
 import pandas as pd
 import requests
 from firebase_admin import credentials, firestore
-from google.cloud.firestore import ArrayRemove, ArrayUnion, Increment
 from google.cloud.firestore_v1.base_query import FieldFilter
 from googleapiclient.errors import HttpError
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
@@ -27,6 +25,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from sqlalchemy.exc import IntegrityError
 
+import cliente_documentos_sql
+import cliente_eventos_sql
+import clientes_sql
 import conversor_clientes
 import conversor_veiculos
 import conversor_rastreadores
@@ -35,8 +36,15 @@ import conversor_areas
 import conversor_uo
 import conversor_colaboradores
 import conversorkml
+import credenciais_sql
+import feed_sql
+import migracoes_sql
 import planilha_migracao
+import ssxdesk_api
+import tarefas_sql
 import usuarios_sql
+import wootric_api
+import wootric_sql
 import validador_importacao
 from auditoria import diff_campos, registrar_acao
 
@@ -79,10 +87,6 @@ if not _FIREBASE_CRED_JSON:
 _firebase_cred = credentials.Certificate(json.loads(_FIREBASE_CRED_JSON))
 firebase_admin.initialize_app(_firebase_cred)
 db = firestore.client()
-CREDENCIAIS_COLLECTION = "credenciais"
-# Credencial da SSX por cliente (Fase 3b) — coleção própria, documento = idcentral,
-# pra nunca duplicar/dessincronizar entre implantacao_clientes e migracao_clientes.
-CREDENCIAIS_CLIENTE_COLLECTION = "credenciais_cliente"
 
 # --- CONTAS DE ACESSO À PRÓPRIA FERRAMENTA (protege o app quando publicado na internet) ---
 # Login/usuários são Postgres (ver usuarios_sql.py e docs/HISTORICO_DECISOES.md).
@@ -349,7 +353,12 @@ def excluir_app_usuario(usuario_id):
     if _perfil_de_usuario(atual) == "adm":
         if usuarios_sql.contar_admins(excluir_id=usuario_id) == 0:
             return jsonify(ok=False, error="Precisa existir pelo menos um administrador."), 400
-    usuarios_sql.excluir_usuario(usuario_id)
+    try:
+        usuarios_sql.excluir_usuario(usuario_id)
+    except IntegrityError:
+        # FK RESTRICT de tarefas.responsavel_id — não apaga silenciosamente
+        # tarefa nenhuma, só avisa que precisa reatribuir antes.
+        return jsonify(ok=False, error="Esse usuário tem tarefas atribuídas — reatribua antes de excluir."), 400
     return jsonify(ok=True)
 
 
@@ -1227,19 +1236,21 @@ def logout_avulso():
 def ficha_salvar_credencial(idcentral):
     if not _sou_admin():
         return jsonify(ok=False, error="Apenas administradores podem alterar a credencial da SSX do cliente."), 403
+    cliente = clientes_sql.buscar_cliente_por_idcentral(idcentral)
+    if not cliente:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
     data = request.get_json(force=True) or {}
     login_novo = str(data.get("login", "")).strip()
     senha_nova = str(data.get("senha", ""))
     if not login_novo:
         return jsonify(ok=False, error="Informe o login."), 400
-    doc_ref = db.collection(CREDENCIAIS_CLIENTE_COLLECTION).document(idcentral)
-    dados_atuais = doc_ref.get().to_dict() or {}
+    dados_atuais = credenciais_sql.obter_credencial_cliente(cliente["id"]) or {}
     # Senha em branco = mantém a que já estava salva (mesmo padrão da senha de
     # usuário em "Gerenciar usuários" — não obriga redigitar pra só trocar o login).
     senha_final = senha_nova if senha_nova else dados_atuais.get("senha", "")
     if not senha_final:
         return jsonify(ok=False, error="Informe a senha."), 400
-    doc_ref.set({"login": login_novo, "senha": senha_final})
+    credenciais_sql.salvar_credencial_cliente(cliente["id"], login_novo, senha_final)
     return jsonify(ok=True, login=login_novo, credencial_configurada=True)
 
 
@@ -1249,47 +1260,20 @@ def logout():
     return jsonify(ok=True)
 
 
-def _credenciais_clientes_para_logins_salvos():
-    """Credencial SSX cadastrada na Ficha de cada cliente (coleção
-    CREDENCIAIS_CLIENTE_COLLECTION, documento = idcentral) também aparece nos
-    Logins salvos da Central de Importação — o cadastro em si continua sendo
-    feito só pela configuração do cliente (Ficha); aqui é só leitura, pra
-    poder ser usada nas telas de Consulta/Importação avulsas."""
-    nomes_por_idcentral = {
-        c.get("idcentral"): c.get("cliente")
-        for c in _cache_api_obter("clientes", _carregar_clientes_todos)
-    }
-    lista = []
-    for doc in db.collection(CREDENCIAIS_CLIENTE_COLLECTION).stream():
-        dados = doc.to_dict() or {}
-        if not dados.get("login") or not dados.get("senha"):
-            continue
-        lista.append({
-            "id": f"cliente:{doc.id}",
-            "nome": nomes_por_idcentral.get(doc.id) or doc.id,
-            "login": dados["login"],
-            "senha": dados["senha"],
-            "origem": "cliente",
-            "idcentral": doc.id,
-        })
-    return lista
-
-
 # --- LOGINS SALVOS (para trocar de cliente rapidamente) ---
 # Guardados no Firestore (coleção "credenciais"), sobrevive a redeploys.
 # Admin-only: são senhas em texto puro, e essa lista não é vinculada a um
 # cliente/dono específico — restrito assim pra não expor senha de terceiros
 # a qualquer perfil logado. A lista também inclui (origem="cliente") as
 # credenciais cadastradas na configuração de cada cliente — ver
-# _credenciais_clientes_para_logins_salvos; essas só podem ser editadas/
-# excluídas pela Ficha, não pelos endpoints de edição abaixo.
+# credenciais_sql.listar_credenciais_clientes_para_logins_salvos; essas só
+# podem ser editadas/excluídas pela Ficha, não pelos endpoints de edição abaixo.
 @app.route("/api/credenciais", methods=["GET"])
 def listar_credenciais():
     if not _sou_admin():
         return jsonify(ok=False, error="Apenas administradores podem ver os logins salvos."), 403
-    docs = db.collection(CREDENCIAIS_COLLECTION).stream()
-    lista = [dict(d.to_dict(), id=d.id, origem="manual") for d in docs]
-    lista.extend(_credenciais_clientes_para_logins_salvos())
+    lista = [dict(c, origem="manual") for c in credenciais_sql.listar_credenciais_manuais()]
+    lista.extend(credenciais_sql.listar_credenciais_clientes_para_logins_salvos())
     lista.sort(key=lambda c: c.get("nome") or "")
     return jsonify(ok=True, credenciais=lista)
 
@@ -1304,13 +1288,11 @@ def criar_credencial():
     senha = str(data.get("senha", ""))
     if not nome or not login or not senha:
         return jsonify(ok=False, error="Informe nome, login e senha."), 400
-    doc_ref = db.collection(CREDENCIAIS_COLLECTION).document()
-    dados = {"nome": nome, "login": login, "senha": senha}
-    doc_ref.set(dados)
-    return jsonify(ok=True, credencial=dict(dados, id=doc_ref.id))
+    credencial = credenciais_sql.criar_credencial(nome, login, senha)
+    return jsonify(ok=True, credencial=credencial)
 
 
-@app.route("/api/credenciais/<cred_id>", methods=["PUT"])
+@app.route("/api/credenciais/<int:cred_id>", methods=["PUT"])
 def editar_credencial(cred_id):
     if not _sou_admin():
         return jsonify(ok=False, error="Apenas administradores podem editar logins salvos."), 403
@@ -1320,22 +1302,18 @@ def editar_credencial(cred_id):
     senha = str(data.get("senha", ""))
     if not nome or not login or not senha:
         return jsonify(ok=False, error="Informe nome, login e senha."), 400
-    doc_ref = db.collection(CREDENCIAIS_COLLECTION).document(cred_id)
-    if not doc_ref.get().exists:
+    credencial = credenciais_sql.editar_credencial(cred_id, nome, login, senha)
+    if not credencial:
         return jsonify(ok=False, error="Login não encontrado."), 404
-    dados = {"nome": nome, "login": login, "senha": senha}
-    doc_ref.set(dados)
-    return jsonify(ok=True, credencial=dict(dados, id=cred_id))
+    return jsonify(ok=True, credencial=credencial)
 
 
-@app.route("/api/credenciais/<cred_id>", methods=["DELETE"])
+@app.route("/api/credenciais/<int:cred_id>", methods=["DELETE"])
 def excluir_credencial(cred_id):
     if not _sou_admin():
         return jsonify(ok=False, error="Apenas administradores podem excluir logins salvos."), 403
-    doc_ref = db.collection(CREDENCIAIS_COLLECTION).document(cred_id)
-    if not doc_ref.get().exists:
+    if not credenciais_sql.excluir_credencial(cred_id):
         return jsonify(ok=False, error="Login não encontrado."), 404
-    doc_ref.delete()
     return jsonify(ok=True)
 
 
@@ -1621,11 +1599,23 @@ def excluir_modelo_comando(comando_id):
 # "última ação" exibida na listagem é sempre calculada a partir dela, nunca
 # digitada — é só o acontecimento mais recente entre os 4 setores.
 IMPLANTACAO_CLIENTES_COLLECTION = "implantacao_clientes"
-IMPLANTACAO_SETORES = ["Implantação", "Migração", "Suporte", "Comercial"]
+# "NPS" segue o mesmo racional de "Suporte": setor normal (aparece no filtro
+# e é selecionável num acontecimento manual), mas na prática é atribuído
+# automaticamente aos eventos sintéticos de avaliação da Wootric — ver
+# construirEventosSinteticosWootric em script.js. Ordem precisa bater com
+# IMPLANTACAO_SETORES em script.js.
+IMPLANTACAO_SETORES = ["Implantação", "Migração", "Suporte", "Comercial", "Treinamento", "Financeiro", "NPS"]
 # Tag opcional do acontecimento — colore a bolinha na Timeline da Ficha
 # (aba Histórico). Mesma lista/cores do "Acompanhamento de cliente" do
 # kanban_dashboard_dev, replicada aqui pra manter o mesmo formato visual.
-EVENTO_TAGS = ["Operação", "Migração", "Fricção", "Sugestão de desenvolvimento", "Travamento", "Problema"]
+# "Suporte"/"NPS" NÃO entram aqui de propósito: são atribuídas
+# automaticamente só aos eventos sintéticos (chamados do ssxdesk/avaliações
+# da Wootric), nunca escolhidas à mão — ver construirEventosSinteticosChamados
+# e construirEventosSinteticosWootric em script.js.
+EVENTO_TAGS = [
+    "Operação", "Migração", "Fricção", "Sugestão de desenvolvimento", "Travamento", "Problema",
+    "Comercial", "Treinamento", "Financeiro",
+]
 # Etapas oficiais do Kanban de Implantação (Fase 1 só usa o campo pra guardar/exibir;
 # a visão em Kanban propriamente dita é de uma fase seguinte).
 IMPLANTACAO_ETAPAS = ["marco-1", "marco-2", "marco-3", "marco-4", "marco-5", "concluido"]
@@ -1896,14 +1886,12 @@ MIGRACAO_ETAPAS = ["analise", "importacao", "comandos", "concluido"]
 MIGRACAO_ETAPA_PADRAO = "analise"
 
 
-# --- CLIENTES (lista única, Fase de reestruturação) ---
-# Substitui aos poucos "implantacao_clientes": em vez de uma coleção por setor,
-# cada cliente tem um "estagio" (Implantação -> Onboarding -> Ongoing, sequencial,
-# um só por vez). Migração NÃO é um estágio — é uma condição paralela com
-# histórico de tentativas (ver "clientes/<id>/migracoes" mais abaixo).
-# Por enquanto isso roda em paralelo com "implantacao_clientes"/"migracao_clientes"
-# (aditivo, nada removido ainda) até os dados existentes serem migrados de verdade.
-CLIENTES_COLLECTION = "clientes"
+# --- CLIENTES (lista única, Postgres — ver clientes_sql.py) ---
+# Cada cliente tem um "estagio" (Implantação -> Onboarding -> Ongoing,
+# sequencial, um só por vez). Migração NÃO é um estágio — é uma condição
+# paralela com histórico de tentativas (ver "migracoes_sql.py").
+# "implantacao_clientes" (Firestore, legado) continua rodando à parte — não
+# foi migrado nesta rodada (ver docs/HISTORICO_DECISOES.md).
 ESTAGIOS_CLIENTE = ["implantacao", "onboarding", "ongoing"]
 ESTAGIO_CLIENTE_PADRAO = "implantacao"
 
@@ -1962,6 +1950,7 @@ ROTULOS_CLIENTE = {
     "decisor_whatsapp": "WhatsApp do decisor",
     "decisor_estado": "Estado do decisor",
     "decisor_cidade": "Cidade do decisor",
+    "codigo_idcentral": "Código IdCentral",
 }
 
 
@@ -2023,52 +2012,11 @@ def _dados_cliente(data):
         # Cidade não é validada contra uma lista fixa — vem da API do IBGE,
         # filtrada pelo estado, mas o valor final salvo é só o nome mesmo.
         "decisor_cidade": str(data.get("decisor_cidade", "")).strip(),
+        # Código de associação usado por sistemas externos (ex. Suporte) —
+        # só perfil adm pode gravar (trava aplicada na rota de editar, não
+        # aqui: aqui só extrai o que veio no payload).
+        "codigo_idcentral": str(data.get("codigo_idcentral", "")).strip(),
     }
-
-
-def _idcentrals_existentes(excluir_id=None):
-    """Mapa {idcentral: doc_id} de todo mundo em CLIENTES_COLLECTION (idcentral
-    vazio fica de fora). Usado tanto pro cadastro/edição manual quanto pra
-    importação em massa, pra barrar dois clientes com o mesmo IdCentral —
-    a Ficha do Cliente (GET /api/ficha/<idcentral>) busca por esse campo com
-    .limit(1), então uma duplicata deixaria o segundo cliente invisível."""
-    mapa = {}
-    for d in db.collection(CLIENTES_COLLECTION).stream():
-        if excluir_id and d.id == excluir_id:
-            continue
-        # str().strip() igual ao _dados_cliente — cliente antigo gravado com
-        # idcentral numérico ou com espaço sobrando não pode escapar da checagem.
-        idcentral = str((d.to_dict() or {}).get("idcentral") or "").strip()
-        if idcentral:
-            mapa[idcentral] = d.id
-    return mapa
-
-
-# Checar "IdCentral já existe?" e gravar são dois passos separados no
-# Firestore — sem esse lock, dois requests quase simultâneos (ex.: duplo
-# clique no "Adicionar") passam os dois pela checagem antes de qualquer um
-# gravar, e o cliente sai duplicado. Todo caminho que cria cliente ou troca
-# o IdCentral faz checagem + escrita dentro dele.
-CLIENTES_IDCENTRAL_LOCK = threading.Lock()
-
-
-def _recalcular_ultima_acao_cliente(cliente_id):
-    """Mesmo racional de _recalcular_ultima_acao_implantacao, pra coleção nova."""
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    ultimo = list(
-        doc_ref.collection("eventos")
-        .order_by("data", direction=firestore.Query.DESCENDING)
-        .limit(1)
-        .stream()
-    )
-    if ultimo:
-        ev = ultimo[0].to_dict()
-        doc_ref.update({
-            "ultima_acao": f"[{ev.get('setor')}] {ev.get('titulo')}",
-            "ultima_acao_data": ev.get("data") or "",
-        })
-    else:
-        doc_ref.update({"ultima_acao": "", "ultima_acao_data": ""})
 
 
 # Cache curto de respostas de listagem. No Firestore cada documento lido é uma
@@ -2103,45 +2051,9 @@ def _cache_api_invalidar(resposta):
     return resposta
 
 
-def _carregar_clientes_todos():
-    docs = list(db.collection(CLIENTES_COLLECTION).stream())
-    lista = []
-    for d in docs:
-        cliente = dict(d.to_dict(), id=d.id)
-        cliente.setdefault("etapa", IMPLANTACAO_ETAPA_PADRAO)
-        cliente.setdefault("marcos_concluidos", [])
-        cliente.setdefault("implantado", False)
-        cliente.setdefault("concluido_em", "")
-        cliente.setdefault("marcos_concluidos_em", {})
-        cliente.setdefault("marcos_atualizado_em", "")
-        cliente.setdefault("motivo_atraso", None)
-        cliente.setdefault("estagio", ESTAGIO_CLIENTE_PADRAO)
-        cliente.setdefault("ultima_acao", "")
-        cliente.setdefault("ultima_acao_data", "")
-        cliente.setdefault("momento", "")
-        cliente.setdefault("flag", "")
-        cliente.setdefault("vendedor", "")
-        cliente.setdefault("persona", "")
-        cliente.setdefault("decisor_nome", "")
-        cliente.setdefault("decisor_whatsapp", "")
-        cliente.setdefault("decisor_estado", "")
-        cliente.setdefault("decisor_cidade", "")
-        cliente.setdefault("tem_implantacao", True)
-        lista.append(cliente)
-    lista.sort(key=lambda c: c["ultima_acao_data"], reverse=True)
-    return lista
-
-
 @app.route("/api/clientes", methods=["GET"])
 def listar_clientes():
-    return jsonify(ok=True, clientes=_cache_api_obter("clientes", _carregar_clientes_todos))
-
-
-# Checagem de IdCentral de UM cliente: 1 a 2 leituras. _idcentrals_existentes()
-# lê a coleção inteira, e isso rodava a cada cadastro/edição manual.
-def _idcentral_em_uso(idcentral, excluir_id=None):
-    docs = db.collection(CLIENTES_COLLECTION).where(filter=FieldFilter("idcentral", "==", idcentral)).limit(2).stream()
-    return any(d.id != excluir_id for d in docs)
+    return jsonify(ok=True, clientes=_cache_api_obter("clientes", clientes_sql.listar_clientes))
 
 
 @app.route("/api/clientes", methods=["POST"])
@@ -2150,71 +2062,57 @@ def criar_cliente():
     dados = _dados_cliente(data)
     if dados is None:
         return jsonify(ok=False, error="Informe o IdCentral do cliente."), 400
-    with CLIENTES_IDCENTRAL_LOCK:
-        if _idcentral_em_uso(dados["idcentral"]):
-            return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
-        doc_ref = db.collection(CLIENTES_COLLECTION).document()
-        doc_ref.set(dados)
+    try:
+        cliente = clientes_sql.criar_cliente(dados)
+    except clientes_sql.IdCentralEmUsoError:
+        return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
     registrar_acao(
-        acao="criar", entidade_tipo="cliente", entidade_id=doc_ref.id,
-        entidade_nome=dados["cliente"], titulo="Cliente criado",
-        cliente_id=doc_ref.id, idcentral=dados["idcentral"], cliente_nome=dados["cliente"],
+        acao="criar", entidade_tipo="cliente", entidade_id=cliente["id"],
+        entidade_nome=cliente["cliente"], titulo="Cliente criado",
+        cliente_id=cliente["id"], idcentral=cliente["idcentral"], cliente_nome=cliente["cliente"],
     )
-    return jsonify(ok=True, cliente=dict(dados, id=doc_ref.id))
+    return jsonify(ok=True, cliente=cliente)
 
 
-@app.route("/api/clientes/<cliente_id>", methods=["PUT"])
+@app.route("/api/clientes/<int:cliente_id>", methods=["PUT"])
 def editar_cliente(cliente_id):
     data = request.get_json(force=True) or {}
     dados = _dados_cliente(data)
     if dados is None:
         return jsonify(ok=False, error="Informe o IdCentral do cliente."), 400
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
+    atual = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not atual:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    doc_atual_dict = doc_atual.to_dict() or {}
     if not _sou_admin():
-        dados["idcentral"] = doc_atual_dict.get("idcentral", "")
-    dados["ultima_acao"] = doc_atual_dict.get("ultima_acao", "")
-    dados["ultima_acao_data"] = doc_atual_dict.get("ultima_acao_data", "")
+        dados["idcentral"] = atual["idcentral"]
+        # Código de associação externa (Suporte) — só admin grava (decisão
+        # explícita da usuária).
+        dados["codigo_idcentral"] = atual["codigo_idcentral"] or ""
     # Etapa/marcos só mudam pelo endpoint dedicado (PUT .../marcos) — o
     # formulário geral não manda mais esses campos, então sem isso qualquer
     # edição comum (nome, objetivo...) resetaria o progresso pro Marco 1.
-    dados["etapa"] = doc_atual_dict.get("etapa", IMPLANTACAO_ETAPA_PADRAO)
-    dados["marcos_concluidos"] = doc_atual_dict.get("marcos_concluidos", [])
-    # doc_ref.set() abaixo substitui o documento inteiro — o checklist dos
-    # marcos (só escrito por PUT .../marcos) precisa ser carregado junto.
-    # Mesmo vale pro switch "Implantado" (só escrito por PUT .../implantado)
-    # e pra data de conclusão dos 5 marcos (concluido_em/por).
-    for campo in ("marcos_itens_feitos", "marcos_itens_extras", "marcos_concluidos_manual",
-                  "marcos_prioridades", "implantado", "implantado_em", "implantado_por",
-                  "concluido_em", "concluido_por", "marcos_concluidos_em",
-                  "marcos_atualizado_em", "motivo_atraso", "tem_implantacao"):
-        if campo in doc_atual_dict:
-            dados[campo] = doc_atual_dict[campo]
-    mudancas = diff_campos(doc_atual_dict, dados, ROTULOS_CLIENTE)
-    with CLIENTES_IDCENTRAL_LOCK:
-        if _idcentral_em_uso(dados["idcentral"], excluir_id=cliente_id):
-            return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
-        doc_ref.set(dados)
+    dados["etapa"] = atual["etapa"]
+    dados["marcos_concluidos"] = atual["marcos_concluidos"]
+    mudancas = diff_campos(atual, dados, ROTULOS_CLIENTE)
+    try:
+        cliente = clientes_sql.atualizar_cliente(cliente_id, dados)
+    except clientes_sql.IdCentralEmUsoError:
+        return jsonify(ok=False, error="Já existe um cliente com esse IdCentral."), 400
     if mudancas:
         registrar_acao(
             acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
-            entidade_nome=dados["cliente"], mudancas=mudancas, titulo="Cliente editado",
-            cliente_id=cliente_id, idcentral=dados["idcentral"], cliente_nome=dados["cliente"],
+            entidade_nome=cliente["cliente"], mudancas=mudancas, titulo="Cliente editado",
+            cliente_id=cliente_id, idcentral=cliente["idcentral"], cliente_nome=cliente["cliente"],
         )
-    return jsonify(ok=True, cliente=dict(dados, id=cliente_id))
+    return jsonify(ok=True, cliente=cliente)
 
 
-@app.route("/api/clientes/<cliente_id>/marcos", methods=["PUT"])
+@app.route("/api/clientes/<int:cliente_id>/marcos", methods=["PUT"])
 def salvar_marcos_cliente(cliente_id):
     data = request.get_json(force=True) or {}
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
+    doc_atual_dict = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not doc_atual_dict:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    doc_atual_dict = doc_atual.to_dict() or {}
 
     # Extras: só texto não vazio, id único; itens feitos: só ids que existem
     # (padrão ou extra) — evita lixo de id de item extra já removido.
@@ -2288,7 +2186,7 @@ def salvar_marcos_cliente(cliente_id):
     elif etapa != "concluido" and etapa_antes == "concluido":
         campos["concluido_em"] = ""
         campos["concluido_por"] = ""
-    doc_ref.update(campos)
+    clientes_sql.atualizar_cliente(cliente_id, campos)
 
     antes = set(doc_atual_dict.get("marcos_concluidos") or [])
     depois = set(marcos_concluidos)
@@ -2313,7 +2211,7 @@ def salvar_marcos_cliente(cliente_id):
     )
 
 
-@app.route("/api/clientes/<cliente_id>/motivo-atraso", methods=["PUT"])
+@app.route("/api/clientes/<int:cliente_id>/motivo-atraso", methods=["PUT"])
 def salvar_motivo_atraso_cliente(cliente_id):
     """Por que o cliente está atrasado no marco atual (árvore de decisão do
     Playbook). Fica preso ao marco em que foi registrado — quando o cliente
@@ -2322,11 +2220,9 @@ def salvar_motivo_atraso_cliente(cliente_id):
     motivo = str(data.get("motivo", "")).strip()
     if motivo not in MOTIVOS_ATRASO:
         return jsonify(ok=False, error="Motivo inválido."), 400
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
+    doc_atual_dict = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not doc_atual_dict:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    doc_atual_dict = doc_atual.to_dict() or {}
     motivo_atraso = {
         "marco": doc_atual_dict.get("etapa") or IMPLANTACAO_ETAPA_PADRAO,
         "motivo": motivo,
@@ -2334,7 +2230,7 @@ def salvar_motivo_atraso_cliente(cliente_id):
         "em": time.strftime("%Y-%m-%d"),
         "por": session.get("app_usuario_responsavel") or session.get("app_usuario_nome", ""),
     }
-    doc_ref.update({"motivo_atraso": motivo_atraso})
+    clientes_sql.atualizar_cliente(cliente_id, {"motivo_atraso": motivo_atraso})
     registrar_acao(
         acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
         entidade_nome=doc_atual_dict.get("cliente", ""),
@@ -2345,18 +2241,16 @@ def salvar_motivo_atraso_cliente(cliente_id):
     return jsonify(ok=True, motivo_atraso=motivo_atraso)
 
 
-@app.route("/api/clientes/<cliente_id>/implantado", methods=["PUT"])
+@app.route("/api/clientes/<int:cliente_id>/implantado", methods=["PUT"])
 def salvar_implantado_cliente(cliente_id):
     """Switch "Implantado" — decisão da equipe, de propósito independente dos
     marcos (a regra de "quando conta como implantado" ainda não está fechada;
     a tela só sugere ligar quando o Marco 3/passagem conclui). Guarda quando e
     quem ligou; desligar limpa os dois."""
     data = request.get_json(force=True) or {}
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
+    doc_atual_dict = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not doc_atual_dict:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    doc_atual_dict = doc_atual.to_dict() or {}
     implantado = bool(data.get("implantado"))
     if implantado == bool(doc_atual_dict.get("implantado")):
         return jsonify(ok=True, implantado=implantado,
@@ -2367,7 +2261,7 @@ def salvar_implantado_cliente(cliente_id):
         "implantado_em": time.strftime("%Y-%m-%d") if implantado else "",
         "implantado_por": (session.get("app_usuario_responsavel") or session.get("app_usuario_nome", "")) if implantado else "",
     }
-    doc_ref.update(campos)
+    clientes_sql.atualizar_cliente(cliente_id, campos)
     registrar_acao(
         acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
         entidade_nome=doc_atual_dict.get("cliente", ""),
@@ -2378,35 +2272,23 @@ def salvar_implantado_cliente(cliente_id):
     return jsonify(ok=True, **campos)
 
 
-@app.route("/api/clientes/<cliente_id>", methods=["DELETE"])
+@app.route("/api/clientes/<int:cliente_id>", methods=["DELETE"])
 def excluir_cliente(cliente_id):
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
+    doc_atual_dict = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not doc_atual_dict:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    doc_atual_dict = doc_atual.to_dict() or {}
-    for ev in doc_ref.collection("eventos").stream():
-        ev.reference.delete()
-    for mig in doc_ref.collection("migracoes").stream():
-        for v in mig.reference.collection("veiculos").stream():
-            v.reference.delete()
-        for m in mig.reference.collection("modelos_comando").stream():
-            m.reference.delete()
-        mig.reference.delete()
-    # Tarefas ficam numa coleção top-level (não subcoleção), por isso não somem
-    # sozinhas com doc_ref.delete() como eventos/migracoes acima — precisa
-    # apagar explicitamente, senão fica tarefa órfã apontando pra um cliente_id
-    # que não existe mais.
-    for tarefa in db.collection(TAREFAS_COLLECTION).where(filter=FieldFilter("cliente_id", "==", cliente_id)).stream():
-        tarefa_dados = tarefa.to_dict() or {}
-        tarefa.reference.delete()
+    # Eventos/migrações(+veículos/modelos)/credencial somem sozinhos via ON
+    # DELETE CASCADE. Tarefas também têm CASCADE no banco, mas isso não gera
+    # log nenhum sozinho — lê a lista ANTES de excluir só pra registrar a
+    # auditoria de cada uma (mesmo comportamento de antes).
+    for tarefa in tarefas_sql.listar_por_cliente(cliente_id):
         registrar_acao(
-            acao="excluir", entidade_tipo="tarefa", entidade_id=tarefa.id,
-            entidade_nome=tarefa_dados.get("titulo", ""), titulo="Tarefa excluída (cliente removido)",
+            acao="excluir", entidade_tipo="tarefa", entidade_id=tarefa["id"],
+            entidade_nome=tarefa.get("titulo", ""), titulo="Tarefa excluída (cliente removido)",
             cliente_id=cliente_id, idcentral=doc_atual_dict.get("idcentral", ""),
-            cliente_nome=doc_atual_dict.get("cliente", ""), tipo_historico="tarefa", tarefa_id=tarefa.id,
+            cliente_nome=doc_atual_dict.get("cliente", ""), tipo_historico="tarefa", tarefa_id=tarefa["id"],
         )
-    doc_ref.delete()
+    clientes_sql.excluir_cliente(cliente_id)
     registrar_acao(
         acao="excluir", entidade_tipo="cliente", entidade_id=cliente_id,
         entidade_nome=doc_atual_dict.get("cliente", ""), titulo="Cliente excluído",
@@ -2577,12 +2459,9 @@ def _montar_relatorio_sync_planilha():
     df = _buscar_planilha_cs()
     primeira_coluna = df.columns[0] if len(df.columns) else None
 
-    clientes_por_idcentral = {}
-    for d in db.collection(CLIENTES_COLLECTION).stream():
-        dados = d.to_dict() or {}
-        idc = str(dados.get("idcentral", "")).strip()
-        if idc:
-            clientes_por_idcentral[idc] = (d.id, dados)
+    clientes_por_idcentral = {
+        c["idcentral"]: (c["id"], c) for c in clientes_sql.listar_clientes() if c["idcentral"]
+    }
 
     itens = []
     sem_idcentral = []
@@ -2684,14 +2563,12 @@ def aplicar_sync_planilha():
     if itens is None:
         return jsonify(ok=False, error="Prévia não encontrada ou expirada — busque de novo."), 400
 
-    with CLIENTES_IDCENTRAL_LOCK:
-        criados, atualizados, ignorados = _aplicar_itens_sync_planilha(itens)
+    criados, atualizados, ignorados = _aplicar_itens_sync_planilha(itens)
     return jsonify(ok=True, criados=criados, atualizados=atualizados, ignorados=ignorados)
 
 
 def _aplicar_itens_sync_planilha(itens):
-    """Chamado com CLIENTES_IDCENTRAL_LOCK já adquirido."""
-    existentes = _idcentrals_existentes()
+    existentes = clientes_sql.idcentrals_existentes()
     campos_chaves = [c for c, _ in CAMPOS_SYNC_PLANILHA]
     criados, atualizados = 0, 0
     ignorados = []
@@ -2709,19 +2586,21 @@ def _aplicar_itens_sync_planilha(itens):
                                    "motivo": "IdCentral inválido."})
                 continue
             dados["dados_planilha"] = item["linha_raw"]
-            novo_ref = db.collection(CLIENTES_COLLECTION).document()
-            novo_ref.set(dados)
-            existentes[novo["idcentral"]] = novo_ref.id
+            try:
+                clientes_sql.criar_cliente(dados)
+            except clientes_sql.IdCentralEmUsoError:
+                ignorados.append({"idcentral": novo["idcentral"], "cliente": novo["cliente"],
+                                   "motivo": "Já existe um cliente com esse IdCentral (criado nesse meio tempo)."})
+                continue
+            existentes.add(novo["idcentral"])
             criados += 1
         else:
-            doc_ref = db.collection(CLIENTES_COLLECTION).document(item["cliente_id"])
-            if not doc_ref.get().exists:
+            campos = {c: novo[c] for c in campos_chaves if not (c == "momento" and not novo[c])}
+            campos["dados_planilha"] = item["linha_raw"]
+            if clientes_sql.atualizar_cliente(item["cliente_id"], campos) is None:
                 ignorados.append({"idcentral": novo["idcentral"], "cliente": novo["cliente"],
                                    "motivo": "Cliente foi removido nesse meio tempo."})
                 continue
-            campos = {c: novo[c] for c in campos_chaves if not (c == "momento" and not novo[c])}
-            campos["dados_planilha"] = item["linha_raw"]
-            doc_ref.update(campos)
             atualizados += 1
 
     return criados, atualizados, ignorados
@@ -2796,7 +2675,7 @@ def preview_import_clientes():
     except Exception as e:
         return jsonify(ok=False, error=f"Falha ao ler Excel: {e}"), 400
 
-    existentes = _idcentrals_existentes()
+    existentes = clientes_sql.idcentrals_existentes()
     vistos_no_arquivo = set()
     resultado = []
     for pos, linha in enumerate(_planilha_clientes_para_linhas(df)):
@@ -2834,16 +2713,14 @@ def confirmar_import_clientes():
     if resultado is None:
         return jsonify(ok=False, error="Prévia não encontrada — suba o arquivo de novo."), 400
 
-    with CLIENTES_IDCENTRAL_LOCK:
-        sucessos, erros = _gravar_import_clientes(resultado)
+    sucessos, erros = _gravar_import_clientes(resultado)
     return jsonify(ok=True, sucessos=sucessos, erros=erros)
 
 
 def _gravar_import_clientes(resultado):
-    """Chamado com CLIENTES_IDCENTRAL_LOCK já adquirido."""
-    # Revalida os IdCentrals contra o Firestore na hora de gravar (pode ter
-    # mudado desde o preview — ex.: outra pessoa importando ao mesmo tempo).
-    existentes = _idcentrals_existentes()
+    # Revalida os IdCentrals na hora de gravar (pode ter mudado desde o
+    # preview — ex.: outra pessoa importando ao mesmo tempo).
+    existentes = clientes_sql.idcentrals_existentes()
     vistos_no_arquivo = set()
     sucessos = 0
     erros = []
@@ -2856,9 +2733,11 @@ def _gravar_import_clientes(resultado):
             erros.append({"linha": linha["linha"], "motivo": "Já existe um cliente com esse IdCentral."})
             continue
         vistos_no_arquivo.add(dados["idcentral"])
-        # .set() um por um (sem db.batch()): o Firestore fake usado pros testes
-        # locais (dev_offline_preview.py) não implementa batch().
-        db.collection(CLIENTES_COLLECTION).document().set(dados)
+        try:
+            clientes_sql.criar_cliente(dados)
+        except clientes_sql.IdCentralEmUsoError:
+            erros.append({"linha": linha["linha"], "motivo": "Já existe um cliente com esse IdCentral."})
+            continue
         sucessos += 1
 
     return sucessos, erros
@@ -2896,53 +2775,143 @@ def listar_municipios_ibge(uf):
     return jsonify(ok=True, municipios=municipios, cache=False)
 
 
-@app.route("/api/clientes/<cliente_id>/eventos", methods=["GET"])
+@app.route("/api/clientes/<int:cliente_id>/eventos", methods=["GET"])
 def listar_eventos_cliente(cliente_id):
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    if not doc_ref.get().exists:
+    if not cliente_eventos_sql.cliente_existe(cliente_id):
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    docs = doc_ref.collection("eventos").stream()
-    lista = [dict(d.to_dict(), id=d.id) for d in docs]
-    return jsonify(ok=True, eventos=lista)
+    return jsonify(ok=True, eventos=cliente_eventos_sql.listar_eventos(cliente_id))
 
 
-@app.route("/api/clientes/<cliente_id>/eventos", methods=["POST"])
+@app.route("/api/clientes/<int:cliente_id>/eventos", methods=["POST"])
 def criar_evento_cliente(cliente_id):
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    if not doc_ref.get().exists:
+    if not cliente_eventos_sql.cliente_existe(cliente_id):
         return jsonify(ok=False, error="Cliente não encontrado."), 404
     data = request.get_json(force=True) or {}
     dados = _dados_implantacao_evento(data)
     if dados is None:
         return jsonify(ok=False, error="Informe o setor e o título."), 400
-    evento_ref = doc_ref.collection("eventos").document()
-    evento_ref.set(dados)
-    _recalcular_ultima_acao_cliente(cliente_id)
-    return jsonify(ok=True, evento=dict(dados, id=evento_ref.id))
+    evento = cliente_eventos_sql.criar_evento(cliente_id, dados)
+    cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
+    return jsonify(ok=True, evento=evento)
 
 
-@app.route("/api/clientes/<cliente_id>/eventos/<evento_id>", methods=["PUT"])
+@app.route("/api/clientes/<int:cliente_id>/eventos/<int:evento_id>", methods=["PUT"])
 def editar_evento_cliente(cliente_id, evento_id):
     data = request.get_json(force=True) or {}
     dados = _dados_implantacao_evento(data)
     if dados is None:
         return jsonify(ok=False, error="Informe o setor e o título."), 400
-    evento_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("eventos").document(evento_id)
-    if not evento_ref.get().exists:
+    evento = cliente_eventos_sql.editar_evento(cliente_id, evento_id, dados)
+    if not evento:
         return jsonify(ok=False, error="Acontecimento não encontrado."), 404
-    evento_ref.set(dados)
-    _recalcular_ultima_acao_cliente(cliente_id)
-    return jsonify(ok=True, evento=dict(dados, id=evento_id))
+    cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
+    return jsonify(ok=True, evento=evento)
 
 
-@app.route("/api/clientes/<cliente_id>/eventos/<evento_id>", methods=["DELETE"])
+@app.route("/api/clientes/<int:cliente_id>/eventos/<int:evento_id>", methods=["DELETE"])
 def excluir_evento_cliente(cliente_id, evento_id):
-    evento_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("eventos").document(evento_id)
-    if not evento_ref.get().exists:
+    if not cliente_eventos_sql.excluir_evento(cliente_id, evento_id):
         return jsonify(ok=False, error="Acontecimento não encontrado."), 404
-    evento_ref.delete()
-    _recalcular_ultima_acao_cliente(cliente_id)
+    cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
     return jsonify(ok=True)
+
+
+_CAMPOS_CHAMADO_RESUMO = (
+    "id", "ticketNumber", "title", "description", "status", "priority", "category", "createdAt", "updatedAt",
+)
+
+
+@app.route("/api/clientes/<int:cliente_id>/chamados", methods=["GET"])
+def listar_chamados_cliente(cliente_id):
+    """Chamados de suporte do ssxdesk pro cliente — "abertos" alimenta o
+    bloco de pendências da Visão Geral da Ficha, "concluidos" a sub-aba
+    Suporte do Histórico. Carregado pelo front em segundo plano, DEPOIS da
+    Ficha já estar aberta — uma falha ou demora aqui nunca deve travar o
+    resto da Ficha.
+
+    Busca pelo `codigo_idcentral` quando o cliente tiver um preenchido —
+    é exatamente pra isso que esse campo existe ("código de associação
+    usado por sistemas externos (ex. Suporte) que não têm API pra resolver
+    isso a partir do idcentral", ver models.py) — e cai pro `idcentral`
+    normal quando não tiver (a maioria dos clientes bate direto por ali)."""
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not cliente:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    idcentral_busca = cliente.get("codigo_idcentral") or cliente["idcentral"]
+    try:
+        chamados = ssxdesk_api.listar_chamados_por_idcentral(idcentral_busca)
+    except ssxdesk_api.SsxDeskApiError as err:
+        return jsonify(ok=False, error=str(err)), 502
+    abertos, concluidos = ssxdesk_api.separar_abertos_e_concluidos(chamados)
+    resumir = lambda c: {campo: c.get(campo) for campo in _CAMPOS_CHAMADO_RESUMO}
+    return jsonify(ok=True, abertos=[resumir(c) for c in abertos], concluidos=[resumir(c) for c in concluidos])
+
+
+# Sincronização da Wootric: roda em thread de fundo, no máximo uma vez a
+# cada _WOOTRIC_SYNC_INTERVALO_SEGUNDOS por processo (gunicorn tem vários
+# workers — cada um sincroniza por conta própria, o intervalo evita que
+# todos batam na API da Wootric ao mesmo tempo a cada Ficha aberta). Uma
+# trava evita duas sincronizações simultâneas no mesmo worker.
+_WOOTRIC_SYNC_INTERVALO_SEGUNDOS = 300  # 5 min
+_wootric_sync_estado = {"ultima_vez": 0.0, "em_andamento": False}
+_wootric_sync_lock = threading.Lock()
+
+
+def sincronizar_avaliacoes_wootric():
+    """Busca na Wootric só o que mudou desde a última sincronização (cursor =
+    avaliação mais recente já salva, com 5 min de folga pra cobrir respostas
+    "updated" depois de criadas) e grava em wootric_avaliacoes. Tabela vazia
+    (primeira vez) = sem cursor, traz o que der dentro do teto de 1500
+    respostas da API (ver docstring de wootric_api.buscar_respostas_desde)."""
+    ultima = wootric_sql.data_mais_recente()
+    cursor = (ultima.timestamp() - 300) if ultima else None
+    respostas = wootric_api.buscar_respostas_desde(cursor)
+    novas, atualizadas, sem_idcentral = wootric_sql.upsert_respostas(respostas)
+    return {"buscadas": len(respostas), "novas": novas, "atualizadas": atualizadas, "sem_idcentral": sem_idcentral}
+
+
+def _disparar_sync_wootric_em_segundo_plano():
+    """Não bloqueia quem chamou — dispara a thread e devolve na hora. Erro de
+    sincronização só fica pra próxima tentativa (próxima Ficha aberta depois
+    do intervalo), nunca aparece pra quem está vendo a Ficha agora (ela já
+    está lendo dados da tabela local, que continuam os últimos sincronizados
+    com sucesso)."""
+    def _rodar():
+        try:
+            sincronizar_avaliacoes_wootric()
+        except wootric_api.WootricApiError:
+            pass  # próxima tentativa tenta de novo sozinha; não há quem avisar aqui
+        finally:
+            with _wootric_sync_lock:
+                _wootric_sync_estado["em_andamento"] = False
+                _wootric_sync_estado["ultima_vez"] = time.time()
+
+    with _wootric_sync_lock:
+        if _wootric_sync_estado["em_andamento"]:
+            return
+        if time.time() - _wootric_sync_estado["ultima_vez"] < _WOOTRIC_SYNC_INTERVALO_SEGUNDOS:
+            return
+        _wootric_sync_estado["em_andamento"] = True
+    threading.Thread(target=_rodar, daemon=True).start()
+
+
+@app.route("/api/clientes/<int:cliente_id>/wootric", methods=["GET"])
+def listar_avaliacoes_wootric_cliente(cliente_id):
+    """Avaliações de NPS (Wootric) do cliente — bloco "Avaliações NPS" da
+    Visão Geral da Ficha. Lê só da tabela local (wootric_avaliacoes, ver
+    wootric_sql.py) — nunca chama a API da Wootric na hora de abrir a Ficha,
+    só dispara (em segundo plano, sem esperar) uma sincronização incremental
+    se já faz tempo que não roda uma. Usa o mesmo fallback
+    codigo_idcentral -> idcentral da integração ssxdesk, porque é o mesmo
+    "código de associação usado por sistemas externos" (ver models.py) — é o
+    código que aparece no e-mail do end_user na Wootric."""
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not cliente:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    idcentral_busca = cliente.get("codigo_idcentral") or cliente["idcentral"]
+    _disparar_sync_wootric_em_segundo_plano()
+    avaliacoes = wootric_sql.listar_por_idcentral(idcentral_busca)
+    return jsonify(ok=True, avaliacoes=avaliacoes)
 
 
 # --- TAREFAS (vinculadas a um cliente, atribuídas a um usuário do app) ---
@@ -2952,7 +2921,6 @@ def excluir_evento_cliente(cliente_id, evento_id):
 # cliente_nome/responsavel_nome ficam denormalizados no próprio doc da tarefa
 # (mesmo racional de "ultima_acao" no cadastro do cliente) pra Minha Conta
 # não precisar de 1 fetch extra por cliente diferente na lista.
-TAREFAS_COLLECTION = "tarefas"
 TAREFA_RESULTADOS = ["concluida", "cancelada"]
 
 
@@ -2985,42 +2953,22 @@ ROTULOS_TAREFA = {
 
 @app.route("/api/tarefas", methods=["GET"])
 def listar_tarefas():
-    """Sempre filtrado no Firestore (.where), nunca .stream() da coleção
-    inteira — evita ler tarefa de todo mundo só pra montar a lista de 1
-    cliente ou de 1 usuário."""
-    cliente_id = request.args.get("cliente_id", "").strip()
+    """Sempre filtrado no SQL, nunca a tabela inteira — evita ler tarefa de
+    todo mundo só pra montar a lista de 1 cliente ou de 1 usuário."""
+    cliente_id_raw = request.args.get("cliente_id", "").strip()
     apenas_minhas = request.args.get("apenas_minhas") == "1"
     minhas_e_criadas = request.args.get("minhas_e_criadas") == "1"
     usuario_id = session.get("app_usuario_id", "")
-    colecao = db.collection(TAREFAS_COLLECTION)
-    if cliente_id:
-        docs = list(colecao.where(filter=FieldFilter("cliente_id", "==", cliente_id)).stream())
+    if cliente_id_raw:
+        if not cliente_id_raw.isdigit():
+            return jsonify(ok=True, tarefas=[])
+        lista = tarefas_sql.listar_por_cliente(int(cliente_id_raw))
     elif apenas_minhas:
-        docs = list(colecao.where(filter=FieldFilter("responsavel_id", "==", usuario_id)).stream())
+        lista = tarefas_sql.listar_apenas_minhas(usuario_id)
     elif minhas_e_criadas:
-        # Central de tarefas (Minha Conta): as que são minhas + as que eu criei
-        # pra outras pessoas (acompanhamento). Duas consultas simples em vez de
-        # um OR, que exigiria índice composto no Firestore; o dict tira a
-        # duplicata de quando eu criei uma tarefa pra mim mesmo.
-        por_id = {}
-        for campo in ("responsavel_id", "criado_por"):
-            for d in colecao.where(filter=FieldFilter(campo, "==", usuario_id)).stream():
-                por_id[d.id] = d
-        docs = list(por_id.values())
+        lista = tarefas_sql.listar_minhas_e_criadas(usuario_id)
     else:
         return jsonify(ok=False, error="Informe cliente_id, apenas_minhas=1 ou minhas_e_criadas=1."), 400
-    lista = [dict(d.to_dict(), id=d.id) for d in docs]
-    # Tarefa criada antes de criado_por_nome existir só tem o id — resolve o
-    # nome aqui (1 leitura por criador distinto, não por tarefa).
-    nomes_criadores = {}
-    for t in lista:
-        if t.get("criado_por_nome") or not t.get("criado_por"):
-            continue
-        uid = t["criado_por"]
-        if uid not in nomes_criadores:
-            u = usuarios_sql.buscar_usuario_por_id(uid) or {}
-            nomes_criadores[uid] = u.get("nome_responsavel") or u.get("usuario") or ""
-        t["criado_por_nome"] = nomes_criadores[uid]
     lista.sort(key=lambda t: (bool(t.get("concluida")), t.get("data_limite", "")))
     return jsonify(ok=True, tarefas=lista)
 
@@ -3036,13 +2984,16 @@ def criar_tarefa():
     # Cliente é opcional — sem ele, a tarefa só aparece em Minha Conta de quem
     # for o responsável (nunca cai em nenhuma Ficha, já que lá a lista vem
     # filtrada por cliente_id).
-    cliente_id = str(data.get("cliente_id", "")).strip()
+    cliente_id_raw = str(data.get("cliente_id", "")).strip()
+    cliente_id = None
     cliente_dados = {}
-    if cliente_id:
-        cliente_doc = db.collection(CLIENTES_COLLECTION).document(cliente_id).get()
-        if not cliente_doc.exists:
+    if cliente_id_raw:
+        if not cliente_id_raw.isdigit():
             return jsonify(ok=False, error="Cliente não encontrado."), 404
-        cliente_dados = cliente_doc.to_dict() or {}
+        cliente_id = int(cliente_id_raw)
+        cliente_dados = clientes_sql.buscar_cliente_por_id(cliente_id)
+        if not cliente_dados:
+            return jsonify(ok=False, error="Cliente não encontrado."), 404
 
     responsavel_id = str(data.get("responsavel_id", "")).strip()
     responsavel_dados = usuarios_sql.buscar_usuario_por_id(responsavel_id)
@@ -3062,23 +3013,21 @@ def criar_tarefa():
         "criado_por_nome": session.get("app_usuario_responsavel") or session.get("app_usuario_nome", ""),
         "criado_em": time.strftime("%Y-%m-%d"),
     })
-    doc_ref = db.collection(TAREFAS_COLLECTION).document()
-    doc_ref.set(dados)
+    tarefa = tarefas_sql.criar_tarefa(dados)
     registrar_acao(
-        acao="criar", entidade_tipo="tarefa", entidade_id=doc_ref.id,
-        entidade_nome=dados["titulo"], titulo="Tarefa criada",
-        cliente_id=dados["cliente_id"] or None, idcentral=dados["idcentral"],
-        cliente_nome=dados["cliente_nome"], tipo_historico="tarefa", tarefa_id=doc_ref.id,
+        acao="criar", entidade_tipo="tarefa", entidade_id=tarefa["id"],
+        entidade_nome=tarefa["titulo"], titulo="Tarefa criada",
+        cliente_id=tarefa["cliente_id"] or None, idcentral=tarefa["idcentral"],
+        cliente_nome=tarefa["cliente_nome"], tipo_historico="tarefa", tarefa_id=tarefa["id"],
     )
-    return jsonify(ok=True, tarefa=dict(dados, id=doc_ref.id))
+    return jsonify(ok=True, tarefa=tarefa)
 
 
-@app.route("/api/tarefas/<tarefa_id>", methods=["PUT"])
+@app.route("/api/tarefas/<int:tarefa_id>", methods=["PUT"])
 @requer_operador
 def editar_tarefa(tarefa_id):
-    doc_ref = db.collection(TAREFAS_COLLECTION).document(tarefa_id)
-    atual = doc_ref.get()
-    if not atual.exists:
+    atual = tarefas_sql.buscar_tarefa(tarefa_id)
+    if not atual:
         return jsonify(ok=False, error="Tarefa não encontrada."), 404
     data = request.get_json(force=True) or {}
     dados = _dados_tarefa(data)
@@ -3099,23 +3048,23 @@ def editar_tarefa(tarefa_id):
     # mesmo id (o que também atualiza idcentral/cliente_nome se o cliente foi
     # renomeado desde então).
     if "cliente_id" in data:
-        cliente_id = str(data.get("cliente_id", "")).strip()
-        if cliente_id:
-            cliente_doc = db.collection(CLIENTES_COLLECTION).document(cliente_id).get()
-            if not cliente_doc.exists:
+        cliente_id_raw = str(data.get("cliente_id", "")).strip()
+        if cliente_id_raw:
+            if not cliente_id_raw.isdigit():
                 return jsonify(ok=False, error="Cliente não encontrado."), 404
-            cliente_dados = cliente_doc.to_dict() or {}
-            dados["cliente_id"] = cliente_id
+            cliente_dados = clientes_sql.buscar_cliente_por_id(int(cliente_id_raw))
+            if not cliente_dados:
+                return jsonify(ok=False, error="Cliente não encontrado."), 404
+            dados["cliente_id"] = int(cliente_id_raw)
             dados["idcentral"] = cliente_dados.get("idcentral", "")
             dados["cliente_nome"] = cliente_dados.get("cliente", "")
         else:
-            dados["cliente_id"] = ""
+            dados["cliente_id"] = None
             dados["idcentral"] = ""
             dados["cliente_nome"] = ""
 
-    doc_ref.update(dados)
-    tarefa_completa = dict(atual.to_dict(), **dados, id=tarefa_id)
-    mudancas = diff_campos(atual.to_dict(), tarefa_completa, ROTULOS_TAREFA)
+    tarefa_completa = tarefas_sql.editar_tarefa(tarefa_id, dados)
+    mudancas = diff_campos(atual, tarefa_completa, ROTULOS_TAREFA)
     if mudancas:
         registrar_acao(
             acao="editar", entidade_tipo="tarefa", entidade_id=tarefa_id,
@@ -3126,14 +3075,12 @@ def editar_tarefa(tarefa_id):
     return jsonify(ok=True, tarefa=tarefa_completa)
 
 
-@app.route("/api/tarefas/<tarefa_id>/concluir", methods=["POST"])
+@app.route("/api/tarefas/<int:tarefa_id>/concluir", methods=["POST"])
 @requer_operador
 def concluir_tarefa(tarefa_id):
-    doc_ref = db.collection(TAREFAS_COLLECTION).document(tarefa_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
+    dados_atuais = tarefas_sql.buscar_tarefa(tarefa_id)
+    if not dados_atuais:
         return jsonify(ok=False, error="Tarefa não encontrada."), 404
-    dados_atuais = doc_atual.to_dict() or {}
     # "concluida" continua significando "encerrada" (sai da lista de pendentes)
     # — o desfecho de verdade fica em "resultado": concluída ou cancelada
     # (não pôde ser feita). Cancelar exige descrição, pra quem criou a tarefa
@@ -3143,13 +3090,11 @@ def concluir_tarefa(tarefa_id):
     descricao = str(data.get("descricao", "")).strip()[:1000]
     if resultado == "cancelada" and not descricao:
         return jsonify(ok=False, error="Descreva por que a tarefa foi cancelada."), 400
-    doc_ref.update({
-        "concluida": True,
-        "concluida_em": time.strftime("%Y-%m-%d"),
-        "resultado": resultado,
-        "resultado_descricao": descricao,
-        "finalizada_por_nome": session.get("app_usuario_responsavel") or session.get("app_usuario_nome", ""),
-    })
+    tarefas_sql.concluir_tarefa(
+        tarefa_id, resultado, descricao,
+        session.get("app_usuario_responsavel") or session.get("app_usuario_nome", ""),
+        time.strftime("%Y-%m-%d"),
+    )
     registrar_acao(
         acao="concluir" if resultado == "concluida" else "cancelar", entidade_tipo="tarefa", entidade_id=tarefa_id,
         entidade_nome=dados_atuais.get("titulo", ""),
@@ -3160,18 +3105,13 @@ def concluir_tarefa(tarefa_id):
     return jsonify(ok=True)
 
 
-@app.route("/api/tarefas/<tarefa_id>/reabrir", methods=["POST"])
+@app.route("/api/tarefas/<int:tarefa_id>/reabrir", methods=["POST"])
 @requer_operador
 def reabrir_tarefa(tarefa_id):
-    doc_ref = db.collection(TAREFAS_COLLECTION).document(tarefa_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
+    dados_atuais = tarefas_sql.buscar_tarefa(tarefa_id)
+    if not dados_atuais:
         return jsonify(ok=False, error="Tarefa não encontrada."), 404
-    dados_atuais = doc_atual.to_dict() or {}
-    doc_ref.update({
-        "concluida": False, "concluida_em": "",
-        "resultado": "", "resultado_descricao": "", "finalizada_por_nome": "",
-    })
+    tarefas_sql.reabrir_tarefa(tarefa_id)
     registrar_acao(
         acao="reabrir", entidade_tipo="tarefa", entidade_id=tarefa_id,
         entidade_nome=dados_atuais.get("titulo", ""), titulo="Tarefa reaberta",
@@ -3181,15 +3121,13 @@ def reabrir_tarefa(tarefa_id):
     return jsonify(ok=True)
 
 
-@app.route("/api/tarefas/<tarefa_id>", methods=["DELETE"])
+@app.route("/api/tarefas/<int:tarefa_id>", methods=["DELETE"])
 @requer_operador
 def excluir_tarefa(tarefa_id):
-    doc_ref = db.collection(TAREFAS_COLLECTION).document(tarefa_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
+    dados_atuais = tarefas_sql.buscar_tarefa(tarefa_id)
+    if not dados_atuais:
         return jsonify(ok=False, error="Tarefa não encontrada."), 404
-    dados_atuais = doc_atual.to_dict() or {}
-    doc_ref.delete()
+    tarefas_sql.excluir_tarefa(tarefa_id)
     registrar_acao(
         acao="excluir", entidade_tipo="tarefa", entidade_id=tarefa_id,
         entidade_nome=dados_atuais.get("titulo", ""), titulo="Tarefa excluída",
@@ -3238,88 +3176,73 @@ def _migracao_atual(migracoes):
     return atual
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes", methods=["GET"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes", methods=["GET"])
 def listar_migracoes_cliente(cliente_id):
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    if not doc_ref.get().exists:
+    if not clientes_sql.buscar_cliente_por_id(cliente_id):
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    docs = doc_ref.collection("migracoes").stream()
-    lista = [dict(d.to_dict(), id=d.id) for d in docs]
-    lista.sort(key=lambda m: m.get("data_inicio") or "", reverse=True)
-    return jsonify(ok=True, migracoes=lista)
+    return jsonify(ok=True, migracoes=migracoes_sql.listar_migracoes(cliente_id))
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes", methods=["POST"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes", methods=["POST"])
 def iniciar_migracao_cliente(cliente_id):
     """Cria uma nova tentativa de migração — é o que o toggle "Tem Migração?
     Sim" do cadastro do cliente chama. Recusa se já existir uma em andamento."""
-    doc_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    if not doc_ref.get().exists:
+    if not clientes_sql.buscar_cliente_por_id(cliente_id):
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    em_andamento = list(
-        doc_ref.collection("migracoes")
-        .where(filter=FieldFilter("status", "==", "em_andamento"))
-        .limit(1)
-        .stream()
-    )
-    if em_andamento:
+    if migracoes_sql.tem_migracao_em_andamento(cliente_id):
         return jsonify(ok=False, error="Esse cliente já tem uma migração em andamento."), 400
     data = request.get_json(force=True) or {}
-    dados = dict(CAMPOS_MIGRACAO_ATTEMPT_PADRAO)
-    dados["plataforma_origem"] = str(data.get("plataforma_origem", "")).strip()
-    dados["link_planilha"] = str(data.get("link_planilha", "")).strip()
-    dados["data_inicio"] = time.strftime("%Y-%m-%d")
-    migracao_ref = doc_ref.collection("migracoes").document()
-    migracao_ref.set(dados)
-    return jsonify(ok=True, migracao=dict(dados, id=migracao_ref.id))
+    migracao = migracoes_sql.iniciar_migracao(
+        cliente_id,
+        str(data.get("plataforma_origem", "")).strip(),
+        str(data.get("link_planilha", "")).strip(),
+        time.strftime("%Y-%m-%d"),
+    )
+    return jsonify(ok=True, migracao=migracao)
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>", methods=["PUT"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>", methods=["PUT"])
 def editar_migracao_cliente(cliente_id, migracao_id):
-    ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    atual = ref.get()
-    if not atual.exists:
+    atual = migracoes_sql.buscar_migracao(migracao_id)
+    if not atual or atual["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
     data = request.get_json(force=True) or {}
-    atual_dados = atual.to_dict()
     atualizacoes = {
-        "plataforma_origem": str(data.get("plataforma_origem", atual_dados.get("plataforma_origem", ""))).strip(),
-        "link_planilha": str(data.get("link_planilha", atual_dados.get("link_planilha", ""))).strip(),
-        "link_acesso_origem": str(data.get("link_acesso_origem", atual_dados.get("link_acesso_origem", ""))).strip(),
-        "login_acesso_origem": str(data.get("login_acesso_origem", atual_dados.get("login_acesso_origem", ""))).strip(),
-        "senha_acesso_origem": str(data.get("senha_acesso_origem", atual_dados.get("senha_acesso_origem", ""))).strip(),
-        "qtd_clientes": _para_int(data.get("qtd_clientes", atual_dados.get("qtd_clientes", 0))),
-        "qtd_placas": _para_int(data.get("qtd_placas", atual_dados.get("qtd_placas", 0))),
-        "percentual_migracao": _para_float(data.get("percentual_migracao", atual_dados.get("percentual_migracao", 0))),
+        "plataforma_origem": str(data.get("plataforma_origem", atual.get("plataforma_origem", ""))).strip(),
+        "link_planilha": str(data.get("link_planilha", atual.get("link_planilha", ""))).strip(),
+        "link_acesso_origem": str(data.get("link_acesso_origem", atual.get("link_acesso_origem", ""))).strip(),
+        "login_acesso_origem": str(data.get("login_acesso_origem", atual.get("login_acesso_origem", ""))).strip(),
+        "senha_acesso_origem": str(data.get("senha_acesso_origem", atual.get("senha_acesso_origem", ""))).strip(),
+        "qtd_clientes": _para_int(data.get("qtd_clientes", atual.get("qtd_clientes", 0))),
+        "qtd_placas": _para_int(data.get("qtd_placas", atual.get("qtd_placas", 0))),
+        "percentual_migracao": _para_float(data.get("percentual_migracao", atual.get("percentual_migracao", 0))),
     }
     etapa = str(data.get("etapa", "")).strip()
     if etapa in MIGRACAO_ETAPAS:
         atualizacoes["etapa"] = etapa
-    ref.update(atualizacoes)
-    return jsonify(ok=True, dados=dict(atual_dados, **atualizacoes))
+    migracao = migracoes_sql.editar_migracao(migracao_id, atualizacoes)
+    return jsonify(ok=True, dados=migracao)
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/finalizar", methods=["POST"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/finalizar", methods=["POST"])
 def finalizar_migracao_cliente(cliente_id, migracao_id):
     """Ação simples de "terminou": marca concluída com a data de hoje. Se
     tiver planilha vinculada, também renomeia (" - FINALIZADA") e move ela
     pra Migrações/Finalizadas no Drive — mas isso é best-effort: se o Drive
     falhar (ex.: planilha apagada manualmente), a migração é finalizada do
     mesmo jeito, só sem mexer no arquivo."""
-    ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    doc_atual = ref.get()
-    if not doc_atual.exists:
+    atual = migracoes_sql.buscar_migracao(migracao_id)
+    if not atual or atual["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    dados = {"status": "concluida", "data_fim": time.strftime("%Y-%m-%d")}
-    ref.update(dados)
-    link_planilha = (doc_atual.to_dict() or {}).get("link_planilha")
+    migracao = migracoes_sql.finalizar_migracao(migracao_id, time.strftime("%Y-%m-%d"))
+    link_planilha = atual.get("link_planilha")
     aviso_planilha = None
     if link_planilha:
         try:
             planilha_migracao.finalizar_planilha_migracao(link_planilha)
         except Exception as err:
             aviso_planilha = f"Migração finalizada, mas não consegui mover/renomear a planilha no Drive: {err}"
-    resposta = dict(ok=True, **dados)
+    resposta = dict(ok=True, status=migracao["status"], data_fim=migracao["data_fim"])
     if aviso_planilha:
         resposta["aviso"] = aviso_planilha
     return jsonify(**resposta)
@@ -3343,70 +3266,43 @@ def _criar_planilha_migracao_ou_erro(nome_cliente):
     return resultado.get("webViewLink", ""), None
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/criar-planilha", methods=["POST"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/criar-planilha", methods=["POST"])
 def criar_planilha_migracao_cliente(cliente_id, migracao_id):
-    cliente_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id)
-    cliente_doc = cliente_ref.get()
-    if not cliente_doc.exists:
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not cliente:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    migracao_ref = cliente_ref.collection("migracoes").document(migracao_id)
-    migracao_doc = migracao_ref.get()
-    if not migracao_doc.exists:
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
     # Trava também no servidor (não só escondendo o botão no front) — evita
     # criar uma planilha nova (e duplicar no Drive) por causa de clique
     # repetido/retry. "substituir" é o que o botão "Liberar edição" manda.
     data = request.get_json(silent=True) or {}
-    link_atual = (migracao_doc.to_dict() or {}).get("link_planilha")
-    if link_atual and not data.get("substituir"):
+    if migracao.get("link_planilha") and not data.get("substituir"):
         return jsonify(
             ok=False,
             error="Essa migração já tem uma planilha vinculada. Libere a edição antes de criar outra.",
         ), 409
-    nome_cliente = (cliente_doc.to_dict() or {}).get("cliente", "")
-    link, erro = _criar_planilha_migracao_ou_erro(nome_cliente)
+    link, erro = _criar_planilha_migracao_ou_erro(cliente.get("cliente", ""))
     if erro:
         return jsonify(ok=False, error=erro), 502
-    migracao_ref.update({"link_planilha": link})
+    migracoes_sql.atualizar_link_planilha(migracao_id, link)
     return jsonify(ok=True, link=link)
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/cancelar", methods=["POST"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/cancelar", methods=["POST"])
 def cancelar_migracao_cliente(cliente_id, migracao_id):
     """Cancela uma migração em andamento — só existe esse caminho (pela Ficha,
     Configurações de Migração); o cadastro do cliente não deixa mais editar ou
     remover uma migração já ativa, só ver e iniciar quando não houver nenhuma."""
-    ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    if not ref.get().exists:
+    atual = migracoes_sql.buscar_migracao(migracao_id)
+    if not atual or atual["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
     data = request.get_json(force=True) or {}
-    dados = {
-        "status": "cancelada",
-        "data_fim": time.strftime("%Y-%m-%d"),
-        "motivo": str(data.get("motivo", "")).strip(),
-    }
-    ref.update(dados)
-    return jsonify(ok=True, **dados)
-
-
-# --- CLIENTES EM MIGRAÇÃO (coleção antiga, ainda em uso pelo frontend atual) ---
-# Coleção independente: uma linha nasce quando alguém importa veículos com a
-# opção "Criar planilha" marcada (não mais atrelada aos logins salvos).
-MIGRACAO_COLLECTION = "migracao_clientes"
-CAMPOS_MIGRACAO_PADRAO = {
-    "nome": "",
-    "idcentral": "",
-    "cs": "",
-    "plataforma_origem": "",
-    "link_planilha": "",
-    "link_acesso_origem": "",
-    "login_acesso_origem": "",
-    "senha_acesso_origem": "",
-    "qtd_clientes": 0,
-    "qtd_placas": 0,
-    "percentual_migracao": 0,
-    "etapa": MIGRACAO_ETAPA_PADRAO,
-}
+    migracao = migracoes_sql.cancelar_migracao(
+        migracao_id, time.strftime("%Y-%m-%d"), str(data.get("motivo", "")).strip(),
+    )
+    return jsonify(ok=True, status=migracao["status"], data_fim=migracao["data_fim"], motivo=migracao["motivo"])
 
 
 def _para_int(valor):
@@ -3423,56 +3319,8 @@ def _para_float(valor):
         return 0.0
 
 
-def obter_ou_criar_cliente_migracao(nome):
-    """Retorna o id da linha do cliente (por nome), criando-a se ainda não existir."""
-    query = db.collection(MIGRACAO_COLLECTION).where(filter=FieldFilter("nome", "==", nome)).limit(1).stream()
-    existente = next(query, None)
-    if existente:
-        return existente.id
-    dados = dict(CAMPOS_MIGRACAO_PADRAO)
-    dados["nome"] = nome
-    doc_ref = db.collection(MIGRACAO_COLLECTION).document()
-    doc_ref.set(dados)
-    return doc_ref.id
-
-
-def _veiculo_doc_id(cliente, veiculo):
-    """ID determinístico por (cliente, veículo) — reimportar o mesmo veículo atualiza a
-    linha existente em vez de duplicar."""
-    chave = f"{cliente}||{veiculo}".encode("utf-8")
-    return hashlib.sha1(chave).hexdigest()
-
-
 STATUS_VEICULO_VALIDOS = ["Aguardando", "Enviar", "Enviado", "Migrado", "Cancelado"]
 STATUS_VEICULO_PADRAO = "Aguardando"
-
-
-def salvar_veiculos_migracao(cliente_migracao_id, veiculos):
-    """Upsert por (cliente, veículo). Usa merge para não apagar 'comando'/'status' já definidos.
-    Veículos novos entram com status "Aguardando"; veículos reimportados mantêm o status atual."""
-    subcolecao = db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).collection("veiculos")
-    for v in veiculos:
-        doc_id = _veiculo_doc_id(v["cliente"], v["veiculo"])
-        doc_ref = subcolecao.document(doc_id)
-        dados = dict(v)
-        if not doc_ref.get().exists:
-            dados["status"] = STATUS_VEICULO_PADRAO
-        doc_ref.set(dados, merge=True)
-
-
-def recalcular_contagens_migracao(cliente_migracao_id):
-    """Recalcula qtd_clientes/qtd_placas a partir do total acumulado de veículos salvos.
-    Só usado logo após uma importação (uma leitura da subcoleção por importação, não por
-    edição de célula — o autosave usa atualizar_contagens_migracao, que não relê nada)."""
-    subcolecao = db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).collection("veiculos")
-    docs = [d.to_dict() for d in subcolecao.stream()]
-    clientes = {d.get("cliente") for d in docs if d.get("cliente")}
-    placas = {d.get("veiculo") for d in docs if d.get("veiculo")}
-    qtd_clientes, qtd_placas = len(clientes), len(placas)
-    db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).update({
-        "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas,
-    })
-    return qtd_clientes, qtd_placas
 
 
 _PERCENTUAL_TTL_SEGUNDOS = 300
@@ -3484,10 +3332,7 @@ def _atualizar_percentual_migracao(cliente_id, migracao_id, link_planilha):
     try:
         valor = planilha_migracao.calcular_progresso_migracao(link_planilha)
         if valor is not None:
-            db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id).update({
-                "percentual_migracao": valor,
-                "percentual_atualizado_em": time.time(),
-            })
+            migracoes_sql.atualizar_percentual(migracao_id, valor, time.time())
     except Exception:
         app.logger.exception("Falha ao atualizar progresso da migração %s pela planilha", migracao_id)
     finally:
@@ -3520,43 +3365,34 @@ def listar_clientes_migracao():
 
 
 def _carregar_clientes_migracao():
-    """Junta as duas fontes de cliente de migração que coexistem hoje:
-    "legado" (migracao_clientes, coleção solta, sem ligação real com um
-    cliente de Implantação) e "unificado" (clientes/<id>/migracoes/<id> — a
-    tentativa pertence de fato a um cliente único, com IdCentral garantido).
-    Todo cliente novo (ver POST .../migracoes chamado pela tela) entra só no
-    unificado; o legado só existe enquanto os dados antigos não são migrados
-    (ver migrar_migracao_para_clientes.py)."""
-    lista = []
+    """Um item por cliente que tem alguma tentativa de migração — a "atual"
+    (em_andamento, senão a mais recente). Coleção legada (migracao_clientes)
+    foi descontinuada (nunca mais recebia cliente novo de verdade — ver
+    docs/HISTORICO_DECISOES.md).
 
-    # Unificado primeiro — tem prioridade sobre o legado quando os dois
-    # existem pro mesmo IdCentral (cliente vinculado manualmente, ou já
-    # migrado pelo script mas a coleção antiga ainda não foi apagada).
-    idcentrais_unificados = set()
-    clientes_por_id = {d.id: (d.to_dict() or {}) for d in db.collection(CLIENTES_COLLECTION).stream()}
-    migracoes_por_cliente = {}
-    for d in db.collection_group("migracoes").stream():
-        cliente_id = d.reference.parent.parent.id
-        migracoes_por_cliente.setdefault(cliente_id, []).append(dict(d.to_dict(), id=d.id))
-    for cliente_id, migracoes in migracoes_por_cliente.items():
-        cliente_dados = clientes_por_id.get(cliente_id)
-        if cliente_dados is None:
-            continue  # cliente-pai foi apagado — tentativa órfã, ignora
+    Busca as migrações de TODOS os clientes numa única consulta (ver
+    `listar_migracoes_todas_por_cliente`) em vez de 1 SELECT por cliente
+    dentro do loop — isso é o que fazia essa listagem ficar lenta em bases
+    com muitos clientes."""
+    lista = []
+    migracoes_por_cliente = migracoes_sql.listar_migracoes_todas_por_cliente()
+    for cliente in clientes_sql.listar_clientes_resumo():
+        migracoes = migracoes_por_cliente.get(cliente["id"], [])
         m = _migracao_atual(migracoes)
         if m is None:
             continue
-        idcentral = cliente_dados.get("idcentral", "")
-        if idcentral:
-            idcentrais_unificados.add(idcentral)
         lista.append({
             "id": m["id"],
+            # Mantido fixo (não há mais "legado") só pra não quebrar o front,
+            # que usa c.origem === "unificado" pra habilitar funcionalidades
+            # completas (IdCentral travado, editar veículos/modelos etc.).
             "origem": "unificado",
-            "cliente_id": cliente_id,
+            "cliente_id": cliente["id"],
             "migracao_id": m["id"],
-            "nome": cliente_dados.get("cliente", ""),
-            "idcentral": idcentral,
-            "cs": cliente_dados.get("csm", ""),
-            "tem_implantacao": cliente_dados.get("tem_implantacao", True),
+            "nome": cliente["cliente"],
+            "idcentral": cliente["idcentral"],
+            "cs": cliente["csm"],
+            "tem_implantacao": cliente["tem_implantacao"],
             "etapa": m.get("etapa") or MIGRACAO_ETAPA_PADRAO,
             "plataforma_origem": m.get("plataforma_origem", ""),
             "link_planilha": m.get("link_planilha", ""),
@@ -3566,73 +3402,62 @@ def _carregar_clientes_migracao():
             "qtd_clientes": m.get("qtd_clientes", 0),
             "qtd_placas": m.get("qtd_placas", 0),
             "percentual_migracao": _percentual_migracao_para_lista(
-                cliente_id, m["id"], m.get("link_planilha", ""),
+                cliente["id"], m["id"], m.get("link_planilha", ""),
                 m.get("percentual_migracao", 0), m.get("percentual_atualizado_em"),
             ),
             "data_inicio": m.get("data_inicio", ""),
             "data_fim": m.get("data_fim", ""),
         })
-
-    for d in db.collection(MIGRACAO_COLLECTION).stream():
-        c = dict(d.to_dict(), id=d.id)
-        c.setdefault("etapa", MIGRACAO_ETAPA_PADRAO)
-        c.setdefault("idcentral", "")
-        # Coleção legada nunca teve data_inicio (nasceu sem esse controle) —
-        # sem essa data não dá pra calcular "dias em migração" no card.
-        c.setdefault("data_inicio", "")
-        c.setdefault("data_fim", "")
-        if c["idcentral"] and c["idcentral"] in idcentrais_unificados:
-            continue  # já tem versão unificada pro mesmo IdCentral — não duplica
-        c["origem"] = "legado"
-        lista.append(c)
-
     lista.sort(key=lambda c: (c.get("nome") or "").lower())
     return lista
 
 
 @app.route("/api/ficha/<idcentral>")
 def obter_ficha_cliente(idcentral):
-    """Busca o cliente único (coleção "clientes") por IdCentral, junto com o
-    histórico de tentativas de migração dele. Mantém a chave "implantacao" (nome
-    de antes da reestruturação) e uma "migracao" (singular = tentativa atual/mais
+    """Busca o cliente único por IdCentral, junto com o histórico de
+    tentativas de migração dele. Mantém a chave "implantacao" (nome de antes
+    da reestruturação) e uma "migracao" (singular = tentativa atual/mais
     recente) pra não precisar reescrever toda a Ficha de uma vez; "migracoes"
     (plural) é a lista completa, pro histórico."""
-    doc_cliente = next(
-        db.collection(CLIENTES_COLLECTION)
-        .where(filter=FieldFilter("idcentral", "==", idcentral)).limit(1).stream(),
-        None,
-    )
-    if not doc_cliente:
+    # DIAGNÓSTICO TEMPORÁRIO — mede cada etapa pra achar onde a Ficha está
+    # realmente gastando tempo (ver conversa sobre lentidão ao abrir
+    # cliente). Remover depois de identificado o gargalo.
+    _t0 = time.perf_counter()
+
+    def _marca(nome):
+        print(f"[ficha:{idcentral}] {nome}: {time.perf_counter() - _t0:.3f}s", flush=True)
+
+    implantacao = clientes_sql.buscar_cliente_por_idcentral(idcentral)
+    _marca("buscar_cliente_por_idcentral")
+    if not implantacao:
         return jsonify(ok=False, error="Nenhum cliente encontrado com esse IdCentral."), 404
 
-    implantacao = dict(doc_cliente.to_dict(), id=doc_cliente.id)
-    implantacao.setdefault("tem_implantacao", True)
-    implantacao.setdefault("etapa", IMPLANTACAO_ETAPA_PADRAO)
-    implantacao.setdefault("marcos_concluidos", [])
-    implantacao.setdefault("implantado", False)
-    implantacao.setdefault("estagio", ESTAGIO_CLIENTE_PADRAO)
-    implantacao.setdefault("momento", "")
-    implantacao.setdefault("flag", "")
-    implantacao.setdefault("vendedor", "")
-    implantacao.setdefault("persona", "")
-    implantacao.setdefault("decisor_nome", "")
-    implantacao.setdefault("decisor_whatsapp", "")
-    implantacao.setdefault("decisor_estado", "")
-    implantacao.setdefault("decisor_cidade", "")
+    # WhatsApp do CS e do Comercial: usa a FK quando resolvida (sem precisar
+    # casar por nome); cai pro casamento por nome só quando não tem FK (CS
+    # sem login, ou carga antiga da planilha). `telefones` só é buscado (1
+    # SELECT de toda a tabela usuarios) se pelo menos um dos dois precisar —
+    # e no máximo uma vez, nunca 1x por prefixo.
+    telefones = None
+    for prefixo, usuario_id_campo in (("csm", "responsavel_usuario_id"), ("vendedor", "vendedor_usuario_id")):
+        usuario_id = implantacao.get(usuario_id_campo)
+        usuario = usuarios_sql.buscar_usuario_por_id(usuario_id) if usuario_id else None
+        if usuario:
+            implantacao[f"{prefixo}_whatsapp"] = usuario.get("telefone_profissional", "")
+        else:
+            if telefones is None:
+                telefones = usuarios_sql.telefones_profissionais_por_nome()
+            implantacao[f"{prefixo}_whatsapp"] = telefones.get(implantacao.get(prefixo) or "", "")
+    _marca("whatsapp_csm_vendedor")
 
-    # WhatsApp do CS e do Comercial vem do cadastro de login de cada um (só o
-    # nome fica salvo no cliente). Calculado aqui, não gravado no documento.
-    telefones = usuarios_sql.telefones_profissionais_por_nome()
-    implantacao["csm_whatsapp"] = telefones.get(implantacao.get("csm") or "", "")
-    implantacao["vendedor_whatsapp"] = telefones.get(implantacao.get("vendedor") or "", "")
-
-    migracoes = [dict(d.to_dict(), id=d.id) for d in doc_cliente.reference.collection("migracoes").stream()]
-    migracoes.sort(key=lambda m: m.get("data_inicio") or "", reverse=True)
+    migracoes = migracoes_sql.listar_migracoes(implantacao["id"])
+    _marca("listar_migracoes")
     migracao_atual = _migracao_atual(migracoes)
 
-    doc_cred = db.collection(CREDENCIAIS_CLIENTE_COLLECTION).document(idcentral).get()
-    dados_cred = doc_cred.to_dict() if doc_cred.exists else None
+    dados_cred = credenciais_sql.obter_credencial_cliente(implantacao["id"])
+    _marca("obter_credencial_cliente")
     credencial_configurada = bool(dados_cred and dados_cred.get("login") and dados_cred.get("senha"))
+    documentos = cliente_documentos_sql.listar_metadados(implantacao["id"])
+    _marca("listar_documentos")
     resposta = dict(
         ok=True,
         idcentral=idcentral,
@@ -3640,104 +3465,106 @@ def obter_ficha_cliente(idcentral):
         migracao=migracao_atual,
         migracoes=migracoes,
         credencial_configurada=credencial_configurada,
+        documentos=documentos,
     )
     # O login em si só aparece pra admin (é quem cadastra/edita); pro resto dos
     # perfis, só o booleano "configurada" — o suficiente pra habilitar o botão
     # Autenticar sem expor a credencial.
     if _sou_admin() and dados_cred:
         resposta["credencial_login"] = dados_cred.get("login", "")
+    _marca("montar_resposta")
     return jsonify(**resposta)
 
 
-@app.route("/api/migracao/clientes", methods=["POST"])
-def criar_cliente_migracao():
-    data = request.get_json(force=True) or {}
-    nome = str(data.get("nome", "")).strip()
-    if not nome:
-        return jsonify(ok=False, error="Informe o nome do cliente."), 400
-    cliente_id = obter_ou_criar_cliente_migracao(nome)
-    doc = db.collection(MIGRACAO_COLLECTION).document(cliente_id).get()
-    return jsonify(ok=True, cliente=dict(doc.to_dict(), id=cliente_id))
+# --- DOCUMENTOS DA FICHA (ficha de entrada assinada, contrato) ---
+# PDF anexado ao cadastro do cliente, guardado em base64 no Postgres (mesmo
+# padrão de UsuarioFoto) — sem servidor de arquivo próprio, nada a provisionar
+# a mais no Render. Teto de tamanho generoso (PDF não passa pelo redimensionamento
+# que a foto de perfil tem no navegador): 12MB de arquivo cru vira ~16M
+# caracteres em base64.
+TIPOS_DOCUMENTO_CLIENTE = {"ficha_entrada": "Ficha de entrada", "contrato": "Contrato"}
+DOCUMENTO_CLIENTE_MAX_CHARS = 16_000_000
 
 
-@app.route("/api/migracao/clientes/<cliente_id>", methods=["DELETE"])
-def excluir_cliente_migracao(cliente_id):
-    doc_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
-    if not doc_ref.get().exists:
+def _validar_documento_cliente(tipo, nome_arquivo, conteudo):
+    if tipo not in TIPOS_DOCUMENTO_CLIENTE:
+        return "Tipo de documento inválido."
+    if not nome_arquivo:
+        return "Informe o nome do arquivo."
+    if not conteudo or not conteudo.startswith("data:application/pdf"):
+        return "O arquivo precisa ser um PDF."
+    if len(conteudo) > DOCUMENTO_CLIENTE_MAX_CHARS:
+        return "Arquivo muito grande — tente um PDF menor (até 12MB)."
+    return None
+
+
+@app.route("/api/clientes/<int:cliente_id>/documentos/<tipo>", methods=["POST"])
+@requer_operador
+def salvar_documento_cliente(cliente_id, tipo):
+    atual = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not atual:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
-    for v in doc_ref.collection("veiculos").stream():
-        v.reference.delete()
-    for m in doc_ref.collection("modelos_comando").stream():
-        m.reference.delete()
-    doc_ref.delete()
+    data = request.get_json(force=True) or {}
+    nome_arquivo = str(data.get("nome_arquivo", "")).strip()
+    conteudo = str(data.get("conteudo", ""))
+    erro = _validar_documento_cliente(tipo, nome_arquivo, conteudo)
+    if erro:
+        return jsonify(ok=False, error=erro), 400
+    # Tamanho real do arquivo (bytes) vem do front (File.size) — só cai pro
+    # tamanho do base64 (~33% maior) se por algum motivo não vier.
+    tamanho = int(data.get("tamanho") or 0) or len(conteudo)
+    enviado_por = session.get("app_usuario_responsavel") or session.get("app_usuario_nome", "")
+    meta = cliente_documentos_sql.salvar_documento(
+        cliente_id, tipo, nome_arquivo, conteudo, tamanho,
+        time.strftime("%Y-%m-%d"), enviado_por,
+    )
+    registrar_acao(
+        acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
+        entidade_nome=atual.get("cliente", ""),
+        titulo=f"Documento anexado: {TIPOS_DOCUMENTO_CLIENTE[tipo]}",
+        cliente_id=cliente_id, idcentral=atual.get("idcentral", ""), cliente_nome=atual.get("cliente", ""),
+    )
+    return jsonify(ok=True, documento=meta)
+
+
+@app.route("/api/clientes/<int:cliente_id>/documentos/<tipo>", methods=["DELETE"])
+@requer_operador
+def excluir_documento_cliente(cliente_id, tipo):
+    atual = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not atual:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    if tipo not in TIPOS_DOCUMENTO_CLIENTE:
+        return jsonify(ok=False, error="Tipo de documento inválido."), 400
+    if not cliente_documentos_sql.excluir_documento(cliente_id, tipo):
+        return jsonify(ok=False, error="Documento não encontrado."), 404
+    registrar_acao(
+        acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
+        entidade_nome=atual.get("cliente", ""),
+        titulo=f"Documento removido: {TIPOS_DOCUMENTO_CLIENTE[tipo]}",
+        cliente_id=cliente_id, idcentral=atual.get("idcentral", ""), cliente_nome=atual.get("cliente", ""),
+    )
     return jsonify(ok=True)
 
 
-@app.route("/api/migracao/clientes/<cliente_id>", methods=["PUT"])
-def atualizar_cliente_migracao(cliente_id):
-    doc_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
-    atual = doc_ref.get()
-    if not atual.exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    data = request.get_json(force=True) or {}
-    atual_dados = atual.to_dict()
-    # Cada campo só é trocado se vier na requisição — senão mantém o valor que já
-    # estava salvo. É o formulário na tela que hoje sempre manda tudo junto; isso
-    # aqui é só pra rota também ficar segura pra uma chamada parcial (ex.: só
-    # atualizar o idcentral) não zerar o resto do cadastro do cliente.
-    dados = {
-        "idcentral": str(data.get("idcentral", atual_dados.get("idcentral", ""))).strip(),
-        "cs": str(data.get("cs", atual_dados.get("cs", ""))).strip(),
-        "plataforma_origem": str(data.get("plataforma_origem", atual_dados.get("plataforma_origem", ""))).strip(),
-        "link_planilha": str(data.get("link_planilha", atual_dados.get("link_planilha", ""))).strip(),
-        "link_acesso_origem": str(data.get("link_acesso_origem", atual_dados.get("link_acesso_origem", ""))).strip(),
-        "login_acesso_origem": str(data.get("login_acesso_origem", atual_dados.get("login_acesso_origem", ""))).strip(),
-        "senha_acesso_origem": str(data.get("senha_acesso_origem", atual_dados.get("senha_acesso_origem", ""))).strip(),
-        "qtd_clientes": _para_int(data.get("qtd_clientes", atual_dados.get("qtd_clientes", 0))),
-        "qtd_placas": _para_int(data.get("qtd_placas", atual_dados.get("qtd_placas", 0))),
-        "percentual_migracao": _para_float(data.get("percentual_migracao", atual_dados.get("percentual_migracao", 0))),
-    }
-    etapa = str(data.get("etapa", "")).strip()
-    if etapa in MIGRACAO_ETAPAS:
-        dados["etapa"] = etapa
-    if not _sou_admin():
-        # Mesma regra da Implantação: só admin altera um IdCentral já existente.
-        dados["idcentral"] = atual_dados.get("idcentral", "")
-    doc_ref.update(dados)
-    return jsonify(ok=True, dados=dict(atual_dados, **dados))
+@app.route("/api/clientes/<int:cliente_id>/documentos/<tipo>/arquivo", methods=["GET"])
+def servir_documento_cliente(cliente_id, tipo):
+    if tipo not in TIPOS_DOCUMENTO_CLIENTE:
+        return jsonify(ok=False, error="Tipo de documento inválido."), 400
+    doc = cliente_documentos_sql.obter_arquivo(cliente_id, tipo)
+    if not doc or not doc["conteudo"].startswith("data:"):
+        return jsonify(ok=False, error="Documento não encontrado."), 404
+    _, _, b64 = doc["conteudo"].partition(",")
+    resposta = Response(base64.b64decode(b64), mimetype="application/pdf")
+    nome = (doc["nome_arquivo"] or f"{tipo}.pdf").replace('"', "'")
+    resposta.headers["Content-Disposition"] = f'inline; filename="{nome}"'
+    return resposta
 
 
-@app.route("/api/migracao/clientes/<cliente_id>/criar-planilha", methods=["POST"])
-def criar_planilha_migracao_legado(cliente_id):
-    doc_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
-    atual = doc_ref.get()
-    if not atual.exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    atual_dados = atual.to_dict() or {}
-    data = request.get_json(silent=True) or {}
-    if atual_dados.get("link_planilha") and not data.get("substituir"):
-        return jsonify(
-            ok=False,
-            error="Essa migração já tem uma planilha vinculada. Libere a edição antes de criar outra.",
-        ), 409
-    nome_cliente = atual_dados.get("nome", "")
-    link, erro = _criar_planilha_migracao_ou_erro(nome_cliente)
-    if erro:
-        return jsonify(ok=False, error=erro), 502
-    doc_ref.update({"link_planilha": link})
-    return jsonify(ok=True, link=link)
-
-
-# --- MODELOS DE RASTREADOR POR CLIENTE (padroniza o Comando pelo Equipamento) ---
-# Cada cliente em migração tem sua própria tabela de {modelo, porta, comando_template}.
+# --- MODELOS DE RASTREADOR POR MIGRAÇÃO (padroniza o Comando pelo Equipamento) ---
+# Cada tentativa de migração tem sua própria tabela de {modelo, porta, comando_template}.
 # O comando_template usa o placeholder literal "{porta}", substituído pela porta
-# cadastrada pra esse modelo nesse cliente — ex.: "ip,200.152.62.20,{porta}" com
-# porta "123456" vira "ip,200.152.62.20,123456". Usado tanto na tela (quando o
-# Equipamento de um veículo é selecionado) quanto na importação com "Criar planilha".
-def _resolver_comando_modelo(template, porta):
-    return (template or "").replace("{porta}", porta or "")
-
-
+# cadastrada pra esse modelo nessa migração — ex.: "ip,200.152.62.20,{porta}" com
+# porta "123456" vira "ip,200.152.62.20,123456".
 def _dados_modelo_comando(data):
     modelo = str(data.get("modelo", "")).strip()
     if not modelo:
@@ -3749,170 +3576,46 @@ def _dados_modelo_comando(data):
     }
 
 
-def _preencher_comandos_por_modelo(cliente_migracao_id, veiculos):
-    """Preenche 'comando' em cada dict de veiculos (in-place) cujo 'equipamento'
-    bata (case-insensitive) com um modelo cadastrado pra esse cliente."""
-    docs = db.collection(MIGRACAO_COLLECTION).document(cliente_migracao_id).collection("modelos_comando").stream()
-    mapa = {}
-    for d in docs:
-        m = d.to_dict()
-        modelo = str(m.get("modelo", "")).strip().lower()
-        if modelo:
-            mapa[modelo] = m
-    if not mapa:
-        return
-    for v in veiculos:
-        equipamento = str(v.get("equipamento", "")).strip().lower()
-        modelo = mapa.get(equipamento)
-        if modelo:
-            v["comando"] = _resolver_comando_modelo(modelo.get("comando_template"), modelo.get("porta"))
-
-
-def _reaplicar_comando_em_veiculos_existentes(veiculos_ref, modelo, porta, comando_template):
-    """Ao criar/editar um modelo, atualiza na hora o 'comando' de veículos já
-    cadastrados nessa subcoleção cujo 'equipamento' bate (case-insensitive) com ele.
-    Retorna quantos veículos foram atualizados. Recebe a referência da subcoleção
-    (não um cliente_id) pra servir tanto o cliente de migração antigo quanto uma
-    tentativa de migração nova — mesma lógica, containers diferentes."""
-    modelo_norm = str(modelo or "").strip().lower()
-    if not modelo_norm:
-        return 0
-    comando_resolvido = _resolver_comando_modelo(comando_template, porta)
-    atualizados = 0
-    for v in veiculos_ref.stream():
-        dados = v.to_dict()
-        if str(dados.get("equipamento", "")).strip().lower() == modelo_norm:
-            v.reference.update({"comando": comando_resolvido})
-            atualizados += 1
-    return atualizados
-
-
-def _listar_modelos_impl(container_ref):
-    docs = container_ref.collection("modelos_comando").stream()
-    lista = [dict(d.to_dict(), id=d.id) for d in docs]
-    lista.sort(key=lambda m: (m.get("modelo") or "").lower())
-    return lista
-
-
-def _salvar_modelo_impl(container_ref, modelo_ref, data):
-    """Cria (modelo_ref recém-gerado) ou substitui (edição) um modelo de comando,
-    e reaplica o comando resolvido nos veículos já cadastrados cujo equipamento
-    bate. Retorna (dados, veiculos_atualizados), ou None se dados inválidos."""
-    dados = _dados_modelo_comando(data)
-    if dados is None:
-        return None
-    modelo_ref.set(dados)
-    atualizados = _reaplicar_comando_em_veiculos_existentes(
-        container_ref.collection("veiculos"), dados["modelo"], dados["porta"], dados["comando_template"]
-    )
-    return dados, atualizados
-
-
-@app.route("/api/migracao/clientes/<cliente_id>/modelos", methods=["GET"])
-def listar_modelos_comando_migracao(cliente_id):
-    container_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
-    if not container_ref.get().exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    return jsonify(ok=True, modelos=_listar_modelos_impl(container_ref))
-
-
-@app.route("/api/migracao/clientes/<cliente_id>/modelos", methods=["POST"])
-def criar_modelo_comando_migracao(cliente_id):
-    container_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
-    if not container_ref.get().exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    modelo_ref = container_ref.collection("modelos_comando").document()
-    resultado = _salvar_modelo_impl(container_ref, modelo_ref, request.get_json(force=True) or {})
-    if resultado is None:
-        return jsonify(ok=False, error="Informe o modelo do rastreador."), 400
-    dados, atualizados = resultado
-    return jsonify(ok=True, modelo=dict(dados, id=modelo_ref.id), veiculos_atualizados=atualizados)
-
-
-@app.route("/api/migracao/clientes/<cliente_id>/modelos/<modelo_id>", methods=["PUT"])
-def editar_modelo_comando_migracao(cliente_id, modelo_id):
-    container_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
-    modelo_ref = container_ref.collection("modelos_comando").document(modelo_id)
-    if not modelo_ref.get().exists:
-        return jsonify(ok=False, error="Modelo não encontrado."), 404
-    resultado = _salvar_modelo_impl(container_ref, modelo_ref, request.get_json(force=True) or {})
-    if resultado is None:
-        return jsonify(ok=False, error="Informe o modelo do rastreador."), 400
-    dados, atualizados = resultado
-    return jsonify(ok=True, modelo=dict(dados, id=modelo_id), veiculos_atualizados=atualizados)
-
-
-@app.route("/api/migracao/clientes/<cliente_id>/modelos/<modelo_id>", methods=["DELETE"])
-def excluir_modelo_comando_migracao(cliente_id, modelo_id):
-    ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("modelos_comando").document(modelo_id)
-    if not ref.get().exists:
-        return jsonify(ok=False, error="Modelo não encontrado."), 404
-    ref.delete()
-    return jsonify(ok=True)
-
-
-# --- Mesmas rotas de modelo de comando, para uma tentativa de migração nova
-# (clientes/<id>/migracoes/<id>) — mesma lógica de _listar_modelos_impl/_salvar_modelo_impl. ---
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/modelos", methods=["GET"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/modelos", methods=["GET"])
 def listar_modelos_comando_cliente(cliente_id, migracao_id):
-    container_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    if not container_ref.get().exists:
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    return jsonify(ok=True, modelos=_listar_modelos_impl(container_ref))
+    return jsonify(ok=True, modelos=migracoes_sql.listar_modelos(migracao_id))
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/modelos", methods=["POST"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/modelos", methods=["POST"])
 def criar_modelo_comando_cliente(cliente_id, migracao_id):
-    container_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    if not container_ref.get().exists:
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    modelo_ref = container_ref.collection("modelos_comando").document()
-    resultado = _salvar_modelo_impl(container_ref, modelo_ref, request.get_json(force=True) or {})
-    if resultado is None:
+    dados = _dados_modelo_comando(request.get_json(force=True) or {})
+    if dados is None:
         return jsonify(ok=False, error="Informe o modelo do rastreador."), 400
-    dados, atualizados = resultado
-    return jsonify(ok=True, modelo=dict(dados, id=modelo_ref.id), veiculos_atualizados=atualizados)
+    modelo, atualizados = migracoes_sql.salvar_modelo(migracao_id, None, dados)
+    return jsonify(ok=True, modelo=modelo, veiculos_atualizados=atualizados)
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/modelos/<modelo_id>", methods=["PUT"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/modelos/<int:modelo_id>", methods=["PUT"])
 def editar_modelo_comando_cliente(cliente_id, migracao_id, modelo_id):
-    container_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    modelo_ref = container_ref.collection("modelos_comando").document(modelo_id)
-    if not modelo_ref.get().exists:
-        return jsonify(ok=False, error="Modelo não encontrado."), 404
-    resultado = _salvar_modelo_impl(container_ref, modelo_ref, request.get_json(force=True) or {})
-    if resultado is None:
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    dados = _dados_modelo_comando(request.get_json(force=True) or {})
+    if dados is None:
         return jsonify(ok=False, error="Informe o modelo do rastreador."), 400
-    dados, atualizados = resultado
-    return jsonify(ok=True, modelo=dict(dados, id=modelo_id), veiculos_atualizados=atualizados)
-
-
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/modelos/<modelo_id>", methods=["DELETE"])
-def excluir_modelo_comando_cliente(cliente_id, migracao_id, modelo_id):
-    ref = (
-        db.collection(CLIENTES_COLLECTION).document(cliente_id)
-        .collection("migracoes").document(migracao_id)
-        .collection("modelos_comando").document(modelo_id)
-    )
-    if not ref.get().exists:
+    resultado = migracoes_sql.salvar_modelo(migracao_id, modelo_id, dados)
+    if resultado is None:
         return jsonify(ok=False, error="Modelo não encontrado."), 404
-    ref.delete()
+    modelo, atualizados = resultado
+    return jsonify(ok=True, modelo=modelo, veiculos_atualizados=atualizados)
+
+
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/modelos/<int:modelo_id>", methods=["DELETE"])
+def excluir_modelo_comando_cliente(cliente_id, migracao_id, modelo_id):
+    if not migracoes_sql.excluir_modelo(modelo_id):
+        return jsonify(ok=False, error="Modelo não encontrado."), 404
     return jsonify(ok=True)
-
-
-def _listar_veiculos_impl(container_ref):
-    docs = container_ref.collection("veiculos").stream()
-    lista = []
-    for d in docs:
-        dados = d.to_dict()
-        dados.setdefault("comando", "")
-        dados.setdefault("apn", "")
-        dados.setdefault("ls_apn", "")
-        dados.setdefault("ultima_comunicacao", "")
-        dados.setdefault("status", STATUS_VEICULO_PADRAO)
-        lista.append(dict(dados, id=d.id))
-    lista.sort(key=lambda v: (v.get("cliente") or "", v.get("veiculo") or ""))
-    return lista
 
 
 CAMPOS_VEICULO_ATUALIZAVEIS = [
@@ -3920,164 +3623,48 @@ CAMPOS_VEICULO_ATUALIZAVEIS = [
 ]
 
 
-def _atualizar_veiculo_impl(veiculo_ref, data):
-    """Retorna (atualizacoes, None) e já grava, ou (None, mensagem_erro) se inválido."""
-    atualizacoes = {}
-    for campo in CAMPOS_VEICULO_ATUALIZAVEIS:
-        if campo in data:
-            atualizacoes[campo] = str(data.get(campo, ""))
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos", methods=["GET"])
+def listar_veiculos_cliente(cliente_id, migracao_id):
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    return jsonify(ok=True, veiculos=migracoes_sql.listar_veiculos(migracao_id))
+
+
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/<int:veiculo_id>", methods=["PUT"])
+def atualizar_veiculo_cliente(cliente_id, migracao_id, veiculo_id):
+    data = request.get_json(force=True) or {}
+    campos = {c: str(data.get(c, "")) for c in CAMPOS_VEICULO_ATUALIZAVEIS if c in data}
     if "status" in data:
         status = str(data.get("status", "")).strip()
         if status not in STATUS_VEICULO_VALIDOS:
-            return None, "Status inválido."
-        atualizacoes["status"] = status
-    if not atualizacoes:
-        return None, "Nada para atualizar."
-    veiculo_ref.update(atualizacoes)
-    return atualizacoes, None
-
-
-CAMPOS_VEICULO_ITEM = [
-    "cliente", "veiculo", "equipamento", "id_equipamento", "apn", "ls_apn",
-    "numero_linha", "comando", "ultima_comunicacao",
-]
-
-
-def _salvar_item_veiculo_impl(container_ref, item):
-    """Upsert de 1 veículo (cria ou renomeia) — compartilhado entre o container
-    "cliente de migração" antigo e uma tentativa de migração nova. Retorna o dict
-    salvo (com id), ou None se faltar cliente/veículo."""
-    cliente = str(item.get("cliente", "")).strip()
-    veiculo = str(item.get("veiculo", "")).strip()
-    if not cliente or not veiculo:
-        return None
-
-    subcolecao = container_ref.collection("veiculos")
-    novo_id = _veiculo_doc_id(cliente, veiculo)
-    antigo_id = item.get("id")
-    dados = {campo: str(item.get(campo, "")) for campo in CAMPOS_VEICULO_ITEM}
-
-    novo_ref = subcolecao.document(novo_id)
-    if antigo_id and antigo_id != novo_id and not str(antigo_id).startswith("novo-"):
-        # Cliente/Veículo mudaram: era um registro existente (id real) —
-        # migra o status pro novo doc e remove o antigo pra não duplicar.
-        antigo_ref = subcolecao.document(antigo_id)
-        antigo_doc = antigo_ref.get()
-        if antigo_doc.exists:
-            status_existente = antigo_doc.to_dict().get("status")
-            if status_existente:
-                dados["status"] = status_existente
-            antigo_ref.delete()
-    if "status" not in dados and not novo_ref.get().exists:
-        dados["status"] = STATUS_VEICULO_PADRAO
-
-    novo_ref.set(dados, merge=True)
-    return dict(dados, id=novo_id)
-
-
-@app.route("/api/migracao/clientes/<cliente_id>/veiculos", methods=["GET"])
-def listar_veiculos_migracao(cliente_id):
-    container_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
-    if not container_ref.get().exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    return jsonify(ok=True, veiculos=_listar_veiculos_impl(container_ref))
-
-
-@app.route("/api/migracao/clientes/<cliente_id>/veiculos/<veiculo_id>", methods=["PUT"])
-def atualizar_veiculo_migracao(cliente_id, veiculo_id):
-    ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("veiculos").document(veiculo_id)
-    if not ref.get().exists:
-        return jsonify(ok=False, error="Veículo não encontrado."), 404
-    atualizacoes, erro = _atualizar_veiculo_impl(ref, request.get_json(force=True) or {})
-    if erro:
-        return jsonify(ok=False, error=erro), 400
-    return jsonify(ok=True, **atualizacoes)
-
-
-@app.route("/api/migracao/clientes/<cliente_id>/veiculos/<veiculo_id>", methods=["DELETE"])
-def excluir_veiculo_migracao(cliente_id, veiculo_id):
-    ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id).collection("veiculos").document(veiculo_id)
-    ref.delete()
-    return jsonify(ok=True)
-
-
-@app.route("/api/migracao/clientes/<cliente_id>/veiculos/item", methods=["POST"])
-def salvar_item_veiculo_migracao(cliente_id):
-    """Cria ou renomeia (upsert) UM veículo por vez — usado pelo autosave de Cliente/Veículo,
-    que muda a identidade do doc (id é hash de cliente+veículo, ver _veiculo_doc_id)."""
-    container_ref = db.collection(MIGRACAO_COLLECTION).document(cliente_id)
-    if not container_ref.get().exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    resultado = _salvar_item_veiculo_impl(container_ref, request.get_json(force=True) or {})
-    if resultado is None:
-        return jsonify(ok=False, error="Informe cliente e veículo."), 400
-    return jsonify(ok=True, veiculo=resultado)
-
-
-@app.route("/api/migracao/clientes/<cliente_id>", methods=["PATCH"])
-def atualizar_contagens_migracao(cliente_id):
-    """Atualiza só qtd_clientes/qtd_placas, já calculados no navegador a partir da lista de
-    veículos carregada — evita reler a subcoleção inteira a cada linha criada/excluída."""
-    data = request.get_json(force=True) or {}
-    atualizacoes = {}
-    if "qtd_clientes" in data:
-        atualizacoes["qtd_clientes"] = _para_int(data.get("qtd_clientes"))
-    if "qtd_placas" in data:
-        atualizacoes["qtd_placas"] = _para_int(data.get("qtd_placas"))
-    if not atualizacoes:
+            return jsonify(ok=False, error="Status inválido."), 400
+        campos["status"] = status
+    if not campos:
         return jsonify(ok=False, error="Nada para atualizar."), 400
-    db.collection(MIGRACAO_COLLECTION).document(cliente_id).update(atualizacoes)
-    return jsonify(ok=True, **atualizacoes)
-
-
-# --- Mesmas rotas de veículos, para uma tentativa de migração nova
-# (clientes/<id>/migracoes/<id>) — mesma lógica de _listar_veiculos_impl e cia. ---
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/veiculos", methods=["GET"])
-def listar_veiculos_cliente(cliente_id, migracao_id):
-    container_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    if not container_ref.get().exists:
-        return jsonify(ok=False, error="Migração não encontrada."), 404
-    return jsonify(ok=True, veiculos=_listar_veiculos_impl(container_ref))
-
-
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/veiculos/<veiculo_id>", methods=["PUT"])
-def atualizar_veiculo_cliente(cliente_id, migracao_id, veiculo_id):
-    ref = (
-        db.collection(CLIENTES_COLLECTION).document(cliente_id)
-        .collection("migracoes").document(migracao_id)
-        .collection("veiculos").document(veiculo_id)
-    )
-    if not ref.get().exists:
+    if not migracoes_sql.atualizar_veiculo(veiculo_id, campos):
         return jsonify(ok=False, error="Veículo não encontrado."), 404
-    atualizacoes, erro = _atualizar_veiculo_impl(ref, request.get_json(force=True) or {})
-    if erro:
-        return jsonify(ok=False, error=erro), 400
-    return jsonify(ok=True, **atualizacoes)
+    return jsonify(ok=True, **campos)
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/veiculos/<veiculo_id>", methods=["DELETE"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/<int:veiculo_id>", methods=["DELETE"])
 def excluir_veiculo_cliente(cliente_id, migracao_id, veiculo_id):
-    ref = (
-        db.collection(CLIENTES_COLLECTION).document(cliente_id)
-        .collection("migracoes").document(migracao_id)
-        .collection("veiculos").document(veiculo_id)
-    )
-    ref.delete()
+    migracoes_sql.excluir_veiculo(veiculo_id)
     return jsonify(ok=True)
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/veiculos/item", methods=["POST"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/item", methods=["POST"])
 def salvar_item_veiculo_cliente(cliente_id, migracao_id):
-    container_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    if not container_ref.get().exists:
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    resultado = _salvar_item_veiculo_impl(container_ref, request.get_json(force=True) or {})
+    resultado = migracoes_sql.salvar_item_veiculo(migracao_id, request.get_json(force=True) or {})
     if resultado is None:
         return jsonify(ok=False, error="Informe cliente e veículo."), 400
     return jsonify(ok=True, veiculo=resultado)
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/resumo-planilha", methods=["GET"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/resumo-planilha", methods=["GET"])
 def resumo_planilha_migracao_cliente(cliente_id, migracao_id):
     """Leitura "ao vivo", só-leitura (não grava nada) — chamada sozinha toda
     vez que a aba Migração da Ficha é aberta, pra mostrar o resumo por
@@ -4085,11 +3672,10 @@ def resumo_planilha_migracao_cliente(cliente_id, migracao_id):
     clicar em "Importar da planilha" (que é a ação pesada, grava os
     veículos). % vem da linha "Total" do resumo por modelo (Comunicou/Total)
     — mais leve que reler a aba Migração inteira só pra essa conta."""
-    migracao_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    doc = migracao_ref.get()
-    if not doc.exists:
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    link_planilha = (doc.to_dict() or {}).get("link_planilha")
+    link_planilha = migracao.get("link_planilha")
     if not link_planilha:
         return jsonify(ok=False, error="Essa migração não tem planilha vinculada."), 400
     try:
@@ -4110,19 +3696,18 @@ def resumo_planilha_migracao_cliente(cliente_id, migracao_id):
     return jsonify(ok=True, resumo_modelos=resumo_modelos, percentual_migracao=percentual_migracao)
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>/importar-planilha", methods=["POST"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/importar-planilha", methods=["POST"])
 def importar_veiculos_planilha_cliente(cliente_id, migracao_id):
-    """Lê a aba "Migração" da planilha vinculada e faz upsert dos veículos —
-    por (cliente, veículo), mesma chave de _veiculo_doc_id, então reimportar
-    atualiza quem já existe em vez de duplicar. Diferente de
-    _salvar_item_veiculo_impl (que preserva o status ao editar manualmente),
-    aqui o status SEMPRE vem da planilha — é lá que o time marca
-    Aguardando/Enviar/Enviado/Comunicou, então reimportar deve refletir isso."""
-    container_ref = db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id)
-    doc = container_ref.get()
-    if not doc.exists:
+    """Lê a aba "Migração" da planilha vinculada e faz upsert dos veículos por
+    (cliente, veículo) — reimportar atualiza quem já existe em vez de
+    duplicar. Diferente de salvar_item_veiculo (que preserva o status ao
+    editar manualmente), aqui o status SEMPRE vem da planilha — é lá que o
+    time marca Aguardando/Enviar/Enviado/Comunicou, então reimportar deve
+    refletir isso."""
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    link_planilha = (doc.to_dict() or {}).get("link_planilha")
+    link_planilha = migracao.get("link_planilha")
     if not link_planilha:
         return jsonify(ok=False, error="Essa migração não tem planilha vinculada."), 400
     try:
@@ -4131,18 +3716,14 @@ def importar_veiculos_planilha_cliente(cliente_id, migracao_id):
         return jsonify(ok=False, error=str(err)), 502
     except HttpError as err:
         return jsonify(ok=False, error=f"Erro do Google Sheets ao ler a planilha: {err}"), 502
-    subcolecao = container_ref.collection("veiculos")
-    for v in veiculos:
-        subcolecao.document(_veiculo_doc_id(v["cliente"], v["veiculo"])).set(v, merge=True)
+    migracoes_sql.importar_veiculos_planilha(migracao_id, veiculos)
     qtd_clientes = len({v["cliente"] for v in veiculos})
     qtd_placas = len({v["veiculo"] for v in veiculos})
     # Progresso da migração = % de veículos com status "Migrado" (equivalente
     # ao "Comunicou" da planilha) sobre o total importado agora.
     migrados = sum(1 for v in veiculos if v["status"] == "Migrado")
     percentual_migracao = round(100 * migrados / len(veiculos)) if veiculos else 0
-    container_ref.update({
-        "qtd_clientes": qtd_clientes, "qtd_placas": qtd_placas, "percentual_migracao": percentual_migracao,
-    })
+    migracoes_sql.atualizar_contagens(migracao_id, qtd_clientes, qtd_placas, percentual_migracao)
     # Resumo por modelo (tabela da aba "Infos gerais") — são fórmulas da
     # própria planilha, só lidas prontas aqui (ver docstring da função);
     # falha em lê-lo não deve derrubar a importação dos veículos, que já
@@ -4157,48 +3738,30 @@ def importar_veiculos_planilha_cliente(cliente_id, migracao_id):
     )
 
 
-@app.route("/api/clientes/<cliente_id>/migracoes/<migracao_id>", methods=["PATCH"])
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>", methods=["PATCH"])
 def atualizar_contagens_migracao_cliente(cliente_id, migracao_id):
-    """Mesmo racional de atualizar_contagens_migracao, na tentativa nova."""
+    """Atualiza só qtd_clientes/qtd_placas, já calculados no navegador a partir
+    da lista de veículos carregada — evita reler a tabela inteira a cada linha
+    criada/excluída."""
     data = request.get_json(force=True) or {}
-    atualizacoes = {}
-    if "qtd_clientes" in data:
-        atualizacoes["qtd_clientes"] = _para_int(data.get("qtd_clientes"))
-    if "qtd_placas" in data:
-        atualizacoes["qtd_placas"] = _para_int(data.get("qtd_placas"))
-    if not atualizacoes:
+    qtd_clientes = _para_int(data["qtd_clientes"]) if "qtd_clientes" in data else None
+    qtd_placas = _para_int(data["qtd_placas"]) if "qtd_placas" in data else None
+    if qtd_clientes is None and qtd_placas is None:
         return jsonify(ok=False, error="Nada para atualizar."), 400
-    db.collection(CLIENTES_COLLECTION).document(cliente_id).collection("migracoes").document(migracao_id).update(atualizacoes)
-    return jsonify(ok=True, **atualizacoes)
+    if not migracoes_sql.atualizar_contagens(migracao_id, qtd_clientes, qtd_placas):
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    resposta = {}
+    if qtd_clientes is not None:
+        resposta["qtd_clientes"] = qtd_clientes
+    if qtd_placas is not None:
+        resposta["qtd_placas"] = qtd_placas
+    return jsonify(ok=True, **resposta)
 
 
 def _contar(query):
     """Contagem agregada do Firestore (count()) — custa 1 leitura a cada 1.000
     documentos contados, em vez de 1 leitura por documento como .stream()."""
     return int(query.count().get()[0][0].value)
-
-
-def _contar_por_valor(query, campo, valores, padrao):
-    """{valor: qtd} contando só com agregação. Doc sem o campo (ou com valor
-    fora da lista) entra no `padrao` — mesma regra do `or PADRAO` de antes."""
-    try:
-        total = _contar(query)
-        contagem = {v: _contar(query.where(filter=FieldFilter(campo, "==", v))) for v in valores if v != padrao}
-        contagem[padrao] = total - sum(contagem.values())
-        return {v: contagem[v] for v in valores}, total
-    except Exception as e:  # noqa: BLE001
-        # collection_group + where precisa de índice de "grupo de coleções"
-        # no Firestore (não vem ligado por padrão). Sem ele o Firestore recusa
-        # a consulta — aí conta do jeito antigo (lendo tudo) pra não quebrar o
-        # Dashboard; a mensagem do erro traz o link pra criar o índice.
-        print(f"[dashboard] contagem agregada de '{campo}' falhou, usando leitura completa: {e}")
-        contagem = {v: 0 for v in valores}
-        total = 0
-        for d in query.stream():
-            total += 1
-            valor = d.to_dict().get(campo) or padrao
-            contagem[valor if valor in contagem else padrao] += 1
-        return contagem, total
 
 
 @app.route("/api/dashboard")
@@ -4209,26 +3772,22 @@ def dashboard_indicadores():
 
 
 def _carregar_dashboard():
-    # Tudo com contagem agregada: antes lia documento por documento (inclusive
-    # TODOS os veículos de todas as migrações) a cada abertura do Dashboard,
-    # que é a tela inicial — era a maior fonte de leitura do app.
-    total_clientes = _contar(db.collection(MIGRACAO_COLLECTION))
-    migracao_ativos = total_clientes - _contar(
-        db.collection(MIGRACAO_COLLECTION).where(filter=FieldFilter("etapa", "==", "concluido")))
-
+    # Implantação (legado, ainda em Firestore) continua com contagem agregada.
     total_implantacao = _contar(db.collection(IMPLANTACAO_CLIENTES_COLLECTION))
     implantacao_ativos = total_implantacao - _contar(
         db.collection(IMPLANTACAO_CLIENTES_COLLECTION).where(filter=FieldFilter("etapa", "==", "concluido")))
 
-    por_status, total_veiculos = _contar_por_valor(
-        db.collection_group("veiculos"), "status", STATUS_VEICULO_VALIDOS, STATUS_VEICULO_PADRAO)
+    # Migração (modelo unificado, Postgres) — mesma métrica de antes
+    # (total de tentativas rastreadas vs. quantas já concluíram todas as
+    # etapas), só que agora só sobre o Postgres (a coleção legada
+    # "migracao_clientes" foi descontinuada).
+    por_etapa_migracao, total_clientes = migracoes_sql.contar_por_etapa(MIGRACAO_ETAPAS, MIGRACAO_ETAPA_PADRAO)
+    migracao_ativos = total_clientes - por_etapa_migracao.get("concluido", 0)
 
-    # Coleção "clientes" nova (Fase de reestruturação) — roda em paralelo com os
-    # contadores antigos acima até os dados serem migrados de verdade.
-    por_estagio, _ = _contar_por_valor(
-        db.collection(CLIENTES_COLLECTION), "estagio", ESTAGIOS_CLIENTE, ESTAGIO_CLIENTE_PADRAO)
-    migracoes_por_status, _ = _contar_por_valor(
-        db.collection_group("migracoes"), "status", STATUS_MIGRACAO_VALIDOS, STATUS_MIGRACAO_PADRAO)
+    por_status, total_veiculos = migracoes_sql.contar_veiculos_por_status(STATUS_VEICULO_VALIDOS, STATUS_VEICULO_PADRAO)
+
+    por_estagio, _ = clientes_sql.contar_por_estagio(ESTAGIOS_CLIENTE, ESTAGIO_CLIENTE_PADRAO)
+    migracoes_por_status, _ = migracoes_sql.contar_por_status(STATUS_MIGRACAO_VALIDOS, STATUS_MIGRACAO_PADRAO)
     migracoes_em_andamento = migracoes_por_status["em_andamento"]
 
     return dict(
@@ -8027,64 +7586,14 @@ def conversor_download(conv_id, formato, parte):
 
 
 # --- FEED (publicações da equipe, estilo comunidade: curtidas e comentários) ---
-# Publicação pode ser geral ou vinculada a um cliente. Comentários ficam numa
-# coleção própria (filtrada por post_id), não num array dentro do post, pra um
-# post muito comentado não crescer o documento sem limite. Mesmo racional de
-# TAREFAS_COLLECTION: coleções top-level.
-FEED_POSTS_COLLECTION = "feed_posts"
-FEED_COMENTARIOS_COLLECTION = "feed_comentarios"
+# Publicação pode ser geral ou vinculada a um cliente.
 FEED_PAGINA = 20
 FEED_PAGINA_MAX = 100
 FEED_TEXTO_MAX = 2000
 
 
-def _feed_agora():
-    return datetime.now(timezone.utc)
-
-
-def _feed_iso(valor):
-    # Firestore devolve datetime; o simulador offline devolve texto ISO.
-    if not valor:
-        return ""
-    return valor if isinstance(valor, str) else valor.isoformat()
-
-
 def _feed_pode_excluir(autor_id):
     return session.get("app_usuario_id", "") == autor_id or session.get("app_usuario_perfil") == "adm"
-
-
-def _feed_serializar_post(doc):
-    dados = doc.to_dict() or {}
-    curtidas = dados.get("curtidas", [])
-    criado_em = dados.get("criado_em")
-    return {
-        "id": doc.id,
-        "texto": dados.get("texto", ""),
-        "autor_id": dados.get("autor_id", ""),
-        "autor_nome": dados.get("autor_nome", ""),
-        "cliente_id": dados.get("cliente_id", ""),
-        "cliente_nome": dados.get("cliente_nome", ""),
-        "tipo": dados.get("tipo", ""),
-        "criado_em": _feed_iso(criado_em),
-        "curtidas_total": len(curtidas),
-        "curtido_por_mim": session.get("app_usuario_id", "") in curtidas,
-        "comentarios_total": dados.get("comentarios_total", 0),
-        "pode_excluir": _feed_pode_excluir(dados.get("autor_id", "")),
-    }
-
-
-def _feed_serializar_comentario(doc):
-    dados = doc.to_dict() or {}
-    criado_em = dados.get("criado_em")
-    return {
-        "id": doc.id,
-        "post_id": dados.get("post_id", ""),
-        "texto": dados.get("texto", ""),
-        "autor_id": dados.get("autor_id", ""),
-        "autor_nome": dados.get("autor_nome", ""),
-        "criado_em": _feed_iso(criado_em),
-        "pode_excluir": _feed_pode_excluir(dados.get("autor_id", "")),
-    }
 
 
 def _feed_texto_valido(data):
@@ -8092,7 +7601,7 @@ def _feed_texto_valido(data):
     return texto if texto and len(texto) <= FEED_TEXTO_MAX else None
 
 
-#  "autor_id" fixo (não é o id de nenhum app_usuario real) — o post sai como
+#  "autor_id" fixo (não é o id de nenhum Usuario real) — o post sai como
 # publicado por uma espécie de mascote do sistema, não pela própria pessoa
 # aniversariante, então só admin apaga (ver _feed_pode_excluir).
 SASHA_AUTOR_ID = "sasha-robo"
@@ -8110,17 +7619,11 @@ def _gerar_posts_aniversario_hoje():
         if usuario.get("aniversario_post_em") == hoje_iso:
             continue
         nome = f"{usuario.get('nome', '')} {usuario.get('sobrenome', '')}".strip() or usuario.get("usuario", "")
-        db.collection(FEED_POSTS_COLLECTION).document().set({
-            "texto": f"🎉 Hoje é aniversário de {nome}! A equipe deseja um feliz aniversário!",
-            "autor_id": SASHA_AUTOR_ID,
-            "autor_nome": SASHA_AUTOR_NOME,
-            "cliente_id": "",
-            "cliente_nome": "",
-            "criado_em": _feed_agora(),
-            "curtidas": [],
-            "comentarios_total": 0,
-            "tipo": "aniversario",
-        })
+        feed_sql.criar_post(
+            texto=f"🎉 Hoje é aniversário de {nome}! A equipe deseja um feliz aniversário!",
+            autor_id=SASHA_AUTOR_ID, autor_nome=SASHA_AUTOR_NOME,
+            cliente_id=None, cliente_nome="", tipo="aniversario",
+        )
         usuarios_sql.marcar_aniversario_postado(usuario["id"], hoje_iso)
 
 
@@ -8137,16 +7640,15 @@ def listar_feed():
         limite = min(max(int(request.args.get("limite", FEED_PAGINA)), 1), FEED_PAGINA_MAX)
     except ValueError:
         limite = FEED_PAGINA
-    consulta = db.collection(FEED_POSTS_COLLECTION)
     antes_de = request.args.get("antes_de", "").strip()
+    cursor = None
     if antes_de:
         try:
             cursor = datetime.fromisoformat(antes_de)
         except ValueError:
             return jsonify(ok=False, error="Cursor inválido."), 400
-        consulta = consulta.where(filter=FieldFilter("criado_em", "<", cursor))
-    docs = list(consulta.order_by("criado_em", direction="DESCENDING").limit(limite).stream())
-    return jsonify(ok=True, posts=[_feed_serializar_post(d) for d in docs])
+    posts = feed_sql.listar_feed(cursor, limite, session.get("app_usuario_id", ""), _sou_admin())
+    return jsonify(ok=True, posts=posts)
 
 
 @app.route("/api/feed", methods=["POST"])
@@ -8157,119 +7659,99 @@ def criar_post_feed():
     if texto is None:
         return jsonify(ok=False, error=f"Escreva a publicação (até {FEED_TEXTO_MAX} caracteres)."), 400
 
-    cliente_id = str(data.get("cliente_id", "")).strip()
-    cliente_nome = ""
-    if cliente_id:
-        cliente_doc = db.collection(CLIENTES_COLLECTION).document(cliente_id).get()
-        if not cliente_doc.exists:
+    cliente_id_raw = str(data.get("cliente_id", "")).strip()
+    cliente_id, cliente_nome = None, ""
+    if cliente_id_raw:
+        if not cliente_id_raw.isdigit():
             return jsonify(ok=False, error="Cliente não encontrado."), 404
-        cliente_nome = (cliente_doc.to_dict() or {}).get("cliente", "")
+        cliente = clientes_sql.buscar_cliente_por_id(int(cliente_id_raw))
+        if not cliente:
+            return jsonify(ok=False, error="Cliente não encontrado."), 404
+        cliente_id, cliente_nome = cliente["id"], cliente["cliente"]
 
-    doc_ref = db.collection(FEED_POSTS_COLLECTION).document()
-    doc_ref.set({
-        "texto": texto,
-        "autor_id": session.get("app_usuario_id", ""),
-        "autor_nome": session.get("app_usuario_nome", ""),
-        "cliente_id": cliente_id,
-        "cliente_nome": cliente_nome,
-        "criado_em": _feed_agora(),
-        "curtidas": [],
-        "comentarios_total": 0,
-    })
-    registrar_acao(
-        acao="criar", entidade_tipo="post", entidade_id=doc_ref.id,
-        entidade_nome=texto[:80], titulo="Publicação no feed",
-        cliente_id=cliente_id or None, cliente_nome=cliente_nome,
+    post = feed_sql.criar_post(
+        texto=texto, autor_id=session.get("app_usuario_id", ""), autor_nome=session.get("app_usuario_nome", ""),
+        cliente_id=cliente_id, cliente_nome=cliente_nome,
     )
-    return jsonify(ok=True, post=_feed_serializar_post(doc_ref.get()))
+    registrar_acao(
+        acao="criar", entidade_tipo="post", entidade_id=post["id"],
+        entidade_nome=texto[:80], titulo="Publicação no feed",
+        cliente_id=cliente_id, cliente_nome=cliente_nome,
+    )
+    return jsonify(ok=True, post=post)
 
 
-@app.route("/api/feed/<post_id>", methods=["DELETE"])
+@app.route("/api/feed/<int:post_id>", methods=["DELETE"])
 @requer_operador
 def excluir_post_feed(post_id):
-    ref = db.collection(FEED_POSTS_COLLECTION).document(post_id)
-    doc = ref.get()
-    if not doc.exists:
+    post = feed_sql.buscar_post(post_id)
+    if not post:
         return jsonify(ok=False, error="Publicação não encontrada."), 404
-    dados = doc.to_dict() or {}
-    if not _feed_pode_excluir(dados.get("autor_id", "")):
+    if not _feed_pode_excluir(post.get("autor_id", "")):
         return jsonify(ok=False, error="Só quem publicou (ou um admin) pode excluir."), 403
-
-    # Comentários não têm como sobreviver sem o post — apagados junto.
-    for comentario in db.collection(FEED_COMENTARIOS_COLLECTION).where(filter=FieldFilter("post_id", "==", post_id)).stream():
-        comentario.reference.delete()
-    ref.delete()
+    # Comentários/curtidas somem junto via ON DELETE CASCADE.
+    feed_sql.excluir_post(post_id)
     registrar_acao(
         acao="excluir", entidade_tipo="post", entidade_id=post_id,
-        entidade_nome=str(dados.get("texto", ""))[:80], titulo="Publicação excluída do feed",
-        cliente_id=dados.get("cliente_id") or None, cliente_nome=dados.get("cliente_nome", ""),
+        entidade_nome=str(post.get("texto", ""))[:80], titulo="Publicação excluída do feed",
+        cliente_id=post.get("cliente_id") or None, cliente_nome=post.get("cliente_nome", ""),
     )
     return jsonify(ok=True)
 
 
-@app.route("/api/feed/<post_id>/curtir", methods=["POST"])
+@app.route("/api/feed/<int:post_id>/curtir", methods=["POST"])
 @requer_operador
 def curtir_post_feed(post_id):
-    ref = db.collection(FEED_POSTS_COLLECTION).document(post_id)
-    doc = ref.get()
-    if not doc.exists:
+    if not feed_sql.buscar_post(post_id):
         return jsonify(ok=False, error="Publicação não encontrada."), 404
-    usuario_id = session.get("app_usuario_id", "")
-    curtidas = (doc.to_dict() or {}).get("curtidas", [])
-    # ArrayUnion/ArrayRemove são atômicos no Firestore: dois cliques quase
-    # simultâneos de pessoas diferentes não se sobrescrevem.
-    if usuario_id in curtidas:
-        ref.update({"curtidas": ArrayRemove([usuario_id])})
-        return jsonify(ok=True, curtido_por_mim=False, curtidas_total=len(curtidas) - 1)
-    ref.update({"curtidas": ArrayUnion([usuario_id])})
-    return jsonify(ok=True, curtido_por_mim=True, curtidas_total=len(curtidas) + 1)
+    curtido, total = feed_sql.alternar_curtida(post_id, session.get("app_usuario_id", ""))
+    return jsonify(ok=True, curtido_por_mim=curtido, curtidas_total=total)
 
 
-@app.route("/api/feed/<post_id>/comentarios", methods=["GET"])
+@app.route("/api/feed/<int:post_id>/comentarios", methods=["GET"])
 def listar_comentarios_feed(post_id):
-    docs = db.collection(FEED_COMENTARIOS_COLLECTION).where(filter=FieldFilter("post_id", "==", post_id)).stream()
-    comentarios = [_feed_serializar_comentario(d) for d in docs]
-    comentarios.sort(key=lambda c: c["criado_em"])
+    comentarios = feed_sql.listar_comentarios(post_id)
+    for c in comentarios:
+        c["pode_excluir"] = _feed_pode_excluir(c.get("autor_id", ""))
     return jsonify(ok=True, comentarios=comentarios)
 
 
-@app.route("/api/feed/<post_id>/comentarios", methods=["POST"])
+@app.route("/api/feed/<int:post_id>/comentarios", methods=["POST"])
 @requer_operador
 def criar_comentario_feed(post_id):
     data = request.get_json(force=True) or {}
     texto = _feed_texto_valido(data)
     if texto is None:
         return jsonify(ok=False, error=f"Escreva o comentário (até {FEED_TEXTO_MAX} caracteres)."), 400
-    ref_post = db.collection(FEED_POSTS_COLLECTION).document(post_id)
-    if not ref_post.get().exists:
+    if not feed_sql.buscar_post(post_id):
         return jsonify(ok=False, error="Publicação não encontrada."), 404
 
-    doc_ref = db.collection(FEED_COMENTARIOS_COLLECTION).document()
-    doc_ref.set({
-        "post_id": post_id,
-        "texto": texto,
-        "autor_id": session.get("app_usuario_id", ""),
-        "autor_nome": session.get("app_usuario_nome", ""),
-        "criado_em": _feed_agora(),
-    })
-    ref_post.update({"comentarios_total": Increment(1)})
-    return jsonify(ok=True, comentario=_feed_serializar_comentario(doc_ref.get()))
+    comentario = feed_sql.criar_comentario(
+        post_id, texto, session.get("app_usuario_id", ""), session.get("app_usuario_nome", ""),
+    )
+    comentario["pode_excluir"] = True  # quem comenta sempre pode excluir o próprio comentário
+    return jsonify(ok=True, comentario=comentario)
 
 
-@app.route("/api/feed/comentarios/<comentario_id>", methods=["DELETE"])
+@app.route("/api/feed/comentarios/<int:comentario_id>", methods=["DELETE"])
 @requer_operador
 def excluir_comentario_feed(comentario_id):
-    ref = db.collection(FEED_COMENTARIOS_COLLECTION).document(comentario_id)
-    doc = ref.get()
-    if not doc.exists:
+    comentario = feed_sql.buscar_comentario(comentario_id)
+    if not comentario:
         return jsonify(ok=False, error="Comentário não encontrado."), 404
-    dados = doc.to_dict() or {}
-    if not _feed_pode_excluir(dados.get("autor_id", "")):
+    if not _feed_pode_excluir(comentario.get("autor_id", "")):
         return jsonify(ok=False, error="Só quem comentou (ou um admin) pode excluir."), 403
-    ref.delete()
-    db.collection(FEED_POSTS_COLLECTION).document(dados.get("post_id", "")).update({"comentarios_total": Increment(-1)})
+    feed_sql.excluir_comentario(comentario_id)
     return jsonify(ok=True)
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # threaded=True: sem isso, o servidor de dev do Werkzeug atende 1
+    # requisição POR VEZ pro processo inteiro — qualquer chamada lenta em
+    # andamento (ex.: sincronizar planilha de CS, criar planilha no Drive,
+    # qualquer chamada à API do Google Sheets/Drive) prende TODAS as outras
+    # abas/requisições até terminar, inclusive rotas que já são rápidas
+    # (como /api/migracao/clientes). É a causa mais provável de "às vezes
+    # trava, às vezes não" no ambiente local — em produção isso é papel do
+    # gunicorn (múltiplos workers), não desse app.run().
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
