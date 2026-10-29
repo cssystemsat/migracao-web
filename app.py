@@ -3,6 +3,7 @@ import io
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import unicodedata
@@ -277,6 +278,52 @@ def criar_app_usuario():
         id=novo["id"], usuario=novo["usuario"], perfil=novo["perfil"], area=novo["area"] or "",
         nome_responsavel=novo["nome_responsavel"],
     ))
+
+
+def _slug_usuario(nome):
+    """Deriva um login a partir do nome completo (ex.: "João da Silva" ->
+    "joao.da.silva") — usado só na criação em massa, onde não faz sentido
+    pedir um login por pessoa (ex.: importar a lista do Comercial)."""
+    sem_acento = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-zA-Z0-9]+", ".", sem_acento).strip(".").lower()
+    return slug or "usuario"
+
+
+@app.route("/api/app-usuarios/lote", methods=["POST"])
+def criar_app_usuarios_lote():
+    """Cria vários usuários de uma vez a partir só do nome (ex.: colar a
+    lista inteira do Comercial) — login e senha são gerados automaticamente,
+    já que essas pessoas não vão acessar a ferramenta por enquanto; a
+    finalidade imediata é só aparecerem nos selects de Responsável/Consultor
+    Comercial (ver listar_app_usuarios_opcoes). Quando alguém da lista
+    precisar logar de verdade, um admin edita o usuário e define a senha
+    pela tela normal."""
+    if not _sou_admin():
+        return jsonify(ok=False, error="Apenas administradores podem gerenciar usuários."), 403
+    data = request.get_json(silent=True) or {}
+    nomes = [str(n).strip() for n in (data.get("nomes") or []) if str(n).strip()]
+    if not nomes:
+        return jsonify(ok=False, error="Informe pelo menos um nome."), 400
+    perfil = str(data.get("perfil", "")).strip()
+    if perfil not in PERFIS_USUARIO:
+        perfil = "visualizacao"
+    area = str(data.get("area", "")).strip()
+    if area not in AREAS_USUARIO:
+        area = None
+
+    criados = []
+    for nome in nomes:
+        base = _slug_usuario(nome)
+        candidato = base
+        sufixo = 2
+        while usuarios_sql.buscar_usuario(candidato):
+            candidato = f"{base}{sufixo}"
+            sufixo += 1
+        novo = usuarios_sql.criar_usuario(
+            candidato, secrets.token_urlsafe(12), perfil=perfil, area=area, nome_responsavel=nome,
+        )
+        criados.append({"usuario": novo["usuario"], "nome_responsavel": nome})
+    return jsonify(ok=True, criados=criados)
 
 
 @app.route("/api/app-usuarios/<usuario_id>", methods=["PUT"])

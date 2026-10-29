@@ -1925,6 +1925,30 @@
               <button type="button" id="btn-cancelar-edicao-usuario" class="btn-secondary hidden">Cancelar edição</button>
             </div>
           </form>
+
+          <button type="button" id="btn-usuarios-lote-toggle" class="btn-secondary" style="margin-top:8px;">Adicionar vários de uma vez</button>
+          <div id="usuarios-lote-painel" class="hidden" style="margin-top:12px;">
+            <p class="placeholder">Cole um nome por linha (ex.: a lista do Comercial). Login e senha são gerados automaticamente — essas pessoas não conseguem entrar na ferramenta até um admin editar o usuário e definir uma senha.</p>
+            <textarea id="usuarios-lote-nomes" rows="6" placeholder="João da Silva&#10;Maria Souza" style="width:100%;"></textarea>
+            <div class="form-credencial-botoes" style="margin-top:8px;">
+              <select id="usuarios-lote-perfil" title="Perfil de acesso pros usuários criados">
+                <option value="visualizacao" selected>Visualização — só lê, nenhuma ação</option>
+                <option value="analista">Analista — opera só nos clientes da própria carteira</option>
+                <option value="adm">Administrador — acesso total, gerencia outros usuários</option>
+              </select>
+              <select id="usuarios-lote-area" title="Área desses usuários">
+                <option value="">Sem área definida</option>
+                <option value="CS - Implantação">CS - Implantação</option>
+                <option value="CS - Onboarding">CS - Onboarding</option>
+                <option value="CS - Ongoing">CS - Ongoing</option>
+                <option value="Treinamento">Treinamento</option>
+                <option value="Suporte">Suporte</option>
+                <option value="Comercial" selected>Comercial</option>
+              </select>
+              <button type="button" id="btn-usuarios-lote-criar" class="btn-primary">Criar usuários</button>
+            </div>
+            <p id="usuarios-lote-resultado" class="placeholder hidden"></p>
+          </div>
         </div>
 
         <div id="config-painel-integracoes" class="hidden">

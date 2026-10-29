@@ -16872,6 +16872,52 @@ formNovoUsuario.addEventListener("submit", async (e) => {
   }
 });
 
+// --- Adicionar usuários em massa (ex.: colar a lista inteira do Comercial) ---
+// Login e senha são gerados pelo backend — essas pessoas não entram na
+// ferramenta até um admin editar o usuário e definir senha pela tela normal.
+const btnUsuariosLoteToggle = el("btn-usuarios-lote-toggle");
+const usuariosLotePainel = el("usuarios-lote-painel");
+const usuariosLoteNomes = el("usuarios-lote-nomes");
+const usuariosLotePerfil = el("usuarios-lote-perfil");
+const usuariosLoteArea = el("usuarios-lote-area");
+const btnUsuariosLoteCriar = el("btn-usuarios-lote-criar");
+const usuariosLoteResultado = el("usuarios-lote-resultado");
+
+function mostrarResultadoUsuariosLote(msg, erro) {
+  usuariosLoteResultado.textContent = msg;
+  usuariosLoteResultado.style.color = erro ? "#b91c1c" : "";
+  usuariosLoteResultado.style.whiteSpace = "pre-line";
+  usuariosLoteResultado.classList.toggle("hidden", !msg);
+}
+
+btnUsuariosLoteToggle.addEventListener("click", () => {
+  usuariosLotePainel.classList.toggle("hidden");
+  mostrarResultadoUsuariosLote("");
+});
+
+btnUsuariosLoteCriar.addEventListener("click", async () => {
+  const nomes = usuariosLoteNomes.value.split("\n").map((n) => n.trim()).filter(Boolean);
+  if (!nomes.length) return mostrarResultadoUsuariosLote("Cole pelo menos um nome.", true);
+  btnUsuariosLoteCriar.disabled = true;
+  try {
+    const r = await fetch("/api/app-usuarios/lote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nomes, perfil: usuariosLotePerfil.value, area: usuariosLoteArea.value }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return mostrarResultadoUsuariosLote(data.error || "Falha ao criar usuários.", true);
+    const lista = data.criados.map((c) => `${c.nome_responsavel} → login "${c.usuario}"`).join("\n");
+    mostrarResultadoUsuariosLote(`${data.criados.length} usuário(s) criado(s):\n${lista}`, false);
+    usuariosLoteNomes.value = "";
+    await carregarAppUsuarios();
+  } catch (err) {
+    mostrarResultadoUsuariosLote(String(err), true);
+  } finally {
+    btnUsuariosLoteCriar.disabled = false;
+  }
+});
+
 async function excluirAppUsuario(id) {
   if (!confirm("Excluir este usuário?")) return;
   try {
