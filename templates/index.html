@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Migração {{ app_version }} — Web</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Inter agora é self-hosted (ver @font-face em style.css) — não depende
+       mais do CDN do Google, só os ícones (Material Symbols) ainda vêm de lá. -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
   <script>
     // Aplica o tema salvo antes da página desenhar, pra não piscar claro e depois escurecer.
     try {
@@ -17,63 +22,112 @@
 </head>
 <body data-usuario-id="{{ app_usuario_id }}" data-usuario-responsavel="{{ app_usuario_responsavel }}" data-usuario-perfil="{{ app_usuario_perfil }}">
   <nav class="sidebar" id="sidebar">
-    <div class="sidebar-topo">
+    <div class="sidebar-topo-linha">
       <button type="button" class="sidebar-toggle" id="sidebar-toggle" title="Recolher menu" aria-label="Recolher menu" aria-expanded="true">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
       </button>
-      <button type="button" class="sidebar-logo" id="sidebar-logo" title="Ir para o Dashboard">
-        <span class="sidebar-logo-texto">Migração <span>{{ app_version }}</span></span>
-      </button>
+      <div class="sidebar-marca">
+        <img class="sidebar-marca-imagem sidebar-marca-clara" src="{{ url_for('static', filename='systemsat-logo-claro.png') }}" alt="Systemsat">
+        <img class="sidebar-marca-imagem sidebar-marca-escura" src="{{ url_for('static', filename='systemsat-logo-escuro.png') }}" alt="Systemsat">
+      </div>
     </div>
-
-    <button type="button" class="sidebar-voltar hidden" id="sidebar-voltar" title="Voltar">
-      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+    <button type="button" class="sidebar-voltar" id="sidebar-voltar" title="Voltar para o Dashboard" aria-label="Voltar para o Dashboard">
+      <span class="material-symbols-outlined sidebar-item-icone">arrow_back</span>
       <span class="sidebar-item-texto">Voltar</span>
     </button>
 
-    <div id="sidebar-raiz">
+    <div id="sidebar-raiz" role="navigation" aria-label="Navegação geral">
+      <div class="sidebar-secao-titulo">Navegação geral</div>
       <button type="button" class="sidebar-item" id="nav-dashboard" title="Dashboard">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path><path d="M10 20v-6h4v6"></path></svg>
+        <span class="material-symbols-outlined sidebar-item-icone">grid_view</span>
         <span class="sidebar-item-texto">Dashboard</span>
       </button>
       <button type="button" class="sidebar-item" id="nav-feed" title="Feed">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        <span class="material-symbols-outlined sidebar-item-icone">dynamic_feed</span>
         <span class="sidebar-item-texto">Feed</span>
       </button>
-      <button type="button" class="sidebar-item" id="nav-implantacao" title="Controle de Implantação">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.2"></rect><rect x="10" y="4" width="5" height="10" rx="1.2"></rect><rect x="17" y="4" width="4" height="13" rx="1.2"></rect></svg>
-        <span class="sidebar-item-texto">Controle de Implantação</span>
-      </button>
-      <button type="button" class="sidebar-item" id="nav-migracao" title="Controle de Migração">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 20 7 16 11"></polyline><line x1="4" y1="7" x2="20" y2="7"></line><polyline points="8 13 4 17 8 21"></polyline><line x1="20" y1="17" x2="4" y2="17"></line></svg>
-        <span class="sidebar-item-texto">Controle de Migração</span>
-      </button>
-      <button type="button" class="sidebar-item" id="nav-ferramentas" title="Ferramentas Auxiliares">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line><circle cx="9" cy="6" r="2"></circle><circle cx="15" cy="12" r="2"></circle><circle cx="9" cy="18" r="2"></circle></svg>
-        <span class="sidebar-item-texto">Ferramentas Auxiliares</span>
-      </button>
+      <div class="sidebar-grupo">
+        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-implantacao" data-sidebar-group="implantacao" aria-controls="sidebar-subnav-implantacao" aria-expanded="true" title="Expandir ou recolher Implantação">
+          <span class="material-symbols-outlined sidebar-item-icone">tune</span>
+          <span class="sidebar-item-texto">Implantação</span>
+          <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
+        </button>
+        <div class="sidebar-subnav" id="sidebar-subnav-implantacao" role="group" aria-label="Páginas de Implantação">
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-implantacao" title="Controle de Implantação">
+            <span class="material-symbols-outlined sidebar-item-icone">checklist</span>
+            <span class="sidebar-item-texto">Controle de Implantação</span>
+          </button>
+        </div>
+      </div>
+      <div class="sidebar-grupo">
+        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-migracao" data-sidebar-group="migracao" aria-controls="sidebar-subnav-migracao" aria-expanded="true" title="Expandir ou recolher Migração">
+          <span class="material-symbols-outlined sidebar-item-icone">sync_alt</span>
+          <span class="sidebar-item-texto">Migração</span>
+          <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
+        </button>
+        <div class="sidebar-subnav" id="sidebar-subnav-migracao" role="group" aria-label="Páginas de Migração">
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-migracao" title="Controle de Migração">
+            <span class="material-symbols-outlined sidebar-item-icone">swap_horiz</span>
+            <span class="sidebar-item-texto">Controle de Migração</span>
+          </button>
+        </div>
+      </div>
+      <div class="sidebar-grupo">
+        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-ferramentas" data-sidebar-group="ferramentas" aria-controls="sidebar-subnav-ferramentas" aria-expanded="true" title="Expandir ou recolher Ferramentas Auxiliares">
+          <span class="material-symbols-outlined sidebar-item-icone">build_circle</span>
+          <span class="sidebar-item-texto">Ferramentas Auxiliares</span>
+          <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
+        </button>
+        <div class="sidebar-subnav" id="sidebar-subnav-ferramentas" role="group" aria-label="Páginas de Ferramentas Auxiliares">
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-tool-ferramentas" title="Visão geral das Ferramentas Auxiliares">
+            <span class="material-symbols-outlined sidebar-item-icone">apps</span>
+            <span class="sidebar-item-texto">Ferramentas Auxiliares</span>
+          </button>
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-tool-central-importacao" data-ferramenta-sub="central-importacao" title="Central de Importação SSX">
+            <span class="material-symbols-outlined sidebar-item-icone">grid_view</span>
+            <span class="sidebar-item-texto">Central de Importação SSX</span>
+          </button>
+          {% if app_usuario_perfil != 'visualizacao' %}
+            <button type="button" class="sidebar-item sidebar-subitem" id="nav-tool-comandos" data-ferramenta-sub="comandos" title="Envio de Comandos">
+              <span class="material-symbols-outlined sidebar-item-icone">send</span>
+              <span class="sidebar-item-texto">Envio de Comandos</span>
+            </button>
+          {% endif %}
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-tool-quebra-string" data-ferramenta-sub="quebra-string" title="Quebra-String">
+            <span class="material-symbols-outlined sidebar-item-icone">code</span>
+            <span class="sidebar-item-texto">Quebra-String</span>
+          </button>
+        </div>
+      </div>
     </div>
 
-    <div id="sidebar-cliente" class="hidden">
-      <div class="sidebar-cliente-nome" id="ficha-sidebar-nome"></div>
+    <div id="sidebar-cliente" class="hidden" role="navigation" aria-label="Contexto operacional do cliente">
+      <div class="sidebar-cliente-card">
+        <div class="sidebar-cliente-topo">
+          <span class="sidebar-cliente-rotulo">Cliente em foco</span>
+          <span class="sidebar-cliente-ativo">Ativo</span>
+        </div>
+        <div class="sidebar-cliente-nome" id="ficha-sidebar-nome"></div>
+      </div>
+      <div class="sidebar-secao-titulo">Contexto operacional</div>
       <button type="button" class="sidebar-item" id="ficha-aba-geral" title="Visão Geral">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path><path d="M10 20v-6h4v6"></path></svg>
+        <span class="material-symbols-outlined sidebar-item-icone">space_dashboard</span>
         <span class="sidebar-item-texto">Visão Geral</span>
       </button>
       <button type="button" class="sidebar-item" id="ficha-aba-implantacao" title="Implantação">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 4V3h6v1"></path><line x1="9" y1="10" x2="15" y2="10"></line><line x1="9" y1="14" x2="15" y2="14"></line><line x1="9" y1="18" x2="12" y2="18"></line></svg>
+        <span class="material-symbols-outlined sidebar-item-icone">rocket_launch</span>
         <span class="sidebar-item-texto">Implantação</span>
       </button>
       <button type="button" class="sidebar-item" id="ficha-aba-marcos" title="Marcos">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="21" x2="5" y2="3"></line><path d="M5 4h12l-2.5 4L17 12H5"></path></svg>
+        <span class="material-symbols-outlined sidebar-item-icone">flag</span>
         <span class="sidebar-item-texto">Marcos</span>
       </button>
       <button type="button" class="sidebar-item hidden" id="ficha-aba-migracao" title="Migração">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 20 7 16 11"></polyline><line x1="4" y1="7" x2="20" y2="7"></line><polyline points="8 13 4 17 8 21"></polyline><line x1="20" y1="17" x2="4" y2="17"></line></svg>
+        <span class="material-symbols-outlined sidebar-item-icone">swap_horiz</span>
         <span class="sidebar-item-texto">Migração</span>
       </button>
       <button type="button" class="sidebar-item" id="ficha-aba-historico" title="Histórico">
-        <svg class="sidebar-item-icone" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 16 14"></polyline></svg>
+        <span class="material-symbols-outlined sidebar-item-icone">history</span>
         <span class="sidebar-item-texto">Histórico</span>
       </button>
     </div>
@@ -81,19 +135,41 @@
 
   <header class="topbar">
     <div class="topbar-esquerda">
-      <h1 class="topbar-titulo" id="topbar-titulo"></h1>
+      <button type="button" class="topbar-marca" id="topbar-central-crc" title="Ir para o Dashboard" aria-label="Central CRC — ir para o Dashboard">
+        <span class="topbar-marca-icone"><span class="material-symbols-outlined">hub</span></span>
+        <span class="topbar-marca-nome">Central CRC</span>
+      </button>
+      <span class="topbar-divisor topbar-divisor-sm"></span>
+      <nav class="topbar-breadcrumb" aria-label="Local atual">
+        <a href="#" id="topbar-breadcrumb-raiz" class="topbar-breadcrumb-raiz hidden">Clientes</a>
+        <span class="topbar-breadcrumb-sep hidden" id="topbar-breadcrumb-sep">/</span>
+        <span class="topbar-breadcrumb-atual" id="topbar-titulo"></span>
+      </nav>
+    </div>
+    <div class="topbar-direita">
       <div class="topbar-busca">
         <svg class="topbar-busca-icone" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>
         <input type="text" id="topbar-busca-input" placeholder="Ir para cliente…" autocomplete="off" title="Abre a Ficha do cliente (Ctrl+K)">
         <kbd class="topbar-busca-atalho">Ctrl K</kbd>
         <div id="topbar-busca-resultados" class="busca-global-resultados hidden"></div>
       </div>
-    </div>
-    <div class="topbar-direita">
+      <button type="button" class="topbar-icone-btn" id="topbar-tema-toggle" title="Alternar tema escuro" aria-label="Alternar tema escuro">
+        <span class="material-symbols-outlined" id="topbar-tema-icone">dark_mode</span>
+      </button>
+      <button type="button" class="topbar-icone-btn" id="topbar-notificacoes" title="Notificações (em breve)" aria-label="Notificações" disabled>
+        <span class="material-symbols-outlined">notifications</span>
+      </button>
+      <span class="topbar-divisor"></span>
       <div class="app-usuario-menu">
-        <button type="button" id="btn-app-menu" class="btn-engrenagem-usuario" title="Perfil e configurações">
-          <img id="topbar-avatar-img" src="{{ url_for('foto_meu_perfil', v=app_usuario_foto_versao) if app_usuario_tem_foto else '' }}" alt="" class="topbar-avatar-img{{ '' if app_usuario_tem_foto else ' hidden' }}">
-          <svg id="topbar-avatar-placeholder" class="topbar-avatar-placeholder{{ '' if not app_usuario_tem_foto else ' hidden' }}" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"></path></svg>
+        <button type="button" id="btn-app-menu" class="topbar-usuario-btn" title="Perfil e configurações">
+          <span class="topbar-avatar">
+            <img id="topbar-avatar-img" src="{{ url_for('foto_meu_perfil', v=app_usuario_foto_versao) if app_usuario_tem_foto else '' }}" alt="" class="topbar-avatar-img{{ '' if app_usuario_tem_foto else ' hidden' }}">
+            <svg id="topbar-avatar-placeholder" class="topbar-avatar-placeholder{{ '' if not app_usuario_tem_foto else ' hidden' }}" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"></path></svg>
+          </span>
+          <span class="topbar-usuario-texto">
+            <span class="topbar-usuario-nome">{{ app_usuario }}</span>
+            <span class="topbar-usuario-cargo" id="topbar-usuario-cargo"></span>
+          </span>
         </button>
         <div id="app-menu-dropdown" class="app-menu-dropdown hidden">
           <div class="app-menu-usuario">
@@ -2678,6 +2754,8 @@
         <h3 id="veiculos-migracao-titulo">Veículos</h3>
         <div class="modal-header-acoes">
           <span id="veiculos-migracao-envio-status" class="veiculos-migracao-envio-status"></span>
+          <button id="veiculos-migracao-sincronizar-ssx" class="btn-secondary">Sincronizar com SSX</button>
+          <button id="veiculos-migracao-verificar-comunicacao" class="btn-secondary">Verificar comunicação</button>
           <button id="veiculos-migracao-selecionar-todos" class="btn-secondary">Selecionar todos</button>
           <button id="veiculos-migracao-enviar-selecionados" class="btn-primary">Enviar</button>
           <button id="veiculos-migracao-fechar" class="btn-secondary">Fechar</button>
@@ -2775,6 +2853,24 @@
         <button type="button" id="btn-atalhos-excluir-cancelar" class="btn-aviso-erro-cancelar">Cancelar</button>
       </div>
       <button id="atalhos-excluir-fechar-x" class="modal-aviso-erro-fechar" aria-label="Fechar">✕</button>
+    </div>
+  </div>
+
+  <div id="overlay-sincronizar-veiculos-ssx" class="overlay hidden">
+    <div class="modal modal-aviso-erro">
+      <div class="modal-aviso-erro-corpo">
+        <span class="modal-aviso-erro-icone" aria-hidden="true">!</span>
+        <div>
+          <h3 class="modal-aviso-erro-titulo">Confirmar sincronização com a SSX</h3>
+          <p id="sincvei-resumo-texto" class="modal-aviso-erro-texto"></p>
+        </div>
+      </div>
+      <div id="sincvei-log" class="log-massa"></div>
+      <div class="modal-aviso-erro-acoes">
+        <button type="button" id="btn-sincvei-confirmar" class="btn-primary">Atualizar</button>
+        <button type="button" id="btn-sincvei-cancelar" class="btn-aviso-erro-cancelar">Cancelar</button>
+      </div>
+      <button id="sincvei-fechar-x" class="modal-aviso-erro-fechar" aria-label="Fechar">✕</button>
     </div>
   </div>
 

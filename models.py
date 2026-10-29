@@ -11,7 +11,7 @@ historico_cliente) são as que ficam 100% dentro deste banco.
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Index, JSON, Numeric, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, JSON, Numeric, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -345,6 +345,22 @@ class Migracao(Base):
     )
 
 
+class MigracaoSsxSyncJob(Base):
+    """Prévia de sincronização SSX persistida até o usuário aplicá-la."""
+
+    __tablename__ = "migracao_ssx_sync_jobs"
+
+    job_id: Mapped[str] = mapped_column(primary_key=True)
+    migracao_id: Mapped[int] = mapped_column(
+        ForeignKey("migracoes.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(default="rodando", index=True)
+    diff: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    erro: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resultado: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_agora, index=True)
+
+
 class MigracaoVeiculo(Base):
     __tablename__ = "migracao_veiculos"
 
@@ -362,6 +378,24 @@ class MigracaoVeiculo(Base):
     comando: Mapped[str] = mapped_column(default="")
     ultima_comunicacao: Mapped[str] = mapped_column(default="")
     status: Mapped[str] = mapped_column(default="Aguardando")
+
+    # Preenchidos a partir do match com a SSX (Vehicle/List, por
+    # id_equipamento == IdTracker — ver ssx_veiculos_sync.py) — nulos até a
+    # primeira sincronização encontrar o equipamento lá.
+    # codigo_integracao_rastreador_ssx é só informativo (TrackerIntegrationCode,
+    # opcional na SSX) — nunca usado pra casar linha nenhuma.
+    codigo_integracao_veiculo_ssx: Mapped[str | None] = mapped_column(nullable=True)
+    codigo_integracao_rastreador_ssx: Mapped[str | None] = mapped_column(nullable=True)
+    # ClientTradingName da SSX — nosso "cliente" (nome do titular) é texto
+    # livre da planilha; a central tem vários clientes finais (ver plano), e
+    # esse campo mostra de qual cliente SSX esse veículo é de fato.
+    cliente_ssx: Mapped[str | None] = mapped_column(nullable=True)
+
+    # Marco "já comunicou pela primeira vez depois da migração" (não é
+    # status de saúde contínuo — isso é papel do próprio SSX). Uma vez
+    # True, nunca volta pra False.
+    migracao_confirmada_ssx: Mapped[bool] = mapped_column(default=False)
+    migracao_confirmada_em: Mapped[str | None] = mapped_column(nullable=True)
 
     __table_args__ = (
         # Substitui o hash determinístico (cliente+veiculo) que era o id do

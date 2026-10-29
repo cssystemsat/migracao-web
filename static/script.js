@@ -26,6 +26,9 @@ const USUARIO_ID_ATUAL = document.body.dataset.usuarioId || "";
 // clara em vez do erro cru "Unexpected token '<'".
 async function parseJsonResponse(resp) {
   const texto = await resp.text();
+  if (resp.redirected && new URL(resp.url).pathname === "/login-app") {
+    throw new Error("Sua sessão expirou. Entre novamente e repita a operação.");
+  }
   try {
     return JSON.parse(texto);
   } catch (err) {
@@ -3744,13 +3747,14 @@ const veiculosMigracaoEnvioStatus = el("veiculos-migracao-envio-status");
 const inputVeiculosMigracaoBusca = el("veiculos-migracao-busca");
 const chipsVeiculosMigracaoStatus = el("veiculos-migracao-chips-status");
 
-const STATUS_VEICULO_OPCOES = ["Aguardando", "Enviar", "Enviado", "Migrado", "Cancelado"];
+const STATUS_VEICULO_OPCOES = ["Aguardando", "Enviar", "Enviado", "Migrado", "Cancelado", "Sem rastreador"];
 const STATUS_VEICULO_CLASSE = {
   Aguardando: "linha-status-aguardando",
   Enviar: "linha-status-enviar",
   Enviado: "linha-status-enviado",
   Migrado: "linha-status-migrado",
   Cancelado: "linha-status-cancelado",
+  "Sem rastreador": "linha-status-sem-rastreador",
 };
 // Caminho base da API pra essa tela — muda conforme de onde ela foi aberta:
 // tela antiga de Migração solta (/api/migracao/clientes/<id>) ou a tentativa
@@ -3759,9 +3763,30 @@ const STATUS_VEICULO_CLASSE = {
 // é o que permite as duas telas reaproveitarem o mesmo módulo sem duplicar nada.
 let veiculosMigracaoBaseUrl = null;
 let veiculosMigracaoClienteIdAtual = null; // só de referência/depuração; não usado em nenhuma URL
+// Só a PÁGINA atual, filtrada/ordenada pelo backend — ver listar_veiculos_pagina
+// em migracoes_sql.py. Central grande (ex. Cartracking) travava a tela quando
+// isso guardava a lista inteira e o filtro/ordenação rodava em JS sobre tudo.
 let veiculosMigracaoDadosAtuais = [];
+// Linhas "novas" (ainda sem id real) adicionadas por "Adicionar linha" — ficam
+// fora da paginação do servidor (nunca existiram lá) e são sempre mostradas
+// junto da página 0 até serem salvas (ver salvarItemVeiculo).
+let veiculosMigracaoLinhasNovas = [];
+let veiculosMigracaoTotal = 0;
+let veiculosMigracaoResumo = { por_status: {}, total: 0, por_cliente: {} };
 let veiculosMigracaoFiltroTexto = "";
 let veiculosMigracaoFiltroStatus = ""; // "" = todos
+// Filtro "contém" por coluna, estilo Excel (ver trFiltros em
+// renderTabelaVeiculosMigracao) — {campo: texto}, combinado em E entre si e
+// com busca/status. "col_<campo>" na querystring de GET /veiculos.
+let veiculosMigracaoFiltrosColuna = {};
+let veiculosMigracaoFiltroColunaAtivo = null; // campo sendo digitado agora, pra devolver o foco depois do re-render
+let veiculosMigracaoOrdemCampo = null; // null = ordem padrão do backend (cliente, veiculo)
+let veiculosMigracaoOrdemAsc = true;
+let veiculosMigracaoPagina = 0;
+let veiculosMigracaoDebounceBusca = null;
+let veiculosMigracaoDebounceFiltroColuna = null;
+const VEICULOS_MIGRACAO_POR_PAGINA = 100;
+const veiculosMigracaoSelecionados = new Set();
 
 el("veiculos-migracao-fechar").addEventListener("click", () => overlayVeiculosMigracao.classList.add("hidden"));
 async function carregarModelosCacheParaVeiculos(baseUrl) {
@@ -3782,7 +3807,14 @@ async function abrirVeiculosPorBaseUrl(baseUrl, clienteId, titulo) {
   veiculosMigracaoEnvioStatus.textContent = "";
   btnSelecionarTodosVeiculos.textContent = "Selecionar todos";
   veiculosMigracaoFiltroTexto = "";
+  veiculosMigracaoFiltrosColuna = {};
+  veiculosMigracaoFiltroColunaAtivo = null;
   veiculosMigracaoFiltroStatus = "";
+  veiculosMigracaoOrdemCampo = null;
+  veiculosMigracaoOrdemAsc = true;
+  veiculosMigracaoPagina = 0;
+  veiculosMigracaoLinhasNovas = [];
+  veiculosMigracaoSelecionados.clear();
   inputVeiculosMigracaoBusca.value = "";
   overlayVeiculosMigracao.classList.remove("hidden");
   await carregarModelosCacheParaVeiculos(baseUrl);
@@ -3818,49 +3850,95 @@ function criarLinhaBrancoVeiculo() {
   };
 }
 
+// Busca, ordena e pagina no SERVIDOR (ver listar_veiculos_pagina em
+// migracoes_sql.py) — lê o estado atual de filtro/ordenação/página das
+// variáveis globais (veiculosMigracaoFiltro*/Ordem*/Pagina). Chamado tanto na
+// abertura inicial quanto a cada troca de filtro/ordenação/página; quem
+// muda esse estado é responsável por chamar isso depois (ver chips de
+// status, clique no cabeçalho da coluna, busca e os botões de paginação).
 async function recarregarVeiculosMigracao(permitirLinhasBranco = false) {
   try {
-    const r = await fetch(`${veiculosMigracaoBaseUrl}/veiculos`);
+    const params = new URLSearchParams({
+      pagina: String(veiculosMigracaoPagina),
+      tamanho: String(VEICULOS_MIGRACAO_POR_PAGINA),
+    });
+    if (veiculosMigracaoFiltroTexto.trim()) params.set("busca", veiculosMigracaoFiltroTexto.trim());
+    if (veiculosMigracaoFiltroStatus) params.set("status", veiculosMigracaoFiltroStatus);
+    Object.entries(veiculosMigracaoFiltrosColuna).forEach(([campo, texto]) => {
+      if (texto) params.set(`col_${campo}`, texto);
+    });
+    if (veiculosMigracaoOrdemCampo) {
+      params.set("ordenar_por", veiculosMigracaoOrdemCampo);
+      params.set("ordem", veiculosMigracaoOrdemAsc ? "asc" : "desc");
+    }
+    const r = await fetch(`${veiculosMigracaoBaseUrl}/veiculos?${params.toString()}`);
     const data = await parseJsonResponse(r);
     if (!data.ok) {
       veiculosMigracaoCorpo.innerHTML = "";
       return alert(`Erro ao carregar veículos: ${data.error || "falha desconhecida"}`);
     }
-    if (data.veiculos.length === 0 && permitirLinhasBranco) {
-      // Só gera linhas em branco na abertura inicial. Depois de um salvamento,
-      // se vier vazio (falha real ou instabilidade de rede), mostramos vazio
-      // mesmo — nunca substituímos dados recém-digitados por linhas em branco.
-      veiculosMigracaoDadosAtuais = Array.from({ length: 10 }, criarLinhaBrancoVeiculo);
+    if (data.total === 0 && permitirLinhasBranco) {
+      // Só gera linhas em branco na abertura inicial (migração sem veículo
+      // nenhum ainda). Depois de um salvamento, se vier vazio (falha real ou
+      // instabilidade de rede), mostramos vazio mesmo — nunca substituímos
+      // dados recém-digitados por linhas em branco.
+      veiculosMigracaoDadosAtuais = [];
+      veiculosMigracaoLinhasNovas = Array.from({ length: 10 }, criarLinhaBrancoVeiculo);
+      veiculosMigracaoTotal = 0;
+      veiculosMigracaoResumo = { por_status: {}, total: 0, por_cliente: {} };
     } else {
       veiculosMigracaoDadosAtuais = data.veiculos;
+      veiculosMigracaoTotal = data.total;
+      veiculosMigracaoResumo = data.resumo || { por_status: {}, total: 0, por_cliente: {} };
     }
+    veiculosMigracaoSelecionados.clear();
     renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
   } catch (err) {
+    veiculosMigracaoCorpo.innerHTML = "";
+    const mensagem = document.createElement("p");
+    mensagem.className = "placeholder";
+    mensagem.textContent = `Não foi possível carregar os veículos: ${String(err.message || err)}`;
+    const tentarNovamente = document.createElement("button");
+    tentarNovamente.type = "button";
+    tentarNovamente.className = "btn-secondary";
+    tentarNovamente.textContent = "Tentar novamente";
+    tentarNovamente.addEventListener("click", () => recarregarVeiculosMigracao(permitirLinhasBranco));
+    veiculosMigracaoCorpo.append(mensagem, tentarNovamente);
     alert(`Erro ao carregar veículos: ${String(err)}`);
   }
 }
 
-// --- Contagem "Migrado/Total" por cliente (equivalente à fórmula da planilha) e
-// qtd_clientes/qtd_placas do card do projeto — tudo calculado no navegador a partir de
-// veiculosMigracaoDadosAtuais (já carregado por inteiro), sem reler a subcoleção.
-function calcularContagensPorCliente(veiculos) {
-  const mapa = {};
-  veiculos.forEach((v) => {
-    if (!v.cliente) return;
-    if (!mapa[v.cliente]) mapa[v.cliente] = { migrado: 0, total: 0 };
-    mapa[v.cliente].total += 1;
-    if (v.status === "Migrado") mapa[v.cliente].migrado += 1;
-  });
-  return mapa;
+// --- Contagem "Migrado/Total" por cliente, excluindo cancelados e veículos
+// sem rastreador. Os totais persistidos são recalculados no servidor.
+// "mapa" vem pronto do servidor em veiculosMigracaoResumo.por_cliente (ver
+// calcular_resumo_veiculos em migracoes_sql.py) — contagem sobre a MIGRAÇÃO
+// INTEIRA, não só a página carregada, por isso não dá pra recalcular aqui
+// com os dados que o front tem na mão.
+async function atualizarResumoVeiculos() {
+  try {
+    const params = new URLSearchParams({ pagina: "0", tamanho: "1" });
+    const r = await fetch(`${veiculosMigracaoBaseUrl}/veiculos?${params.toString()}`);
+    const data = await parseJsonResponse(r);
+    if (data.ok) {
+      veiculosMigracaoResumo = data.resumo || veiculosMigracaoResumo;
+      veiculosMigracaoTotal = data.total;
+    }
+  } catch (err) {
+    // Resumo é só um detalhe visual (chips/badge) — falha aqui não deve
+    // interromper a edição em andamento.
+  }
+  atualizarContadoresClientes();
+  renderChipsStatusVeiculos();
 }
 
 function atualizarContadoresClientes() {
-  const mapa = calcularContagensPorCliente(veiculosMigracaoDadosAtuais);
+  const mapa = veiculosMigracaoResumo.por_cliente || {};
   veiculosMigracaoCorpo.querySelectorAll("tbody tr").forEach((tr) => {
-    const v = veiculosMigracaoDadosAtuais.find((item) => item.id === tr.dataset.veiculoId);
     const badge = tr.querySelector(".veiculo-contagem-cliente");
-    if (!v || !badge) return;
-    const info = v.cliente ? mapa[v.cliente] : null;
+    if (!badge) return;
+    const campoCliente = tr.querySelector('[data-campo="cliente"]');
+    const cliente = campoCliente ? campoCliente.value : "";
+    const info = cliente ? mapa[cliente] : null;
     badge.textContent = info ? ` (${info.migrado}/${info.total})` : "";
   });
 }
@@ -3869,6 +3947,7 @@ function sincronizarContagensClienteMigracao() {
   const clientes = new Set();
   const placas = new Set();
   veiculosMigracaoDadosAtuais.forEach((v) => {
+    if (["Cancelado", "Sem rastreador"].includes(v.status)) return;
     if (v.cliente) clientes.add(v.cliente);
     if (v.veiculo) placas.add(v.veiculo);
   });
@@ -3894,8 +3973,17 @@ async function autosaveCampoSimples(tr, campo, valorNovo, rotulo) {
       alert(`Erro ao salvar ${rotulo}: ${data.error || "falha desconhecida"}`);
       return false;
     }
-    const registro = veiculosMigracaoDadosAtuais.find((item) => item.id === tr.dataset.veiculoId);
-    if (registro) registro[campo] = valorNovo;
+    const registro = veiculosMigracaoDadosAtuais.find((item) => String(item.id) === tr.dataset.veiculoId);
+    if (registro) {
+      registro[campo] = data[campo] ?? valorNovo;
+      if (data.status) {
+        registro.status = data.status;
+        const selectStatus = tr.querySelector(".veiculo-status-select");
+        if (selectStatus) selectStatus.value = data.status;
+        tr.className = STATUS_VEICULO_CLASSE[data.status] || "";
+        atualizarResumoVeiculos();
+      }
+    }
     return true;
   } catch (err) {
     alert(`Erro ao salvar ${rotulo}: ${String(err)}`);
@@ -3930,7 +4018,14 @@ async function salvarItemVeiculo(tr) {
     if (registro) {
       Object.assign(registro, data.veiculo);
     } else {
+      // Linha nova (ainda em veiculosMigracaoLinhasNovas, fora da paginação do
+      // servidor) acabou de ganhar id real — sai de lá e passa a viver junto
+      // da página carregada, como qualquer outra linha salva.
+      veiculosMigracaoLinhasNovas = veiculosMigracaoLinhasNovas.filter((v) => v.id !== idAntigo);
       veiculosMigracaoDadosAtuais.push(data.veiculo);
+    }
+    if (veiculosMigracaoSelecionados.delete(String(idAntigo))) {
+      veiculosMigracaoSelecionados.add(String(data.veiculo.id));
     }
     tr.dataset.veiculoId = data.veiculo.id;
 
@@ -3942,7 +4037,7 @@ async function salvarItemVeiculo(tr) {
     }
     tr.className = STATUS_VEICULO_CLASSE[data.veiculo.status] || "";
 
-    atualizarContadoresClientes();
+    atualizarResumoVeiculos();
     if (eraNovo) sincronizarContagensClienteMigracao();
   } catch (err) {
     alert(`Erro ao salvar veículo: ${String(err)}`);
@@ -3961,14 +4056,18 @@ async function excluirLinhaVeiculo(tr) {
       return alert(`Erro ao excluir: ${String(err)}`);
     }
   }
-  veiculosMigracaoDadosAtuais = veiculosMigracaoDadosAtuais.filter((item) => item.id !== id);
-  tr.remove();
-  if (veiculosMigracaoDadosAtuais.length === 0) {
-    renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
+  veiculosMigracaoSelecionados.delete(String(id));
+  if (linhaNaoSalva) {
+    veiculosMigracaoLinhasNovas = veiculosMigracaoLinhasNovas.filter((item) => String(item.id) !== String(id));
   } else {
-    atualizarContadoresClientes();
+    veiculosMigracaoDadosAtuais = veiculosMigracaoDadosAtuais.filter((item) => String(item.id) !== String(id));
+    veiculosMigracaoTotal = Math.max(0, veiculosMigracaoTotal - 1);
   }
-  if (!linhaNaoSalva) sincronizarContagensClienteMigracao();
+  renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
+  if (!linhaNaoSalva) {
+    sincronizarContagensClienteMigracao();
+    atualizarResumoVeiculos();
+  }
 }
 
 // Deixa TODAS as colunas de uma tabela redimensionáveis arrastando a borda do
@@ -4067,29 +4166,143 @@ function tornarColunasRedimensionaveis(table, chaveArmazenamento, larguraFixaPor
   atualizarLarguraTotal();
 }
 
-function renderTabelaVeiculosMigracao(clienteId, veiculos) {
+// Filtro/ordenação/paginação de verdade agora rodam no servidor (ver
+// listar_veiculos_pagina em migracoes_sql.py) — isso só filtra as linhas
+// NOVAS/não salvas (veiculosMigracaoLinhasNovas), que nunca passam por lá.
+function obterLinhasNovasFiltradas() {
+  const filtro = normalizarBusca(veiculosMigracaoFiltroTexto);
+  return veiculosMigracaoLinhasNovas.filter((veiculo) => {
+    if (veiculosMigracaoFiltroStatus && veiculo.status !== veiculosMigracaoFiltroStatus) return false;
+    if (!filtro) return true;
+    const texto = normalizarBusca(
+      [veiculo.cliente, veiculo.veiculo, veiculo.equipamento].join(" "),
+    );
+    return texto.includes(filtro);
+  });
+}
+
+// Lê os valores digitados (ainda sem blur, portanto sem autosave disparado)
+// de volta pros objetos em memória, antes de qualquer re-render/refetch que
+// descartaria o array atual — essencial pras linhas novas (não existem no
+// servidor ainda, então um refetch não traz esse valor de volta).
+function salvarValoresPaginaVeiculos() {
+  const porId = new Map(
+    [...veiculosMigracaoDadosAtuais, ...veiculosMigracaoLinhasNovas].map((veiculo) => [String(veiculo.id), veiculo]),
+  );
+  veiculosMigracaoCorpo.querySelectorAll("tbody tr").forEach((tr) => {
+    const veiculo = porId.get(tr.dataset.veiculoId);
+    if (!veiculo) return;
+    tr.querySelectorAll("[data-campo]").forEach((campo) => {
+      veiculo[campo.dataset.campo] = campo.value;
+    });
+    const status = tr.querySelector(".veiculo-status-select");
+    if (status) veiculo.status = status.value;
+  });
+}
+
+function atualizarTextoSelecaoVeiculos(veiculosFiltrados) {
+  const todosSelecionados = veiculosFiltrados.length > 0 &&
+    veiculosFiltrados.every((veiculo) => veiculosMigracaoSelecionados.has(String(veiculo.id)));
+  btnSelecionarTodosVeiculos.textContent = todosSelecionados ? "Desmarcar todos" : "Selecionar todos";
+}
+
+// `veiculosDaPagina` já vem filtrada/ordenada/paginada do servidor (ver
+// listar_veiculos_pagina) — essa função só soma as linhas novas/não salvas
+// (que nunca passam pelo servidor) e desenha o que recebeu, sem refiltrar
+// nem reordenar nada em JS.
+function renderTabelaVeiculosMigracao(clienteId, veiculosDaPagina) {
   veiculosMigracaoCorpo.innerHTML = "";
 
-  if (veiculos.length === 0) {
+  const linhasNovas = veiculosMigracaoPagina === 0 ? obterLinhasNovasFiltradas() : [];
+  const veiculosOrdenados = [...veiculosDaPagina, ...linhasNovas];
+  if (veiculosOrdenados.length === 0) {
     const p = document.createElement("p");
     p.className = "placeholder";
-    p.textContent = "Nenhum veículo cadastrado para esse cliente ainda.";
+    p.textContent = veiculosMigracaoTotal === 0 && veiculosMigracaoLinhasNovas.length === 0
+      ? "Nenhum veículo cadastrado para esse cliente ainda."
+      : "Nenhum veículo corresponde aos filtros atuais.";
     veiculosMigracaoCorpo.appendChild(p);
+    renderChipsStatusVeiculos();
+    atualizarTextoSelecaoVeiculos([]);
     return;
   }
 
-  const headers = ["", "Status", "Cliente", "Veículo", "Equipamento", "ID do equipamento", "APN", "L/S apn", "Número da linha", "Comando", "Última comunicação", "Ações"];
+  const headers = [
+    "", "Status", "Comunicação SSX", "Cliente", "Veículo", "Equipamento", "ID do equipamento", "APN", "L/S apn",
+    "Número da linha", "Comando", "Última comunicação", "Ações",
+  ];
+  // Campo de cada coluna pra ordenar — null = coluna não ordenável (checkbox/Ações).
+  const CAMPOS_ORDENACAO_VEICULOS = [
+    null, "status", "migracao_confirmada_ssx", "cliente", "veiculo", "equipamento", "id_equipamento",
+    "apn", "ls_apn", "numero_linha", "comando", "ultima_comunicacao", null,
+  ];
+
   const table = document.createElement("table");
   table.className = "tabela-saida";
 
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  headers.forEach((h) => {
+  headers.forEach((h, i) => {
     const th = document.createElement("th");
-    th.textContent = h;
+    const campo = CAMPOS_ORDENACAO_VEICULOS[i];
+    if (campo) {
+      th.classList.add("th-ordenavel");
+      const ativo = veiculosMigracaoOrdemCampo === campo;
+      th.textContent = h + (ativo ? (veiculosMigracaoOrdemAsc ? " ▲" : " ▼") : "");
+      th.addEventListener("click", async () => {
+        if (veiculosMigracaoOrdemCampo === campo) {
+          veiculosMigracaoOrdemAsc = !veiculosMigracaoOrdemAsc;
+        } else {
+          veiculosMigracaoOrdemCampo = campo;
+          veiculosMigracaoOrdemAsc = true;
+        }
+        document.activeElement?.blur();
+        salvarValoresPaginaVeiculos();
+        veiculosMigracaoPagina = 0;
+        await recarregarVeiculosMigracao();
+      });
+    } else {
+      th.textContent = h;
+    }
     trHead.appendChild(th);
   });
   thead.appendChild(trHead);
+
+  // Segunda linha do cabeçalho: uma caixa de filtro "contém" por coluna de
+  // texto, estilo Excel (busca geral já existe acima da tabela — isso aqui é
+  // granular, coluna por coluna, e combina em E com ela). Filtra no servidor
+  // (col_<campo> em GET /veiculos), não em JS.
+  const CAMPOS_FILTRAVEIS_COLUNA = new Set([
+    "cliente", "veiculo", "equipamento", "id_equipamento", "apn", "ls_apn",
+    "numero_linha", "comando", "ultima_comunicacao",
+  ]);
+  const trFiltros = document.createElement("tr");
+  trFiltros.className = "veiculos-migracao-filtros-coluna";
+  CAMPOS_ORDENACAO_VEICULOS.forEach((campo) => {
+    const th = document.createElement("th");
+    if (campo && CAMPOS_FILTRAVEIS_COLUNA.has(campo)) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "veiculo-filtro-coluna-input";
+      input.placeholder = "Filtrar...";
+      input.dataset.colunaFiltro = campo;
+      input.value = veiculosMigracaoFiltrosColuna[campo] || "";
+      input.addEventListener("input", () => {
+        veiculosMigracaoFiltroColunaAtivo = campo;
+        if (input.value) veiculosMigracaoFiltrosColuna[campo] = input.value;
+        else delete veiculosMigracaoFiltrosColuna[campo];
+        clearTimeout(veiculosMigracaoDebounceFiltroColuna);
+        veiculosMigracaoDebounceFiltroColuna = setTimeout(async () => {
+          salvarValoresPaginaVeiculos();
+          veiculosMigracaoPagina = 0;
+          await recarregarVeiculosMigracao();
+        }, 350);
+      });
+      th.appendChild(input);
+    }
+    trFiltros.appendChild(th);
+  });
+  thead.appendChild(trFiltros);
   table.appendChild(thead);
 
   // Campo de texto simples, sempre editável, autosave via PUT ao sair da célula
@@ -4108,6 +4321,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
       const ok = await autosaveCampoSimples(tr, campo, input.value, rotulo);
       if (ok) ultimoValorSalvo = input.value;
     });
+    input.addEventListener("input", () => { v[campo] = input.value; });
     td.appendChild(input);
     return td;
   }
@@ -4132,12 +4346,13 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
       await salvarItemVeiculo(tr);
       ultimoValorSalvo = input.value;
     });
+    input.addEventListener("input", () => { v[campo] = input.value; });
     td.appendChild(input);
     return td;
   }
 
   const tbody = document.createElement("tbody");
-  veiculos.forEach((v) => {
+  veiculosOrdenados.forEach((v) => {
     const tr = document.createElement("tr");
     tr.dataset.veiculoId = v.id;
     const statusAtual = v.status || "Aguardando";
@@ -4147,6 +4362,12 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "veiculo-checkbox";
+    checkbox.checked = veiculosMigracaoSelecionados.has(String(v.id));
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) veiculosMigracaoSelecionados.add(String(v.id));
+      else veiculosMigracaoSelecionados.delete(String(v.id));
+      atualizarTextoSelecaoVeiculos(veiculosOrdenados);
+    });
     tdCheck.appendChild(checkbox);
     tr.appendChild(tdCheck);
 
@@ -4170,19 +4391,53 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
       const novoStatus = selectStatus.value;
       const ok = await autosaveCampoSimples(tr, "status", novoStatus, "status");
       if (ok) {
-        tr.className = STATUS_VEICULO_CLASSE[novoStatus] || "";
-        atualizarContadoresClientes();
-        renderChipsStatusVeiculos();
+        const registro = veiculosMigracaoDadosAtuais.find((item) => String(item.id) === tr.dataset.veiculoId);
+        const statusEfetivo = registro ? registro.status : novoStatus;
+        selectStatus.value = statusEfetivo;
+        tr.className = STATUS_VEICULO_CLASSE[statusEfetivo] || "";
+        // Reconsulta o servidor: além de atualizar chips/contagens, se tiver
+        // um filtro de status ativo diferente do novo valor, essa linha some
+        // da página atual — igual a mudar de página ou de filtro.
         aplicarFiltrosVeiculos();
       }
     });
     tdStatus.appendChild(selectStatus);
     tr.appendChild(tdStatus);
 
+    // Marco "já comunicou pela primeira vez depois da migração" (não é status
+    // de saúde contínuo — isso é papel do próprio SSX). migracao_confirmada_ssx
+    // só vira true e nunca volta; vem já persistido do banco (migracoes_sql),
+    // não recalculado no front. Ver botão "Verificar comunicação".
+    const tdComunicacao = document.createElement("td");
+    const badgeComunicacao = document.createElement("span");
+    if (v.migracao_confirmada_ssx) {
+      badgeComunicacao.className = "badge-migracao-confirmada";
+      badgeComunicacao.textContent = "Confirmada";
+      badgeComunicacao.title = v.migracao_confirmada_em ? `Comunicou em ${v.migracao_confirmada_em}` : "";
+    } else {
+      badgeComunicacao.className = "badge-migracao-nao-confirmada";
+      badgeComunicacao.textContent = "Ainda não confirmada";
+    }
+    tdComunicacao.appendChild(badgeComunicacao);
+    tr.appendChild(tdComunicacao);
+
     const tdCliente = criarCampoClienteOuVeiculo(tr, v, "cliente");
     const badgeContagem = document.createElement("span");
     badgeContagem.className = "veiculo-contagem-cliente";
     tdCliente.appendChild(badgeContagem);
+    // Cliente da SSX (ClientTradingName) não ganha coluna própria — a central
+    // tem vários clientes finais, então isso pode divergir do "Cliente"
+    // (texto livre do titular, editável à esquerda); mostra só como dica no
+    // hover do campo, ou um badge quando o rastreador nem foi achado na SSX.
+    if (v.cliente_ssx && v.cliente_ssx !== v.cliente) {
+      tdCliente.title = `Cliente na SSX: ${v.cliente_ssx}`;
+    } else if (!v.cliente_ssx && v.id_equipamento) {
+      const badgeNaoCadastrado = document.createElement("span");
+      badgeNaoCadastrado.className = "badge-veiculo-nao-cadastrado";
+      badgeNaoCadastrado.textContent = "não cadastrado na SSX";
+      badgeNaoCadastrado.title = `Nenhum rastreador com o código "${v.id_equipamento}" foi encontrado na SSX.`;
+      tdCliente.appendChild(badgeNaoCadastrado);
+    }
     tr.appendChild(tdCliente);
 
     tr.appendChild(criarCampoClienteOuVeiculo(tr, v, "veiculo"));
@@ -4207,8 +4462,16 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
         if (m.modelo === v.equipamento) opt.selected = true;
         select.appendChild(opt);
       });
+      if (v.equipamento && !veiculosMigracaoModelosCache.some((m) => m.modelo === v.equipamento)) {
+        const opt = document.createElement("option");
+        opt.value = v.equipamento;
+        opt.textContent = v.equipamento;
+        opt.selected = true;
+        select.appendChild(opt);
+      }
       let ultimoEquipamentoSalvo = select.value;
       select.addEventListener("change", async () => {
+        v.equipamento = select.value;
         const modelo = veiculosMigracaoModelosCache.find((m) => m.modelo === select.value);
         if (modelo && inputComandoRef) {
           inputComandoRef.value = resolverComandoModelo(modelo.comando_template, modelo.porta);
@@ -4242,6 +4505,7 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
       const ok = await autosaveCampoSimples(tr, "comando", inputComando.value, "comando");
       if (ok) ultimoComandoSalvo = inputComando.value;
     });
+    inputComando.addEventListener("input", () => { v.comando = inputComando.value; });
     tdComando.appendChild(inputComando);
     tr.appendChild(tdComando);
 
@@ -4282,8 +4546,15 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
     btnAdicionarLinha.textContent = "+";
     btnAdicionarLinha.title = "Adicionar nova linha";
     btnAdicionarLinha.addEventListener("click", () => {
-      veiculosMigracaoDadosAtuais.push(criarLinhaBrancoVeiculo());
-      renderTabelaVeiculosMigracao(clienteId, veiculosMigracaoDadosAtuais);
+      // Linhas novas só aparecem junto da página 0 (ver renderTabelaVeiculosMigracao).
+      salvarValoresPaginaVeiculos();
+      veiculosMigracaoLinhasNovas.push(criarLinhaBrancoVeiculo());
+      if (veiculosMigracaoPagina !== 0) {
+        veiculosMigracaoPagina = 0;
+        recarregarVeiculosMigracao();
+      } else {
+        renderTabelaVeiculosMigracao(clienteId, veiculosMigracaoDadosAtuais);
+      }
     });
     tdAcoes.appendChild(btnAdicionarLinha);
 
@@ -4293,70 +4564,291 @@ function renderTabelaVeiculosMigracao(clienteId, veiculos) {
   });
   table.appendChild(tbody);
   veiculosMigracaoCorpo.appendChild(table);
+  const controlesPagina = document.createElement("div");
+  controlesPagina.className = "veiculos-migracao-paginacao";
+  // Paginação é do SERVIDOR agora (veiculosMigracaoTotal vem da resposta de
+  // /veiculos) — linhas novas/não salvas não contam nesse total, só existem
+  // localmente até serem salvas.
+  const totalPaginas = Math.max(1, Math.ceil(veiculosMigracaoTotal / VEICULOS_MIGRACAO_POR_PAGINA));
+  const primeiroItem = veiculosMigracaoTotal === 0 ? 0 : veiculosMigracaoPagina * VEICULOS_MIGRACAO_POR_PAGINA + 1;
+  const ultimoItem = Math.min((veiculosMigracaoPagina + 1) * VEICULOS_MIGRACAO_POR_PAGINA, veiculosMigracaoTotal);
+  const resumoPagina = document.createElement("span");
+  resumoPagina.textContent = veiculosMigracaoTotal === 0
+    ? `${linhasNovas.length} linha(s) nova(s) ainda não salva(s).`
+    : `${primeiroItem}–${ultimoItem} de ${veiculosMigracaoTotal} veículos`;
+  controlesPagina.appendChild(resumoPagina);
+
+  const btnAnterior = document.createElement("button");
+  btnAnterior.type = "button";
+  btnAnterior.className = "btn-secondary";
+  btnAnterior.textContent = "Anterior";
+  btnAnterior.disabled = veiculosMigracaoPagina === 0;
+  btnAnterior.addEventListener("click", async () => {
+    document.activeElement?.blur();
+    salvarValoresPaginaVeiculos();
+    veiculosMigracaoPagina -= 1;
+    await recarregarVeiculosMigracao();
+  });
+  controlesPagina.appendChild(btnAnterior);
+
+  const resumoPaginas = document.createElement("span");
+  resumoPaginas.textContent = `Página ${veiculosMigracaoPagina + 1} de ${totalPaginas}`;
+  controlesPagina.appendChild(resumoPaginas);
+
+  const btnProximo = document.createElement("button");
+  btnProximo.type = "button";
+  btnProximo.className = "btn-secondary";
+  btnProximo.textContent = "Próxima";
+  btnProximo.disabled = veiculosMigracaoPagina + 1 >= totalPaginas;
+  btnProximo.addEventListener("click", async () => {
+    document.activeElement?.blur();
+    salvarValoresPaginaVeiculos();
+    veiculosMigracaoPagina += 1;
+    await recarregarVeiculosMigracao();
+  });
+  controlesPagina.appendChild(btnProximo);
+  veiculosMigracaoCorpo.appendChild(controlesPagina);
   tornarColunasRedimensionaveis(table, "larguraColunas_veiculosMigracao");
   atualizarContadoresClientes();
   renderChipsStatusVeiculos();
-  aplicarFiltrosVeiculos();
+  atualizarTextoSelecaoVeiculos(veiculosOrdenados);
+
+  // A tabela inteira é reconstruída a cada busca/filtro, então a caixa de
+  // filtro de coluna em que a pessoa estava digitando perde o DOM (e o foco)
+  // no meio da digitação — devolve o foco na caixa nova, no fim do texto.
+  if (veiculosMigracaoFiltroColunaAtivo) {
+    const inputAtivo = veiculosMigracaoCorpo.querySelector(
+      `[data-coluna-filtro="${veiculosMigracaoFiltroColunaAtivo}"]`,
+    );
+    if (inputAtivo) {
+      inputAtivo.focus();
+      inputAtivo.setSelectionRange(inputAtivo.value.length, inputAtivo.value.length);
+    }
+  }
 }
 
-// --- Busca + filtro por status (ver STATUS_VEICULO_OPCOES) — a tabela pode
-// chegar com dezenas de linhas de uma importação da planilha, então precisa
-// de um jeito de achar/isolar veículos sem rolar tudo. Filtra escondendo
-// linhas (.hidden), não reconstruindo a tabela — preserva os listeners de
-// autosave de cada célula já montados.
+// --- SINCRONIZAÇÃO COM SSX + VERIFICAÇÃO DE COMUNICAÇÃO ---
+// Só existe pra migrações "unificadas" (penduradas num cliente de verdade,
+// /api/clientes/<id>/migracoes/<id>) — a tela "legada" solta
+// (/api/migracao/clientes/<id>) não tem essas rotas no backend.
+function infoMigracaoUnificadaAtual() {
+  const m = /^\/api\/clientes\/(\d+)\/migracoes\/(\d+)$/.exec(veiculosMigracaoBaseUrl || "");
+  if (!m) return null;
+  return { clienteId: m[1], migracaoId: m[2] };
+}
+
+async function esperarJobConcluir(urlStatus, { intervaloMs = 1200, limiteMs = 10 * 60 * 1000 } = {}) {
+  const inicio = Date.now();
+  while (true) {
+    if (Date.now() - inicio >= limiteMs) {
+      throw new Error("A consulta à SSX excedeu o tempo esperado. Tente novamente; se persistir, verifique a disponibilidade da SSX.");
+    }
+    const r = await fetch(urlStatus);
+    const data = await parseJsonResponse(r);
+    if (!data.ok) throw new Error(data.error || "Job não encontrado.");
+    if (data.status === "rodando") {
+      await new Promise((res) => setTimeout(res, intervaloMs));
+      continue;
+    }
+    return data;
+  }
+}
+
+const btnSincronizarVeiculosSsx = el("veiculos-migracao-sincronizar-ssx");
+const btnVerificarComunicacaoSsx = el("veiculos-migracao-verificar-comunicacao");
+const overlaySincVei = el("overlay-sincronizar-veiculos-ssx");
+const sincveiResumoTexto = el("sincvei-resumo-texto");
+const sincveiLog = el("sincvei-log");
+let sincveiJobIdAtual = null;
+let sincveiInfoAtual = null;
+
+function fecharOverlaySincVei() {
+  overlaySincVei.classList.add("hidden");
+  sincveiJobIdAtual = null;
+  sincveiInfoAtual = null;
+}
+el("btn-sincvei-cancelar").addEventListener("click", fecharOverlaySincVei);
+el("sincvei-fechar-x").addEventListener("click", fecharOverlaySincVei);
+
+btnSincronizarVeiculosSsx.addEventListener("click", async () => {
+  const info = infoMigracaoUnificadaAtual();
+  if (!info) return alert("Sincronização com a SSX só está disponível para migrações vinculadas a um cliente.");
+
+  btnSincronizarVeiculosSsx.disabled = true;
+  veiculosMigracaoEnvioStatus.textContent = "Consultando SSX; clientes grandes podem levar alguns minutos...";
+  try {
+    const base = `/api/clientes/${info.clienteId}/migracoes/${info.migracaoId}/veiculos`;
+    const rInicio = await fetch(`${base}/sincronizar`, { method: "POST" });
+    const dataInicio = await parseJsonResponse(rInicio);
+    if (!dataInicio.ok) throw new Error(dataInicio.error || "falha ao iniciar sincronização");
+
+    const job = await esperarJobConcluir(`${base}/sincronizar/status/${dataInicio.job_id}`);
+    if (job.status === "erro") throw new Error(job.erro || "falha desconhecida");
+
+    const diff = job.diff;
+    sincveiJobIdAtual = dataInicio.job_id;
+    sincveiInfoAtual = info;
+
+    const partes = [];
+    if (diff.a_criar.length > 0) {
+      partes.push(`${diff.a_criar.length} veículo(s) novo(s) serão criados a partir da SSX.`);
+    }
+    if (diff.a_atualizar.length > 0) {
+      partes.push(`${diff.a_atualizar.length} veículo(s) já existentes serão atualizados.`);
+    }
+    if (diff.nao_cadastrados.length > 0) {
+      partes.push(`${diff.nao_cadastrados.length} veículo(s) não encontrados na SSX (rastreador ainda não cadastrado lá).`);
+    }
+    partes.push(`${diff.sem_mudanca} já estavam em dia.`);
+    sincveiResumoTexto.textContent = partes.join(" ");
+
+    sincveiLog.innerHTML = "";
+    const limiteDetalhes = 50;
+    diff.a_criar.slice(0, limiteDetalhes).forEach((item) => {
+      const linha = document.createElement("div");
+      linha.textContent = `Novo: ${item.campos.cliente_ssx || item.campos.cliente} — ${item.campos.veiculo} (rastreador ${item.campos.id_equipamento})`;
+      sincveiLog.appendChild(linha);
+    });
+    diff.a_atualizar.slice(0, limiteDetalhes).forEach((item) => {
+      const linha = document.createElement("div");
+      const camposTexto = Object.entries(item.campos)
+        .map(([campo, [atual, novo]]) => `${campo}: "${atual || ""}" → "${novo || ""}"`)
+        .join("; ");
+      linha.textContent = `Veículo #${item.veiculo_id}: ${camposTexto}`;
+      sincveiLog.appendChild(linha);
+    });
+    const detalhesOcultos =
+      Math.max(0, diff.a_criar.length - limiteDetalhes) +
+      Math.max(0, diff.a_atualizar.length - limiteDetalhes);
+    if (detalhesOcultos > 0) {
+      const aviso = document.createElement("div");
+      aviso.textContent = `Exibindo até ${limiteDetalhes} itens de cada tipo; ${detalhesOcultos} detalhes adicionais foram omitidos. Os totais completos estão no resumo.`;
+      sincveiLog.appendChild(aviso);
+    }
+
+    el("btn-sincvei-confirmar").disabled = diff.a_criar.length === 0 && diff.a_atualizar.length === 0;
+    overlaySincVei.classList.remove("hidden");
+  } catch (err) {
+    alert(`Erro ao sincronizar com a SSX: ${String(err.message || err)}`);
+  } finally {
+    btnSincronizarVeiculosSsx.disabled = false;
+    veiculosMigracaoEnvioStatus.textContent = "";
+  }
+});
+
+el("btn-sincvei-confirmar").addEventListener("click", async () => {
+  if (!sincveiJobIdAtual || !sincveiInfoAtual) return;
+  const { clienteId, migracaoId } = sincveiInfoAtual;
+  const jobId = sincveiJobIdAtual;
+  try {
+    const base = `/api/clientes/${clienteId}/migracoes/${migracaoId}/veiculos`;
+    const r = await fetch(`${base}/sincronizar/aplicar/${jobId}`, { method: "POST" });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) throw new Error(data.error || "falha ao aplicar sincronização");
+    fecharOverlaySincVei();
+    await recarregarVeiculosMigracao(true);
+    alert(`${data.criadas} veículo(s) criados e ${data.atualizados} atualizados com dados da SSX.`);
+  } catch (err) {
+    alert(`Erro ao aplicar sincronização: ${String(err.message || err)}`);
+  }
+});
+
+btnVerificarComunicacaoSsx.addEventListener("click", async () => {
+  const info = infoMigracaoUnificadaAtual();
+  if (!info) return alert("Verificação de comunicação só está disponível para migrações vinculadas a um cliente.");
+
+  btnVerificarComunicacaoSsx.disabled = true;
+  veiculosMigracaoEnvioStatus.textContent = "Consultando SSX; clientes grandes podem levar alguns minutos...";
+  try {
+    const base = `/api/clientes/${info.clienteId}/migracoes/${info.migracaoId}/veiculos`;
+    const rInicio = await fetch(`${base}/verificar-comunicacao`, { method: "POST" });
+    const dataInicio = await parseJsonResponse(rInicio);
+    if (!dataInicio.ok) throw new Error(dataInicio.error || "falha ao iniciar verificação");
+
+    const job = await esperarJobConcluir(`${base}/verificar-comunicacao/status/${dataInicio.job_id}`);
+    if (job.status === "erro") throw new Error(job.erro || "falha desconhecida");
+
+    // migracao_confirmada_ssx já foi gravado no banco pelo backend antes do
+    // job concluir — recarrega pra refletir o marco atualizado na tabela.
+    await recarregarVeiculosMigracao(true);
+
+    // status_por_veiculo é o retrato momentâneo (atualizado/desatualizado/
+    // sem_dado) — útil como detalhe pra quem ainda não confirmou, mas não é
+    // o que decide o badge (isso é migracao_confirmada_ssx, persistido).
+    Object.entries(job.status_por_veiculo || {}).forEach(([veiculoId, status]) => {
+      const tr = veiculosMigracaoCorpo.querySelector(`tr[data-veiculo-id="${veiculoId}"]`);
+      const badge = tr && tr.querySelector(".badge-migracao-nao-confirmada");
+      if (badge) badge.title = `Status na SSX agora: ${status}`;
+    });
+  } catch (err) {
+    alert(`Erro ao verificar comunicação: ${String(err.message || err)}`);
+  } finally {
+    btnVerificarComunicacaoSsx.disabled = false;
+    veiculosMigracaoEnvioStatus.textContent = "";
+  }
+});
+
+// --- Busca + filtro por status (ver STATUS_VEICULO_OPCOES) — filtra os dados
+// completos antes de renderizar a página atual.
+// Contagem vem de veiculosMigracaoResumo.por_status (servidor, migração
+// inteira) — não soma mais só a página carregada.
 function renderChipsStatusVeiculos() {
   chipsVeiculosMigracaoStatus.innerHTML = "";
-  const contagem = {};
-  STATUS_VEICULO_OPCOES.forEach((s) => { contagem[s] = 0; });
-  veiculosMigracaoDadosAtuais.forEach((v) => {
-    const s = v.status || "Aguardando";
-    if (s in contagem) contagem[s] += 1;
-  });
-  const opcoes = [["", "Todos", veiculosMigracaoDadosAtuais.length], ...STATUS_VEICULO_OPCOES.map((s) => [s, s, contagem[s]])];
+  const contagem = veiculosMigracaoResumo.por_status || {};
+  const opcoes = [
+    ["", "Todos", veiculosMigracaoResumo.total || 0],
+    ...STATUS_VEICULO_OPCOES.map((s) => [s, s, contagem[s] || 0]),
+  ];
   opcoes.forEach(([valor, rotulo, qtd]) => {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "veiculo-chip-status";
-    if (valor) chip.classList.add(`chip-${valor.toLowerCase()}`);
+    if (valor) chip.classList.add(`chip-${valor.toLowerCase().replace(/\s+/g, "-")}`);
     if (veiculosMigracaoFiltroStatus === valor) chip.classList.add("ativo");
     chip.textContent = `${rotulo} (${qtd})`;
-    chip.addEventListener("click", () => {
+    chip.addEventListener("click", async () => {
+      document.activeElement?.blur();
+      salvarValoresPaginaVeiculos();
       veiculosMigracaoFiltroStatus = veiculosMigracaoFiltroStatus === valor ? "" : valor;
-      renderChipsStatusVeiculos();
-      aplicarFiltrosVeiculos();
+      veiculosMigracaoPagina = 0;
+      await recarregarVeiculosMigracao();
     });
     chipsVeiculosMigracaoStatus.appendChild(chip);
   });
 }
 
-function aplicarFiltrosVeiculos() {
-  const filtro = normalizarBusca(veiculosMigracaoFiltroTexto);
-  veiculosMigracaoCorpo.querySelectorAll("tbody tr").forEach((tr) => {
-    const statusAtual = tr.querySelector(".veiculo-status-select")?.value || "";
-    const bateStatus = !veiculosMigracaoFiltroStatus || statusAtual === veiculosMigracaoFiltroStatus;
-    let bateTexto = true;
-    if (filtro) {
-      const partes = ["cliente", "veiculo", "equipamento"].map((campo) => {
-        const input = tr.querySelector(`[data-campo="${campo}"]`);
-        return input ? input.value : "";
-      });
-      bateTexto = normalizarBusca(partes.join(" ")).includes(filtro);
-    }
-    tr.classList.toggle("hidden", !(bateStatus && bateTexto));
-  });
+async function aplicarFiltrosVeiculos() {
+  document.activeElement?.blur();
+  salvarValoresPaginaVeiculos();
+  veiculosMigracaoPagina = 0;
+  await recarregarVeiculosMigracao();
 }
 
 inputVeiculosMigracaoBusca.addEventListener("input", () => {
   veiculosMigracaoFiltroTexto = inputVeiculosMigracaoBusca.value;
-  aplicarFiltrosVeiculos();
+  // Debounce — busca filtra no servidor agora, não dá pra disparar uma
+  // requisição por tecla digitada.
+  clearTimeout(veiculosMigracaoDebounceBusca);
+  veiculosMigracaoDebounceBusca = setTimeout(() => aplicarFiltrosVeiculos(), 350);
 });
 
+// Seleção em massa (esse botão e "Enviar pros selecionados") vale só pra
+// página atualmente carregada — com a lista paginada no servidor, não temos
+// mais todo o conjunto filtrado em memória pra marcar de uma vez. Ver
+// histórico de decisões se quiser estender pra "selecionar todos os
+// filtrados" via um endpoint de ids dedicado.
 btnSelecionarTodosVeiculos.addEventListener("click", () => {
-  const checkboxes = Array.from(veiculosMigracaoCorpo.querySelectorAll(".veiculo-checkbox"));
-  if (checkboxes.length === 0) return;
-  const todosMarcados = checkboxes.every((cb) => cb.checked);
-  checkboxes.forEach((cb) => { cb.checked = !todosMarcados; });
-  btnSelecionarTodosVeiculos.textContent = todosMarcados ? "Selecionar todos" : "Desmarcar todos";
+  salvarValoresPaginaVeiculos();
+  const visiveis = [...veiculosMigracaoDadosAtuais, ...(veiculosMigracaoPagina === 0 ? obterLinhasNovasFiltradas() : [])];
+  if (visiveis.length === 0) return;
+  const todosMarcados = visiveis.every((veiculo) =>
+    veiculosMigracaoSelecionados.has(String(veiculo.id))
+  );
+  visiveis.forEach((veiculo) => {
+    if (todosMarcados) veiculosMigracaoSelecionados.delete(String(veiculo.id));
+    else veiculosMigracaoSelecionados.add(String(veiculo.id));
+  });
+  renderTabelaVeiculosMigracao(veiculosMigracaoClienteIdAtual, veiculosMigracaoDadosAtuais);
 });
 
 async function enviarComandoLinhaVeiculo(botao, numeroLinha, comandoTexto) {
@@ -4394,36 +4886,36 @@ async function enviarComandoLinhaVeiculo(botao, numeroLinha, comandoTexto) {
 }
 
 btnEnviarSelecionados.addEventListener("click", async () => {
-  const linhas = Array.from(veiculosMigracaoCorpo.querySelectorAll("tbody tr")).filter(
-    (tr) => tr.querySelector(".veiculo-checkbox")?.checked
+  salvarValoresPaginaVeiculos();
+  const selecionados = veiculosMigracaoDadosAtuais.filter((veiculo) =>
+    veiculosMigracaoSelecionados.has(String(veiculo.id))
   );
-  if (linhas.length === 0) return alert("Marque ao menos um veículo pra enviar.");
+  if (selecionados.length === 0) return alert("Marque ao menos um veículo pra enviar.");
 
   btnEnviarSelecionados.disabled = true;
   let sucessos = 0;
   let erros = 0;
   const detalhes = [];
 
-  for (let i = 0; i < linhas.length; i++) {
-    const tr = linhas[i];
-    veiculosMigracaoEnvioStatus.textContent = `Enviando ${i + 1} de ${linhas.length}...`;
-    const inputComando = tr.querySelector('[data-campo="comando"]');
-    const campoNumero = tr.querySelector('[data-campo="numero_linha"]');
-    const btnLinha = tr.querySelector(".btn-enviar-icone");
-    const numeroLinha = campoNumero ? (campoNumero.value ?? campoNumero.textContent) || "" : "";
-    const resultado = await enviarComandoLinhaVeiculo(btnLinha, numeroLinha, inputComando ? inputComando.value : "");
+  for (let i = 0; i < selecionados.length; i++) {
+    const veiculo = selecionados[i];
+    veiculosMigracaoEnvioStatus.textContent = `Enviando ${i + 1} de ${selecionados.length}...`;
+    const numeroLinha = veiculo.numero_linha || "";
+    const resultado = await enviarComandoLinhaVeiculo(null, numeroLinha, veiculo.comando || "");
     if (resultado.ok) {
       sucessos++;
-      detalhes.push(`✔ ${numeroLinha || "(sem número)"}: ${resultado.resposta}`);
+      if (detalhes.length < 100) detalhes.push(`✔ ${numeroLinha || "(sem número)"}: ${resultado.resposta}`);
     } else {
       erros++;
-      detalhes.push(`✘ ${numeroLinha || "(sem número)"}: ${resultado.error}`);
+      if (detalhes.length < 100) detalhes.push(`✘ ${numeroLinha || "(sem número)"}: ${resultado.error}`);
     }
   }
 
   veiculosMigracaoEnvioStatus.textContent = `Concluído! Sucessos: ${sucessos} | Erros: ${erros}`;
   btnEnviarSelecionados.disabled = false;
-  alert(`Envio em lote concluído.\nSucessos: ${sucessos} | Erros: ${erros}\n\n${detalhes.join("\n")}`);
+  const omitidos = selecionados.length - detalhes.length;
+  const resumoOmitidos = omitidos > 0 ? `\n\nMais ${omitidos} detalhes omitidos.` : "";
+  alert(`Envio em lote concluído.\nSucessos: ${sucessos} | Erros: ${erros}\n\n${detalhes.join("\n")}${resumoOmitidos}`);
 });
 
 async function abrirModalImport(tipo, idcentral) {
@@ -16514,6 +17006,10 @@ function atualizarTituloMinhaConta(p) {
 // mais se aproxima de um cargo hoje) só pra identificação no cabeçalho.
 const CARGO_POR_PERFIL = { adm: "Administrador", analista: "Analista", visualizacao: "Visualização" };
 el("minha-conta-cargo").textContent = CARGO_POR_PERFIL[USUARIO_PERFIL_ATUAL] || "Analista";
+// Versão curta só pra topbar (espaço apertado do lado do avatar) — a página
+// Minha Conta continua com o nome completo do cargo.
+const CARGO_CURTO_POR_PERFIL = { adm: "Admin", analista: "Analista", visualizacao: "Visualização" };
+el("topbar-usuario-cargo").textContent = CARGO_CURTO_POR_PERFIL[USUARIO_PERFIL_ATUAL] || "Analista";
 
 async function carregarMinhaConta() {
   minhaContaMsg.classList.add("hidden");
@@ -16875,17 +17371,29 @@ formMinhaConta.addEventListener("submit", async (e) => {
 });
 
 // --- TEMA ESCURO ---
+// Dois controles pro mesmo estado: o switch de dentro do menu do usuário
+// (chkTemaEscuro) e o botão de ícone solto na topbar (mockup) — aplicarTema
+// é o ponto único que muda o <html data-theme> e mantém os dois em sincronia.
 const chkTemaEscuro = el("chk-tema-escuro");
-chkTemaEscuro.checked = document.documentElement.getAttribute("data-theme") === "dark";
-chkTemaEscuro.addEventListener("change", () => {
-  if (chkTemaEscuro.checked) {
+const topbarTemaToggle = el("topbar-tema-toggle");
+const topbarTemaIcone = el("topbar-tema-icone");
+
+function aplicarTema(escuro) {
+  if (escuro) {
     document.documentElement.setAttribute("data-theme", "dark");
     localStorage.setItem("tema", "dark");
   } else {
     document.documentElement.removeAttribute("data-theme");
     localStorage.setItem("tema", "claro");
   }
-});
+  chkTemaEscuro.checked = escuro;
+  topbarTemaIcone.textContent = escuro ? "light_mode" : "dark_mode";
+  topbarTemaToggle.title = escuro ? "Alternar pro tema claro" : "Alternar pro tema escuro";
+}
+
+aplicarTema(document.documentElement.getAttribute("data-theme") === "dark");
+chkTemaEscuro.addEventListener("change", () => aplicarTema(chkTemaEscuro.checked));
+topbarTemaToggle.addEventListener("click", () => aplicarTema(!chkTemaEscuro.checked));
 
 // --- SIDEBAR MINIMIZÁVEL ---
 const sidebarEl = el("sidebar");
@@ -16906,6 +17414,32 @@ sidebarToggle.addEventListener("click", () => {
   localStorage.setItem("sidebar_state", recolhida ? "collapsed" : "expanded");
 });
 
+const SIDEBAR_GRUPOS = {
+  implantacao: { botao: el("sidebar-grupo-implantacao"), submenu: el("sidebar-subnav-implantacao") },
+  migracao: { botao: el("sidebar-grupo-migracao"), submenu: el("sidebar-subnav-migracao") },
+  ferramentas: { botao: el("sidebar-grupo-ferramentas"), submenu: el("sidebar-subnav-ferramentas") },
+};
+
+function definirGrupoSidebar(nome, expandido, persistir) {
+  const grupo = SIDEBAR_GRUPOS[nome];
+  grupo.botao.setAttribute("aria-expanded", String(expandido));
+  grupo.submenu.classList.toggle("hidden", !expandido);
+  if (persistir) localStorage.setItem(`sidebar_group_${nome}`, expandido ? "expanded" : "collapsed");
+}
+
+Object.entries(SIDEBAR_GRUPOS).forEach(([nome, grupo]) => {
+  definirGrupoSidebar(nome, localStorage.getItem(`sidebar_group_${nome}`) !== "collapsed", false);
+  grupo.botao.addEventListener("click", () => {
+    if (sidebarEl.classList.contains("recolhida")) {
+      aplicarEstadoSidebar(false);
+      localStorage.setItem("sidebar_state", "expanded");
+      definirGrupoSidebar(nome, true, true);
+      return;
+    }
+    definirGrupoSidebar(nome, grupo.botao.getAttribute("aria-expanded") !== "true", true);
+  });
+});
+
 // --- NAVEGAÇÃO PRINCIPAL (Fase 1: Dashboard / Controle de Implantação /
 // Controle de Migração / Ferramentas Auxiliares; Fase 3a: Ficha do Cliente) ---
 // Cada botão da sidebar só mostra/esconde um dos containers de tela e, quando
@@ -16923,9 +17457,14 @@ const TELAS_NAV = {
 const NAV_BOTOES = {
   dashboard: el("nav-dashboard"),
   feed: el("nav-feed"),
-  implantacao: el("nav-implantacao"),
-  migracao: el("nav-migracao"),
-  ferramentas: el("nav-ferramentas"),
+  implantacao: el("nav-sub-implantacao"),
+  migracao: el("nav-sub-migracao"),
+};
+const NAV_BOTOES_FERRAMENTAS = {
+  overview: el("nav-tool-ferramentas"),
+  "central-importacao": el("nav-tool-central-importacao"),
+  comandos: el("nav-tool-comandos"),
+  "quebra-string": el("nav-tool-quebra-string"),
 };
 const sidebarRaiz = el("sidebar-raiz");
 const sidebarCliente = el("sidebar-cliente");
@@ -17221,15 +17760,29 @@ const TITULO_TOPBAR_POR_SUB = {
 
 // Sub-telas de Ferramentas mostram só o próprio nome — a volta pra Ferramentas
 // Auxiliares fica no "Voltar" do sidebar.
+// "Clientes / <algo>" (breadcrumb) só faz sentido na Ficha — nas outras
+// telas o nome sozinho já basta. Na Ficha, o nome real do cliente
+// (ex.: "FOCUS (#837)") chega depois via carregarFichaCliente; até lá fica
+// o rótulo genérico "Ficha do cliente".
+const topbarBreadcrumbRaiz = el("topbar-breadcrumb-raiz");
+const topbarBreadcrumbSep = el("topbar-breadcrumb-sep");
+
 function atualizarTituloTopbar(tela, sub) {
   const titulo = (tela === "ferramentas" && TITULO_TOPBAR_POR_SUB[sub]) || TITULO_TOPBAR_POR_TELA[tela] || "";
   topbarTitulo.textContent = titulo;
+  const naFicha = tela === "ficha";
+  topbarBreadcrumbRaiz.classList.toggle("hidden", !naFicha);
+  topbarBreadcrumbSep.classList.toggle("hidden", !naFicha);
 }
 
 function irParaTela(tela, opcoes) {
   opcoes = opcoes || {};
 
   const novoSub = tela === "ferramentas" && FERRAMENTAS_SUBTELAS[opcoes.sub] ? opcoes.sub : null;
+  const estadoHistoricoAtual = history.state;
+  const indiceHistoricoApp = Number.isInteger(estadoHistoricoAtual?.indiceHistoricoApp)
+    ? estadoHistoricoAtual.indiceHistoricoApp
+    : 0;
 
   // /api/logout faz session.clear() de propósito (é o botão "Sair", desloga
   // da ferramenta inteira) — aqui precisa só limpar o token avulso da SSX,
@@ -17263,11 +17816,26 @@ function irParaTela(tela, opcoes) {
   }
   if (tela === "ferramentas") mostrarFerramentasSub(novoSub);
   Object.entries(NAV_BOTOES).forEach(([nome, botao]) => {
-    if (botao) botao.classList.toggle("ativo", nome === tela);
+    if (!botao) return;
+    const ativo = nome === tela;
+    botao.classList.toggle("ativo", ativo);
+    if (ativo) botao.setAttribute("aria-current", "page"); else botao.removeAttribute("aria-current");
+  });
+  Object.entries(NAV_BOTOES_FERRAMENTAS).forEach(([sub, botao]) => {
+    if (!botao) return;
+    const ativo = tela === "ferramentas" && (sub === "overview" ? !novoSub : sub === novoSub);
+    botao.classList.toggle("ativo", ativo);
+    if (ativo) botao.setAttribute("aria-current", "page"); else botao.removeAttribute("aria-current");
+  });
+  Object.entries(SIDEBAR_GRUPOS).forEach(([nome, grupo]) => {
+    const ativo = nome === tela;
+    grupo.botao.classList.toggle("ativo", ativo);
+    if (ativo) definirGrupoSidebar(nome, true, true);
   });
 
   const naFicha = tela === "ficha";
-  sidebarRaiz.classList.toggle("hidden", naFicha);
+  // A navegação geral permanece disponível em todas as telas; na Ficha, ela
+  // convive com a navegação contextual do cliente.
   sidebarCliente.classList.toggle("hidden", !naFicha);
 
   if (!opcoes.semHistorico) {
@@ -17275,7 +17843,13 @@ function irParaTela(tela, opcoes) {
       ? `/cliente/${encodeURIComponent(opcoes.idcentral)}`
       : (novoSub ? `/ferramentas/${novoSub}` : (CAMINHO_POR_TELA[tela] || "/"));
     if (window.location.pathname !== caminho) {
-      history.pushState({ tela, idcentral: opcoes.idcentral, sub: novoSub, origem: naFicha ? fichaOrigem : undefined }, "", caminho);
+      history.pushState({
+        tela,
+        idcentral: opcoes.idcentral,
+        sub: novoSub,
+        origem: naFicha ? fichaOrigem : undefined,
+        indiceHistoricoApp: indiceHistoricoApp + 1,
+      }, "", caminho);
     }
   }
   marcarTelaListaCompacta(tela === "implantacao" || tela === "migracao");
@@ -17634,16 +18208,38 @@ el("feed-atualizar").addEventListener("click", () => {
 
 NAV_BOTOES.feed.addEventListener("click", () => irParaTela("feed"));
 
-// Na Ficha, o logo é a saída (não há mais botão "Voltar") — então também
-// protege o checklist de marcos não salvo.
-el("sidebar-logo").addEventListener("click", () => {
+// Central CRC leva ao Dashboard e protege o checklist de marcos não salvo.
+el("topbar-central-crc").addEventListener("click", () => {
   if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
   irParaTela("dashboard");
 });
 NAV_BOTOES.dashboard.addEventListener("click", () => irParaTela("dashboard"));
 NAV_BOTOES.implantacao.addEventListener("click", () => irParaTela("implantacao"));
 NAV_BOTOES.migracao.addEventListener("click", () => irParaTela("migracao"));
-NAV_BOTOES.ferramentas.addEventListener("click", () => irParaTela("ferramentas"));
+
+const PREPARAR_FERRAMENTA_PARA_ABRIR = {
+  "conversor-kml": limparConversor,
+  "conversor-clientes": limparConvcli,
+  "conversor-veiculos": limparConvvei,
+  "conversor-rastreadores": limparConvrst,
+  "conversor-simcards": limparConvsim,
+  "conversor-areas": limparConvare,
+  "conversor-uo": limparConvuo,
+  "conversor-colaboradores": limparConvcol,
+  atalhos: limparAtalhos,
+};
+
+Object.entries(NAV_BOTOES_FERRAMENTAS).forEach(([sub, botao]) => {
+  if (!botao) return;
+  botao.addEventListener("click", () => {
+    if (sub === "overview") {
+      irParaTela("ferramentas");
+      return;
+    }
+    if (PREPARAR_FERRAMENTA_PARA_ABRIR[sub]) PREPARAR_FERRAMENTA_PARA_ABRIR[sub]();
+    irParaTela("ferramentas", { sub });
+  });
+});
 
 el("card-ferramentas-importacao").addEventListener("click", () => irParaTela("ferramentas", { sub: "importacao-consulta" }));
 // Perfil "visualizacao" não tem esse card no HTML (só lê, nenhuma ação).
@@ -17723,18 +18319,36 @@ function destinoVoltar() {
 
 function atualizarSidebarVoltar() {
   const destino = destinoVoltar();
-  sidebarVoltar.classList.toggle("hidden", !destino);
-  if (destino) {
-    const titulo = (destino.tela === "ferramentas" && TITULO_TOPBAR_POR_SUB[destino.sub]) || TITULO_TOPBAR_POR_TELA[destino.tela] || "Dashboard";
-    sidebarVoltar.title = `Voltar para ${titulo}`;
-  }
+  const naTelaInicial = telaNavAtual === "dashboard";
+  sidebarVoltar.classList.toggle("sidebar-voltar-invisivel", naTelaInicial);
+  sidebarVoltar.setAttribute("aria-hidden", String(naTelaInicial));
+  sidebarVoltar.tabIndex = naTelaInicial ? -1 : 0;
+  const temPaginaAnterior = Number.isInteger(history.state?.indiceHistoricoApp)
+    && history.state.indiceHistoricoApp > 0;
+  const tituloDestino = destino
+    ? (destino.tela === "ferramentas" && TITULO_TOPBAR_POR_SUB[destino.sub]) || TITULO_TOPBAR_POR_TELA[destino.tela] || "Dashboard"
+    : "Dashboard";
+  const titulo = temPaginaAnterior ? "a página anterior" : tituloDestino;
+  sidebarVoltar.title = `Voltar para ${titulo}`;
+  sidebarVoltar.setAttribute("aria-label", `Voltar para ${titulo}`);
 }
 
 sidebarVoltar.addEventListener("click", () => {
-  const destino = destinoVoltar();
-  if (!destino) return;
   if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
-  irParaTela(destino.tela, { sub: destino.sub });
+  if (Number.isInteger(history.state?.indiceHistoricoApp) && history.state.indiceHistoricoApp > 0) {
+    history.back();
+    return;
+  }
+  const destino = destinoVoltar();
+  irParaTela(destino?.tela || "dashboard", { sub: destino?.sub });
+});
+
+// "Clientes" no breadcrumb da topbar (só aparece na Ficha) volta pro
+// Dashboard — mesmo destino do "Voltar" quando a Ficha foi aberta direto.
+topbarBreadcrumbRaiz.addEventListener("click", (ev) => {
+  ev.preventDefault();
+  if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
+  irParaTela("dashboard");
 });
 
 // --- SINCRONIZAR PLANILHA (planilha de CS -> cadastro de cliente do app) ---
@@ -18613,6 +19227,13 @@ el("form-tarefa").addEventListener("submit", async (e) => {
 // abrirVeiculosMigracao) — sem duplicar aquela lógica.
 let fichaClienteAtual = null; // { idcentral, implantacao, migracao } cru da API
 let fichaAbaAtual = "geral";
+// Última resposta de /api/ficha/<idcentral> vista nesta sessão do navegador,
+// por idcentral — só pra pré-setar a visibilidade das abas (Migração/
+// Implantação/Marcos) ANTES do fetch novo responder, e assim evitar o
+// "pisca" (começa escondido pelo hidden padrão do HTML, some, some de volta
+// ao fetch resolver) ao reabrir/recarregar a MESMA Ficha. Nunca é a fonte de
+// verdade pro conteúdo — isso continua vindo sempre do fetch.
+const fichaClienteCache = new Map();
 
 // Chamados de suporte (ssxdesk), buscados pelo IdCentral — carregados em
 // segundo plano DEPOIS da Ficha já estar aberta (ver carregarChamadosFicha),
@@ -18698,11 +19319,52 @@ function fichaWootricAtuaisValidas(clienteId) {
   return fichaWootricAtual;
 }
 
+// Chips de diagnóstico (Implantado/Momento/Persona/Flag/Atrasado) — ficam no
+// cabeçalho (persistente entre as sub-abas da Ficha, igual ao mockup), não
+// só na Visão Geral. Todas são da jornada de Implantação — não fazem
+// sentido pra um cliente que só tem Migração. "Marco atual" não vira tag
+// aqui: o card de Progresso já mostra isso com muito mais clareza (stepper).
+function construirFichaTagsResumo(implantacao) {
+  if (!implantacao || implantacao.tem_implantacao === false) return null;
+  const tags = document.createElement("div");
+  tags.className = "ficha-tags-resumo";
+  if (implantacao.implantado) tags.appendChild(criarTagResumo("Implantado", "tag-implantado"));
+  if (implantacao.momento) {
+    const classeMomento = FICHA_MOMENTOS_CRITICOS.includes(implantacao.momento) ? "tag-momento-critico" : "tag-momento";
+    const tagMomento = criarTagResumo(implantacao.momento, classeMomento);
+    tagMomento.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>');
+    tags.appendChild(tagMomento);
+  }
+  if (implantacao.persona) {
+    const tagPersona = criarTagResumo(implantacao.persona, "tag-persona");
+    tagPersona.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"></path></svg>');
+    tags.appendChild(tagPersona);
+  }
+  if (implantacao.flag) {
+    const tagFlag = criarTagResumo(implantacao.flag, classeFlagTag(implantacao.flag));
+    tagFlag.insertAdjacentHTML("afterbegin", '<span class="tag-resumo-bolinha"></span>');
+    tags.appendChild(tagFlag);
+  }
+  if (implantacaoAtrasada(implantacao)) {
+    const diasAtraso = diasAtrasoImplantacao(implantacao);
+    const tagAtraso = criarTagResumo(
+      diasAtraso !== null ? `Atrasado há ${diasAtraso} dia${diasAtraso === 1 ? "" : "s"}` : "Atrasado",
+      "tag-atrasado-solido",
+    );
+    tagAtraso.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l3 2"></path><path d="M9 3h6"></path></svg>');
+    tags.appendChild(tagAtraso);
+  }
+  return tags.children.length ? tags : null;
+}
+
 function construirFichaHeader(implantacao, migracao, comEngrenagem) {
   const header = document.createElement("div");
   header.className = "ficha-header";
 
+  // Nome+IdCentral e as tags ficam lado a lado na mesma linha (quebrando só
+  // se não couber), não empilhados — "info" é a linha inteira.
   const info = document.createElement("div");
+  info.className = "ficha-header-info";
   // Nome + tag "Migração" na mesma linha. Sem migração, não mostra tag
   // nenhuma (implantação é o padrão, não precisa de rótulo).
   const linhaTitulo = document.createElement("div");
@@ -18710,6 +19372,13 @@ function construirFichaHeader(implantacao, migracao, comEngrenagem) {
   const titulo = document.createElement("h2");
   titulo.textContent = (implantacao && implantacao.cliente) || (migracao && migracao.nome) || "Cliente";
   linhaTitulo.appendChild(titulo);
+  const idcentral = (implantacao && implantacao.idcentral) || (migracao && migracao.idcentral);
+  if (idcentral) {
+    const badgeId = document.createElement("span");
+    badgeId.className = "ficha-header-idcentral";
+    badgeId.textContent = `IdCentral: ${idcentral}`;
+    linhaTitulo.appendChild(badgeId);
+  }
   if (migracao) {
     const badge = document.createElement("span");
     badge.className = "badge-tipo com-migracao";
@@ -18717,10 +19386,26 @@ function construirFichaHeader(implantacao, migracao, comEngrenagem) {
     linhaTitulo.appendChild(badge);
   }
   info.appendChild(linhaTitulo);
+  const tags = construirFichaTagsResumo(implantacao);
+  if (tags) info.appendChild(tags);
   header.appendChild(info);
 
   if (comEngrenagem) {
-    header.appendChild(construirFichaEngrenagem(implantacao, migracao));
+    const acoes = document.createElement("div");
+    acoes.className = "ficha-header-acoes";
+    acoes.appendChild(construirFichaEngrenagem(implantacao, migracao));
+    if (implantacao) {
+      const btnTarefa = document.createElement("button");
+      btnTarefa.type = "button";
+      btnTarefa.className = "btn-primary ficha-header-nova-tarefa";
+      btnTarefa.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg><span>Nova Tarefa</span>';
+      btnTarefa.addEventListener("click", () => abrirModalTarefa({
+        clienteId: implantacao.id,
+        aoSalvar: () => mostrarFichaAba(fichaAbaAtual),
+      }));
+      acoes.appendChild(btnTarefa);
+    }
+    header.appendChild(acoes);
   }
 
   return header;
@@ -18735,7 +19420,10 @@ function construirFichaEngrenagem(implantacao, migracao) {
   btn.type = "button";
   btn.className = "btn-engrenagem-pagina ficha-engrenagem";
   btn.title = "Editar dados do cliente";
-  aplicarIconeEngrenagem(btn);
+  // Lápis em vez da engrenagem padrão — só aqui, no cabeçalho da Ficha (o
+  // ícone de engrenagem compartilhado continua igual no resto do app).
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"></path></svg>';
+  btn.setAttribute("aria-label", btn.title);
   btn.addEventListener("click", () => abrirConfigFicha(implantacao, migracao));
   return btn;
 }
@@ -18795,7 +19483,7 @@ function ativarSidebarConfig(sidebarEl, modalEl, abaAtiva, implantacao, migracao
   });
 }
 
-function construirStepper(etapasOrdem, etapaLabels, etapaAtual) {
+function construirStepper(etapasOrdem, etapaLabels, etapaAtual, ativaAtrasada = false) {
   const stepper = document.createElement("div");
   stepper.className = "stepper";
   const idxAtual = etapasOrdem.indexOf(etapaAtual);
@@ -18803,7 +19491,7 @@ function construirStepper(etapasOrdem, etapaLabels, etapaAtual) {
     const item = document.createElement("div");
     const concluida = idxAtual > -1 && idx < idxAtual;
     const ativa = idx === idxAtual;
-    item.className = "stepper-etapa" + (concluida ? " concluida" : "") + (ativa ? " ativa" : "");
+    item.className = "stepper-etapa" + (concluida ? " concluida" : "") + (ativa ? " ativa" : "") + (ativa && ativaAtrasada ? " atrasada" : "");
     const bolha = document.createElement("div");
     bolha.className = "stepper-bolha";
     bolha.textContent = String(idx + 1);
@@ -18924,19 +19612,45 @@ const ICONES_CONTATO = {
   pin: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
 };
 
-// Card de contato no padrão dos tiles da Ficha: ícone + rótulo, nome em
-// destaque, detalhe opcional e o botão de WhatsApp da própria pessoa do card
-// (nunca o número de outra).
-function construirCardContato({ icone, rotulo, valor, vazio, detalhes, whatsapp }) {
+// Primeiras letras do nome (até 2), pro avatar colorido do card de contato —
+// mesmo padrão de "iniciais" de qualquer app de CRM (ex.: "Lucas" → "LU").
+function iniciaisNome(nome) {
+  const partes = String(nome || "").trim().split(/\s+/).filter(Boolean);
+  if (!partes.length) return "";
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
+  return (partes[0][0] + partes[1][0]).toUpperCase();
+}
+
+// Card de contato no padrão dos tiles da Ficha: avatar com iniciais, ícone +
+// rótulo, nome em destaque, detalhe opcional e o botão de WhatsApp da própria
+// pessoa do card (nunca o número de outra). "accent" pinta o avatar e a
+// pílula de papel (azul/violeta/verde/turquesa) só pra diferenciar os 4
+// cards à primeira vista — não representa nenhum dado novo. "papel" é um
+// rótulo curto fixo por tipo de card (Owner/Vendas/Foco), também decorativo.
+function construirCardContato({ icone, rotulo, valor, vazio, detalhes, whatsapp, accent, papel }) {
   const card = document.createElement("div");
   card.className = "ficha-contato-card";
 
   const topo = document.createElement("div");
   topo.className = "ficha-contato-topo";
-  topo.innerHTML = ICONES_CONTATO[icone] || "";
+  if (valor) {
+    const avatar = document.createElement("span");
+    avatar.className = `ficha-contato-avatar ficha-contato-avatar-${accent || "cinza"}`;
+    avatar.textContent = iniciaisNome(valor) || "?";
+    topo.appendChild(avatar);
+  } else {
+    topo.innerHTML = ICONES_CONTATO[icone] || "";
+  }
   const r = document.createElement("span");
+  r.className = "ficha-contato-topo-rotulo";
   r.textContent = rotulo;
   topo.appendChild(r);
+  if (papel) {
+    const p = document.createElement("span");
+    p.className = `ficha-contato-papel ficha-contato-papel-${accent || "cinza"}`;
+    p.textContent = papel;
+    topo.appendChild(p);
+  }
   card.appendChild(topo);
 
   const n = document.createElement("div");
@@ -18981,6 +19695,8 @@ function construirFichaLinhaContato(implantacao) {
     vazio: "não definido",
     detalhes: [],
     whatsapp: implantacao.csm_whatsapp,
+    accent: "azul",
+    papel: "Owner",
   }));
   linha.appendChild(construirCardContato({
     icone: "maleta",
@@ -18989,6 +19705,8 @@ function construirFichaLinhaContato(implantacao) {
     vazio: "não definido",
     detalhes: [],
     whatsapp: implantacao.vendedor_whatsapp,
+    accent: "violeta",
+    papel: "Vendas",
   }));
   linha.appendChild(construirCardContato({
     icone: "pessoa",
@@ -18997,6 +19715,8 @@ function construirFichaLinhaContato(implantacao) {
     vazio: "sem nome cadastrado",
     detalhes: [implantacao.decisor_whatsapp],
     whatsapp: implantacao.decisor_whatsapp,
+    accent: "verde",
+    papel: "Foco",
   }));
   linha.appendChild(construirCardContato({
     icone: "pin",
@@ -19004,9 +19724,32 @@ function construirFichaLinhaContato(implantacao) {
     valor: implantacao.decisor_cidade,
     vazio: "não definida",
     detalhes: [implantacao.decisor_estado],
+    papel: implantacao.decisor_estado || null,
     whatsapp: null,
+    accent: "turquesa",
   }));
   return linha;
+}
+
+// Seção "Contatos Essenciais da Conta" — título + contagem de quantos dos 4
+// canais (CSM/Comercial/Decisor/Região) estão de fato preenchidos, acima da
+// grade de cards.
+function construirFichaContatosSecao(implantacao) {
+  const secao = document.createElement("div");
+  secao.className = "ficha-contatos-secao";
+  const titulo = document.createElement("div");
+  titulo.className = "ficha-contatos-secao-titulo";
+  const h3 = document.createElement("h3");
+  h3.textContent = "Contatos Essenciais da Conta";
+  titulo.appendChild(h3);
+  const preenchidos = [implantacao.csm, implantacao.vendedor, implantacao.decisor_nome, implantacao.decisor_cidade]
+    .filter(Boolean).length;
+  const contagem = document.createElement("span");
+  contagem.textContent = `${preenchidos} canal${preenchidos === 1 ? "" : "is"} vinculado${preenchidos === 1 ? "" : "s"}`;
+  titulo.appendChild(contagem);
+  secao.appendChild(titulo);
+  secao.appendChild(construirFichaLinhaContato(implantacao));
+  return secao;
 }
 
 // Junta num só lugar tudo que precisa da atenção do usuário — sem isso, cada
@@ -19026,6 +19769,7 @@ function coletarFichaAlertas(implantacao, migracao) {
         texto: diasAtraso !== null
           ? `${label} atrasado há ${diasAtraso} dia${diasAtraso === 1 ? "" : "s"}`
           : `${label} está atrasado`,
+        severidade: "vermelho",
       });
     }
     // Mesma regra do selo "Parado" do Kanban (clienteParado).
@@ -19033,10 +19777,11 @@ function coletarFichaAlertas(implantacao, migracao) {
       alertas.push({
         rotulo: "Implantação parada",
         texto: `Sem atividade há ${diasSemAtividade(implantacao)} dias`,
+        severidade: "amarelo",
       });
     }
     if (FICHA_MOMENTOS_CRITICOS.includes(implantacao.momento)) {
-      alertas.push({ rotulo: "Momento do cliente", texto: implantacao.momento });
+      alertas.push({ rotulo: "Momento do cliente", texto: implantacao.momento, severidade: "neutro" });
     }
   }
   return alertas;
@@ -19236,11 +19981,23 @@ function construirFichaWootricCard(wootricState) {
   return card;
 }
 
+// Ícone por tipo de alerta (mesmo "rotulo" usado em coletarFichaAlertas) —
+// só decoração, não é dado novo: ajuda a reconhecer o tipo de pendência de
+// longe, igual aos ícones dos cards de contato.
+const ICONES_ALERTA = {
+  "Marco atrasado": '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l3 2"></path><path d="M9 3h6"></path></svg>',
+  "Implantação parada": '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M10 9v6"></path><path d="M14 9v6"></path></svg>',
+  "Momento do cliente": '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 21v-1a7 7 0 0 1 10-6.33"></path><path d="M16 15l5 5M21 15l-5 5"></path></svg>',
+};
+
 function construirFichaAlertasCard(implantacao, migracao) {
   const card = document.createElement("div");
   card.className = "ficha-painel ficha-alertas";
   const h = document.createElement("h3");
-  h.textContent = "Atenção";
+  h.innerHTML = '<span class="ficha-alertas-icone"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg></span>';
+  const hTexto = document.createElement("span");
+  hTexto.textContent = "Atenção";
+  h.appendChild(hTexto);
   card.appendChild(h);
 
   const alertas = coletarFichaAlertas(implantacao, migracao);
@@ -19254,12 +20011,15 @@ function construirFichaAlertasCard(implantacao, migracao) {
   // Cada alerta vira um card no mesmo padrão dos contatos da Visão Geral.
   const grade = document.createElement("div");
   grade.className = "ficha-alertas-grade";
-  alertas.forEach(({ rotulo, texto }) => {
+  alertas.forEach(({ rotulo, texto, severidade }) => {
     const item = document.createElement("div");
-    item.className = "ficha-contato-card ficha-alerta-card";
+    item.className = `ficha-contato-card ficha-alerta-card ficha-alerta-card-${severidade || "vermelho"}`;
     const r = document.createElement("div");
     r.className = "ficha-contato-rotulo";
-    r.textContent = rotulo;
+    r.innerHTML = `<span class="ficha-alerta-rotulo-icone">${ICONES_ALERTA[rotulo] || ""}</span>`;
+    const rTexto = document.createElement("span");
+    rTexto.textContent = rotulo;
+    r.appendChild(rTexto);
     const t = document.createElement("div");
     t.className = "ficha-alerta-texto";
     t.textContent = texto;
@@ -19591,7 +20351,7 @@ function construirFichaProgressoCard(implantacao, migracao) {
         : `🔴 ${label} atrasado`;
       bloco.appendChild(p);
     }
-    bloco.appendChild(construirStepper(IMPLANTACAO_ETAPAS_ORDEM, IMPLANTACAO_ETAPA_LABELS, implantacao.etapa));
+    bloco.appendChild(construirStepper(IMPLANTACAO_ETAPAS_ORDEM, IMPLANTACAO_ETAPA_LABELS, implantacao.etapa, implantacaoAtrasada(implantacao)));
     // O stepper usa os rótulos curtos do Kanban; o nome do marco atual (e de
     // quem é a responsabilidade) aparece por extenso só aqui na Ficha.
     const info = IMPLANTACAO_MARCOS_INFO[implantacao.etapa];
@@ -19869,9 +20629,9 @@ function construirFichaDocumentosCard(implantacao, documentos) {
 // recorte: "Geral" é o painel completo; as outras separam o que é cadastro e
 // andamento (Histórico tem aba própria no sidebar, fora da Visão Geral).
 const FICHA_SUB_ABAS = [
-  ["geral", "Geral"],
+  ["geral", "Visão Geral"],
   ["informacoes", "Informações do Cliente"],
-  ["progresso", "Progresso"],
+  ["progresso", "Progresso & Marcos"],
 ];
 let fichaSubAbaAtual = "geral";
 
@@ -21103,66 +21863,51 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
     return wrap;
   }
 
-  // Tags hierárquicas + linha de contato — pra bater o olho na Visão Geral e
-  // já entender a situação do cliente, sem precisar abrir Configuração/Editar
-  // Cliente. "Marco atual" não vira tag aqui: o card de Progresso já mostra
-  // isso com muito mais clareza (stepper), então repetir seria peso duplicado.
-  if (implantacao) {
-    // Tags (Implantado/Momento/Persona/Flag/Atrasado) são todas da jornada de
-    // Implantação — não fazem sentido pra um cliente que só tem Migração.
-    if (implantacao.tem_implantacao !== false) {
-      const tags = document.createElement("div");
-      tags.className = "ficha-tags-resumo";
-      if (implantacao.implantado) tags.appendChild(criarTagResumo("Implantado", "tag-implantado"));
-      if (implantacao.momento) tags.appendChild(criarTagResumo(implantacao.momento, "tag-momento"));
-      if (implantacao.persona) tags.appendChild(criarTagResumo(implantacao.persona, "tag-persona"));
-      if (implantacao.flag) {
-        const tagFlag = criarTagResumo(implantacao.flag, classeFlagTag(implantacao.flag));
-        tagFlag.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>');
-        tags.appendChild(tagFlag);
-      }
-      if (implantacaoAtrasada(implantacao)) tags.appendChild(criarTagResumo("Atrasado", "tag-flag-red"));
-      if (tags.children.length) wrap.appendChild(tags);
-    }
-
-    wrap.appendChild(construirFichaLinhaContato(implantacao));
-  }
+  // Ordem da Visão Geral (mesma do mockup): Atenção (banner cheio) → Contatos
+  // Essenciais (grade cheia) → Progresso (stepper, cheio) → duas colunas
+  // [Tarefas/NPS/Chamados | Dados cadastrais/Operacional]. As tags de
+  // diagnóstico (Momento/Flag/Atrasado) agora moraram pro cabeçalho
+  // (construirFichaTagsResumo), persistente entre as sub-abas.
 
   // Atenção/Pendências — concentra tudo que precisa de ação num só lugar, em
   // vez de espalhado pela tela.
   wrap.appendChild(construirFichaAlertasCard(implantacao, migracao));
 
-  // Chamados de suporte abertos (ssxdesk, buscados pelo IdCentral) — carrega
-  // em segundo plano (ver carregarChamadosFicha); fichaChamadosAtual só tem
-  // dado de verdade se for deste mesmo cliente.
-  if (fichaChamadosClienteId === implantacao?.id) {
-    const cardChamados = construirFichaChamadosAbertosCard(fichaChamadosAtual);
-    if (cardChamados) wrap.appendChild(cardChamados);
-  }
-
-  // Avaliações de NPS (Wootric, buscadas pelo IdCentral) — mesmo padrão de
-  // carregamento em segundo plano dos chamados do ssxdesk.
-  if (fichaWootricClienteId === implantacao?.id) {
-    const cardWootric = construirFichaWootricCard(fichaWootricAtual);
-    if (cardWootric) wrap.appendChild(cardWootric);
-  }
-
-  // Resumo do cliente + Tarefas lado a lado — bloco principal de
-  // acompanhamento do cliente.
-  const grid = document.createElement("div");
-  grid.className = "ficha-grid-hub";
-  grid.appendChild(construirFichaResumoCard(implantacao, migracao));
   if (implantacao) {
-    grid.appendChild(construirFichaTarefasPainel(implantacao));
-  } else {
-    grid.classList.add("ficha-grid-hub-unica");
+    wrap.appendChild(construirFichaContatosSecao(implantacao));
   }
-  wrap.appendChild(grid);
 
   const progresso = construirFichaProgressoCard(implantacao, migracao);
   if (progresso) wrap.appendChild(progresso);
 
-  wrap.appendChild(construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin));
+  const colunas = document.createElement("div");
+  colunas.className = "ficha-colunas";
+
+  const colEsquerda = document.createElement("div");
+  colEsquerda.className = "ficha-coluna";
+  if (implantacao) colEsquerda.appendChild(construirFichaTarefasPainel(implantacao));
+  // Avaliações de NPS (Wootric, buscadas pelo IdCentral) — carrega em segundo
+  // plano (ver carregarWootricFicha); fichaWootricAtual só tem dado de
+  // verdade se for deste mesmo cliente.
+  if (fichaWootricClienteId === implantacao?.id) {
+    const cardWootric = construirFichaWootricCard(fichaWootricAtual);
+    if (cardWootric) colEsquerda.appendChild(cardWootric);
+  }
+  // Chamados de suporte abertos (ssxdesk, buscados pelo IdCentral) — mesmo
+  // padrão de carregamento em segundo plano (ver carregarChamadosFicha).
+  if (fichaChamadosClienteId === implantacao?.id) {
+    const cardChamados = construirFichaChamadosAbertosCard(fichaChamadosAtual);
+    if (cardChamados) colEsquerda.appendChild(cardChamados);
+  }
+
+  const colDireita = document.createElement("div");
+  colDireita.className = "ficha-coluna";
+  colDireita.appendChild(construirFichaResumoCard(implantacao, migracao));
+  colDireita.appendChild(construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin));
+
+  colunas.appendChild(colEsquerda);
+  colunas.appendChild(colDireita);
+  wrap.appendChild(colunas);
 
   return wrap;
 }
@@ -21525,7 +22270,8 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
         const dataFicha = await parseJsonResponse(rf);
         if (dataFicha.ok) {
           fichaClienteAtual = dataFicha;
-          el("ficha-aba-migracao").classList.toggle("hidden", !dataFicha.migracao);
+          fichaClienteCache.set(implantacao.idcentral, dataFicha);
+          aplicarVisibilidadeAbasFicha(dataFicha);
           mostrarFichaAba("migracao");
         }
       } catch (err) {
@@ -21552,7 +22298,8 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
         const dataFicha = await parseJsonResponse(rf);
         if (dataFicha.ok) {
           fichaClienteAtual = dataFicha;
-          el("ficha-aba-migracao").classList.toggle("hidden", !dataFicha.migracao);
+          fichaClienteCache.set(implantacao.idcentral, dataFicha);
+          aplicarVisibilidadeAbasFicha(dataFicha);
           mostrarFichaAba("migracao");
         }
       } catch (err) {
@@ -21564,11 +22311,12 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
 
   sec.appendChild(acoes);
 
-  // Tabela de fórmulas já calculadas na própria planilha (aba "Infos
-  // gerais"), só exibida aqui, nunca recalculada pelo sistema. Preenchida
-  // de dois jeitos: automático (busca "ao vivo" só-leitura toda vez que essa
-  // aba abre, logo abaixo) e manual, via "Importar da planilha" acima (que
-  // além de atualizar isso também grava os veículos no sistema).
+  // Resumo por modelo/progresso: calculado em cima de `migracao_veiculos`
+  // (local, pelo backend — não lê mais a planilha do Google aqui, ver
+  // resumo_planilha_migracao_cliente em app.py). Preenchida de dois jeitos:
+  // automático (toda vez que essa aba abre, logo abaixo) e manual, via
+  // "Importar da planilha" acima (que além de atualizar isso também grava
+  // os veículos no sistema).
   const resumoModelosDiv = document.createElement("div");
   resumoModelosDiv.className = "resumo-modelos-planilha";
   sec.appendChild(resumoModelosDiv);
@@ -21613,13 +22361,21 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
   return wrap;
 }
 
+// "Ativo" + aria-current="page" (só nav-semântica: diz pra leitor de tela
+// qual aba da Ficha está aberta agora, igual a um link de página atual).
+function marcarFichaAbaAtiva(id, ativo) {
+  const botao = el(id);
+  botao.classList.toggle("ativo", ativo);
+  if (ativo) botao.setAttribute("aria-current", "page"); else botao.removeAttribute("aria-current");
+}
+
 function mostrarFichaAba(aba) {
   fichaAbaAtual = aba;
-  el("ficha-aba-geral").classList.toggle("ativo", aba === "geral");
-  el("ficha-aba-implantacao").classList.toggle("ativo", aba === "implantacao");
-  el("ficha-aba-marcos").classList.toggle("ativo", aba === "marcos");
-  el("ficha-aba-migracao").classList.toggle("ativo", aba === "migracao");
-  el("ficha-aba-historico").classList.toggle("ativo", aba === "historico");
+  marcarFichaAbaAtiva("ficha-aba-geral", aba === "geral");
+  marcarFichaAbaAtiva("ficha-aba-implantacao", aba === "implantacao");
+  marcarFichaAbaAtiva("ficha-aba-marcos", aba === "marcos");
+  marcarFichaAbaAtiva("ficha-aba-migracao", aba === "migracao");
+  marcarFichaAbaAtiva("ficha-aba-historico", aba === "historico");
 
   const corpo = el("ficha-cliente-corpo");
   corpo.innerHTML = "";
@@ -21636,6 +22392,20 @@ function mostrarFichaAba(aba) {
   if (aba === "historico") corpo.appendChild(construirFichaHistorico(implantacao, migracao));
 }
 
+// Só toca na visibilidade das abas da sidebar da Ficha — usada tanto pro
+// preview otimista (com o dado em cache, antes do fetch) quanto pra resposta
+// de verdade (depois do fetch), pra nunca duplicar essa regra.
+function aplicarVisibilidadeAbasFicha(data) {
+  el("ficha-aba-migracao").classList.toggle("hidden", !data.migracao);
+  // Cliente criado pela tela de Migração sem par na Implantação
+  // (tem_implantacao=false) tem menu enxuto: só Visão Geral, Migração e
+  // Histórico — sem Implantação/Marcos, que não existem pra ele.
+  const semImplantacao = data.implantacao && data.implantacao.tem_implantacao === false;
+  el("ficha-aba-implantacao").classList.toggle("hidden", semImplantacao);
+  el("ficha-aba-marcos").classList.toggle("hidden", semImplantacao);
+  return semImplantacao;
+}
+
 async function carregarFichaCliente(idcentral, aba = "geral") {
   fichaClienteAtual = null;
   el("ficha-sidebar-nome").textContent = "Carregando...";
@@ -21643,30 +22413,34 @@ async function carregarFichaCliente(idcentral, aba = "geral") {
   cabecalho.innerHTML = "";
   const corpo = el("ficha-cliente-corpo");
   corpo.innerHTML = '<p class="placeholder">Carregando...</p>';
+  // Preview otimista: se já vimos esse idcentral nesta sessão, deixa a aba
+  // Migração (e Implantação/Marcos) já no estado certo AGORA — sem isso, ela
+  // sempre começa escondida (classe padrão no HTML) até o fetch abaixo
+  // responder, o que pisca pra quem já sabia que esse cliente tem migração.
+  // Será confirmado/corrigido pelo fetch de verdade a seguir de qualquer jeito.
+  const cacheado = fichaClienteCache.get(idcentral);
+  if (cacheado) aplicarVisibilidadeAbasFicha(cacheado);
   try {
     const r = await fetch(`/api/ficha/${encodeURIComponent(idcentral)}`);
     const data = await parseJsonResponse(r);
     if (!data.ok) {
       el("ficha-sidebar-nome").textContent = "Não encontrado";
       el("ficha-aba-migracao").classList.add("hidden");
+      fichaClienteCache.delete(idcentral);
       mostrarErroEmNode(corpo, data.error || "Cliente não encontrado.");
       return;
     }
     fichaClienteAtual = data;
+    fichaClienteCache.set(idcentral, data);
     const nome = (data.implantacao && data.implantacao.cliente) || (data.migracao && data.migracao.nome) || idcentral;
-    el("ficha-sidebar-nome").textContent = nome;
+    el("ficha-sidebar-nome").textContent = `${nome} (#${idcentral})`;
+    topbarTitulo.textContent = `${nome} (#${idcentral})`;
     // Nome do cliente + engrenagem fica fora do conteúdo que troca a cada aba
     // (não é mais reconstruído em toda mostrarFichaAba) — menos repetição,
     // menos espaço de título ocupado em cada aba.
     cabecalho.innerHTML = "";
     cabecalho.appendChild(construirFichaHeader(data.implantacao, data.migracao, true));
-    el("ficha-aba-migracao").classList.toggle("hidden", !data.migracao);
-    // Cliente criado pela tela de Migração sem par na Implantação
-    // (tem_implantacao=false) tem menu enxuto: só Visão Geral, Migração e
-    // Histórico — sem Implantação/Marcos, que não existem pra ele.
-    const semImplantacao = data.implantacao && data.implantacao.tem_implantacao === false;
-    el("ficha-aba-implantacao").classList.toggle("hidden", semImplantacao);
-    el("ficha-aba-marcos").classList.toggle("hidden", semImplantacao);
+    const semImplantacao = aplicarVisibilidadeAbasFicha(data);
     const abasEscondidas = semImplantacao ? ["implantacao", "marcos"] : [];
     const abaFinal = (aba === "migracao" && !data.migracao) || abasEscondidas.includes(aba) ? "geral" : aba;
     mostrarFichaAba(abaFinal);
@@ -21736,10 +22510,23 @@ formFichaCredencial.addEventListener("submit", async (e) => {
   }
 });
 
-irParaTela(resolverCaminho(window.location.pathname).tela, {
+const rotaInicial = resolverCaminho(window.location.pathname);
+irParaTela(rotaInicial.tela, {
   semHistorico: true,
-  idcentral: resolverCaminho(window.location.pathname).idcentral,
-  sub: resolverCaminho(window.location.pathname).sub,
+  idcentral: rotaInicial.idcentral,
+  sub: rotaInicial.sub,
 });
+const estadoInicialHistorico = history.state && typeof history.state === "object" ? history.state : {};
+history.replaceState({
+  ...estadoInicialHistorico,
+  tela: rotaInicial.tela,
+  idcentral: rotaInicial.idcentral,
+  sub: rotaInicial.sub,
+  origem: rotaInicial.tela === "ficha" ? fichaOrigem : undefined,
+  indiceHistoricoApp: Number.isInteger(estadoInicialHistorico.indiceHistoricoApp)
+    ? estadoInicialHistorico.indiceHistoricoApp
+    : 0,
+}, "", window.location.pathname);
+atualizarSidebarVoltar();
 
 atualizarStatus();

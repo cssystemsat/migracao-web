@@ -61,6 +61,24 @@ Implantação, Controle de Migração e Ferramentas Auxiliares.
 - Modelos de comando por fabricante/modelo de rastreador, vinculados ao
   processo de migração do cliente; editar o modelo já atualiza o comando dos
   veículos cadastrados com aquele equipamento.
+- Verificação de comunicação dos veículos usa a identificação `IdTracker` da
+  SSX (`Tracker` nas listas de atualizados/desatualizados), comparada com o
+  campo `ID do equipamento` da ficha, sem usar código de integração ou placa.
+  Veículos sem ID do rastreador não são correspondidos nem confirmados; ao
+  atualizar a lista, confirmações antigas desses veículos são removidas.
+- Veículos sem `ID do equipamento` recebem automaticamente o status
+  `Sem rastreador`; quando um ID é preenchido, voltam para `Aguardando`.
+  `Cancelado` é preservado. Os status `Sem rastreador` e `Cancelado` não
+  entram nos totais, no percentual de progresso nem no resumo por modelo da
+  migração, mas continuam visíveis e filtráveis na lista de veículos.
+- Sincronizar com SSX também preenche Equipamento com o nome do modelo do
+  rastreador, resolvendo `IdModelTracker` pela listagem de modelos da API.
+  Quando faltam os códigos de integração, veículos existentes são
+  correspondidos pela placa para evitar duplicatas. A prévia fica salva no
+  servidor e pode ser aplicada mesmo após reinício; para listas grandes, a
+  confirmação mostra até 50 exemplos de cada tipo e informa os totais completos.
+- A planilha de veículos exibe até 100 linhas por página, preservando busca,
+  filtros e seleção entre páginas para reduzir travamentos em bases grandes.
 - Criação/consulta de planilha de migração no Google Drive por cliente
   (link salvo em `link_planilha`), e importação do que foi preenchido nela.
 - Autenticação na SSX em nome do cliente (sessão de uso avulso ou vinculada

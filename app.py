@@ -40,6 +40,8 @@ import credenciais_sql
 import feed_sql
 import migracoes_sql
 import planilha_migracao
+import ssx_veiculos_sync
+import ssx_http
 import ssxdesk_api
 import tarefas_sql
 import usuarios_sql
@@ -950,8 +952,19 @@ LISTAGENS = {
         campos=["ClientName", "Login", "IsActivatedClient"],
     ),
     "desatualizados": dict(
+        # payload=None (sem filtro) traz TODOS os desatualizados — o filtro
+        # antigo (EventDate Equal None) não era um bug, é um recorte válido
+        # de "nunca comunicou", mas restrito demais pra esta listagem geral
+        # (confirmado contra a API real: com filtro, só os que nunca tiveram
+        # EventDate; sem filtro, todos os desatualizados).
         endpoint="/Administration/Tracker/ListOutdatedTrackedUnits",
-        payload=[{"PropertyName": "EventDate", "Condition": "Equal", "Value": None}],
+        payload=None,
+        headers=["CLIENTE", "TRACKER", "UNIT"],
+        campos=["ClientTradingName", "Tracker", "TrackedUnit"],
+    ),
+    "atualizados": dict(
+        endpoint="/Administration/Tracker/ListMonitoredTrackedUnits",
+        payload=None,
         headers=["CLIENTE", "TRACKER", "UNIT"],
         campos=["ClientTradingName", "Tracker", "TrackedUnit"],
     ),
@@ -1065,11 +1078,15 @@ def montar_payload(tipo_config, mapping, row):
     return payload
 
 
-def requisicao_padrao(endpoint, payload, token):
+def requisicao_padrao(endpoint, payload, token, timeout=20, retries=0):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    r = requests.post(f"{BASE_URL}{endpoint}", json=payload if payload is not None else [], headers=headers, timeout=20)
-    r.raise_for_status()
-    return r.json()
+    return ssx_http.post_json(
+        f"{BASE_URL}{endpoint}",
+        payload if payload is not None else [],
+        headers,
+        timeout=timeout,
+        retries=retries,
+    )
 
 
 def _renderizar_shell():
@@ -1218,6 +1235,26 @@ def _token_para(idcentral_solicitado):
             ok=False,
             error="Sessão está vinculada a um cliente específico. Reautentique em Ferramentas Auxiliares > Autenticação.",
         ), 409
+    return token, None, None
+
+
+def _token_para_cliente(cliente_id):
+    """Autentica na SSX usando a credencial já salva no cliente
+    (`CredencialCliente` — Ficha do Cliente > Credencial SSX), sem depender
+    de sessão nem de um login manual avulso. Usado pelas rotas de
+    Sincronização de Veículos/Verificação de Comunicação, que rodam dentro da
+    Ficha de um cliente específico — diferente de `_token_para`, que serve
+    Ferramentas Auxiliares (login avulso, sem cliente fixo).
+    Retorna (token, None, None) se ok, ou (None, resposta_jsonify, status) se não."""
+    cred = credenciais_sql.obter_credencial_cliente(cliente_id)
+    if not cred or not cred.get("login") or not cred.get("senha"):
+        return None, jsonify(
+            ok=False,
+            error="Esse cliente ainda não tem uma credencial SSX salva (Ficha do Cliente > Credencial SSX).",
+        ), 400
+    token, erro = _autenticar_ssx(cred["login"], cred["senha"])
+    if erro:
+        return None, jsonify(ok=False, error=f"Falha ao autenticar com a credencial salva: {erro}"), 502
     return token, None, None
 
 
@@ -3319,7 +3356,7 @@ def _para_float(valor):
         return 0.0
 
 
-STATUS_VEICULO_VALIDOS = ["Aguardando", "Enviar", "Enviado", "Migrado", "Cancelado"]
+STATUS_VEICULO_VALIDOS = ["Aguardando", "Enviar", "Enviado", "Migrado", "Cancelado", "Sem rastreador"]
 STATUS_VEICULO_PADRAO = "Aguardando"
 
 
@@ -3377,37 +3414,47 @@ def _carregar_clientes_migracao():
     lista = []
     migracoes_por_cliente = migracoes_sql.listar_migracoes_todas_por_cliente()
     for cliente in clientes_sql.listar_clientes_resumo():
-        migracoes = migracoes_por_cliente.get(cliente["id"], [])
-        m = _migracao_atual(migracoes)
-        if m is None:
-            continue
-        lista.append({
-            "id": m["id"],
-            # Mantido fixo (não há mais "legado") só pra não quebrar o front,
-            # que usa c.origem === "unificado" pra habilitar funcionalidades
-            # completas (IdCentral travado, editar veículos/modelos etc.).
-            "origem": "unificado",
-            "cliente_id": cliente["id"],
-            "migracao_id": m["id"],
-            "nome": cliente["cliente"],
-            "idcentral": cliente["idcentral"],
-            "cs": cliente["csm"],
-            "tem_implantacao": cliente["tem_implantacao"],
-            "etapa": m.get("etapa") or MIGRACAO_ETAPA_PADRAO,
-            "plataforma_origem": m.get("plataforma_origem", ""),
-            "link_planilha": m.get("link_planilha", ""),
-            "link_acesso_origem": m.get("link_acesso_origem", ""),
-            "login_acesso_origem": m.get("login_acesso_origem", ""),
-            "senha_acesso_origem": m.get("senha_acesso_origem", ""),
-            "qtd_clientes": m.get("qtd_clientes", 0),
-            "qtd_placas": m.get("qtd_placas", 0),
-            "percentual_migracao": _percentual_migracao_para_lista(
-                cliente["id"], m["id"], m.get("link_planilha", ""),
-                m.get("percentual_migracao", 0), m.get("percentual_atualizado_em"),
-            ),
-            "data_inicio": m.get("data_inicio", ""),
-            "data_fim": m.get("data_fim", ""),
-        })
+        # Um cliente com dado inesperado (migração órfã, campo em formato
+        # errado etc.) não pode derrubar a listagem inteira pra todo mundo —
+        # pula só esse cliente e loga, pra investigar sem tirar o painel do
+        # ar pros outros.
+        try:
+            migracoes = migracoes_por_cliente.get(cliente["id"], [])
+            m = _migracao_atual(migracoes)
+            if m is None:
+                continue
+            lista.append({
+                "id": m["id"],
+                # Mantido fixo (não há mais "legado") só pra não quebrar o front,
+                # que usa c.origem === "unificado" pra habilitar funcionalidades
+                # completas (IdCentral travado, editar veículos/modelos etc.).
+                "origem": "unificado",
+                "cliente_id": cliente["id"],
+                "migracao_id": m["id"],
+                "nome": cliente["cliente"],
+                "idcentral": cliente["idcentral"],
+                "cs": cliente["csm"],
+                "tem_implantacao": cliente["tem_implantacao"],
+                "etapa": m.get("etapa") or MIGRACAO_ETAPA_PADRAO,
+                "plataforma_origem": m.get("plataforma_origem", ""),
+                "link_planilha": m.get("link_planilha", ""),
+                "link_acesso_origem": m.get("link_acesso_origem", ""),
+                "login_acesso_origem": m.get("login_acesso_origem", ""),
+                "senha_acesso_origem": m.get("senha_acesso_origem", ""),
+                "qtd_clientes": m.get("qtd_clientes", 0),
+                "qtd_placas": m.get("qtd_placas", 0),
+                "percentual_migracao": _percentual_migracao_para_lista(
+                    cliente["id"], m["id"], m.get("link_planilha", ""),
+                    m.get("percentual_migracao", 0), m.get("percentual_atualizado_em"),
+                ),
+                "data_inicio": m.get("data_inicio", ""),
+                "data_fim": m.get("data_fim", ""),
+            })
+        except Exception:
+            app.logger.exception(
+                "Falha ao montar item do painel de Migração pro cliente %s — pulado, não derruba a lista.",
+                cliente.get("id"),
+            )
     lista.sort(key=lambda c: (c.get("nome") or "").lower())
     return lista
 
@@ -3419,16 +3466,7 @@ def obter_ficha_cliente(idcentral):
     da reestruturação) e uma "migracao" (singular = tentativa atual/mais
     recente) pra não precisar reescrever toda a Ficha de uma vez; "migracoes"
     (plural) é a lista completa, pro histórico."""
-    # DIAGNÓSTICO TEMPORÁRIO — mede cada etapa pra achar onde a Ficha está
-    # realmente gastando tempo (ver conversa sobre lentidão ao abrir
-    # cliente). Remover depois de identificado o gargalo.
-    _t0 = time.perf_counter()
-
-    def _marca(nome):
-        print(f"[ficha:{idcentral}] {nome}: {time.perf_counter() - _t0:.3f}s", flush=True)
-
     implantacao = clientes_sql.buscar_cliente_por_idcentral(idcentral)
-    _marca("buscar_cliente_por_idcentral")
     if not implantacao:
         return jsonify(ok=False, error="Nenhum cliente encontrado com esse IdCentral."), 404
 
@@ -3447,17 +3485,13 @@ def obter_ficha_cliente(idcentral):
             if telefones is None:
                 telefones = usuarios_sql.telefones_profissionais_por_nome()
             implantacao[f"{prefixo}_whatsapp"] = telefones.get(implantacao.get(prefixo) or "", "")
-    _marca("whatsapp_csm_vendedor")
 
     migracoes = migracoes_sql.listar_migracoes(implantacao["id"])
-    _marca("listar_migracoes")
     migracao_atual = _migracao_atual(migracoes)
 
     dados_cred = credenciais_sql.obter_credencial_cliente(implantacao["id"])
-    _marca("obter_credencial_cliente")
     credencial_configurada = bool(dados_cred and dados_cred.get("login") and dados_cred.get("senha"))
     documentos = cliente_documentos_sql.listar_metadados(implantacao["id"])
-    _marca("listar_documentos")
     resposta = dict(
         ok=True,
         idcentral=idcentral,
@@ -3472,7 +3506,6 @@ def obter_ficha_cliente(idcentral):
     # Autenticar sem expor a credencial.
     if _sou_admin() and dados_cred:
         resposta["credencial_login"] = dados_cred.get("login", "")
-    _marca("montar_resposta")
     return jsonify(**resposta)
 
 
@@ -3623,12 +3656,51 @@ CAMPOS_VEICULO_ATUALIZAVEIS = [
 ]
 
 
+VEICULOS_POR_PAGINA_PADRAO = 100
+VEICULOS_POR_PAGINA_MAXIMO = 500
+# Mesma lista de migracoes_sql._COLUNAS_FILTRAVEIS_POR_COLUNA — cada uma vira
+# um query param "col_<campo>" (caixa de filtro "contém" estilo Excel, ver
+# trFiltros em script.js).
+VEICULOS_COLUNAS_FILTRAVEIS = [
+    "cliente", "veiculo", "equipamento", "id_equipamento", "apn", "ls_apn",
+    "numero_linha", "comando", "ultima_comunicacao",
+]
+
+
 @app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos", methods=["GET"])
 def listar_veiculos_cliente(cliente_id, migracao_id):
+    """Filtra/ordena/pagina no banco — a tela pedia a lista inteira da
+    migração de uma vez (ok pra planilhas pequenas, mas travava a abertura em
+    central grande como a Cartracking, com busca/ordenação feitas em memória
+    no front sobre tudo). `resumo` traz as contagens agregadas (chips de
+    status + "migrado/total" por cliente) que antes vinham de somar a lista
+    inteira no JS."""
     migracao = migracoes_sql.buscar_migracao(migracao_id)
     if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    return jsonify(ok=True, veiculos=migracoes_sql.listar_veiculos(migracao_id))
+    try:
+        pagina = max(int(request.args.get("pagina", 0)), 0)
+    except ValueError:
+        pagina = 0
+    try:
+        tamanho = min(max(int(request.args.get("tamanho", VEICULOS_POR_PAGINA_PADRAO)), 1), VEICULOS_POR_PAGINA_MAXIMO)
+    except ValueError:
+        tamanho = VEICULOS_POR_PAGINA_PADRAO
+    busca = request.args.get("busca", "").strip()
+    status = request.args.get("status", "").strip()
+    ordenar_por = request.args.get("ordenar_por") or None
+    ordem_asc = request.args.get("ordem", "asc") != "desc"
+    filtros_coluna = {
+        campo: valor
+        for campo in VEICULOS_COLUNAS_FILTRAVEIS
+        if (valor := request.args.get(f"col_{campo}", "").strip())
+    }
+    veiculos, total = migracoes_sql.listar_veiculos_pagina(
+        migracao_id, pagina=pagina, tamanho=tamanho, busca=busca, status=status,
+        ordenar_por=ordenar_por, ordem_asc=ordem_asc, filtros_coluna=filtros_coluna,
+    )
+    resumo = migracoes_sql.calcular_resumo_veiculos(migracao_id)
+    return jsonify(ok=True, veiculos=veiculos, total=total, pagina=pagina, tamanho=tamanho, resumo=resumo)
 
 
 @app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/<int:veiculo_id>", methods=["PUT"])
@@ -3642,14 +3714,17 @@ def atualizar_veiculo_cliente(cliente_id, migracao_id, veiculo_id):
         campos["status"] = status
     if not campos:
         return jsonify(ok=False, error="Nada para atualizar."), 400
-    if not migracoes_sql.atualizar_veiculo(veiculo_id, campos):
+    veiculo = migracoes_sql.atualizar_veiculo(veiculo_id, campos)
+    if not veiculo:
         return jsonify(ok=False, error="Veículo não encontrado."), 404
-    return jsonify(ok=True, **campos)
+    migracoes_sql.recalcular_e_persistir_progresso(migracao_id)
+    return jsonify(ok=True, **veiculo)
 
 
 @app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/<int:veiculo_id>", methods=["DELETE"])
 def excluir_veiculo_cliente(cliente_id, migracao_id, veiculo_id):
     migracoes_sql.excluir_veiculo(veiculo_id)
+    migracoes_sql.recalcular_e_persistir_progresso(migracao_id)
     return jsonify(ok=True)
 
 
@@ -3661,29 +3736,23 @@ def salvar_item_veiculo_cliente(cliente_id, migracao_id):
     resultado = migracoes_sql.salvar_item_veiculo(migracao_id, request.get_json(force=True) or {})
     if resultado is None:
         return jsonify(ok=False, error="Informe cliente e veículo."), 400
+    migracoes_sql.recalcular_e_persistir_progresso(migracao_id)
     return jsonify(ok=True, veiculo=resultado)
 
 
 @app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/resumo-planilha", methods=["GET"])
 def resumo_planilha_migracao_cliente(cliente_id, migracao_id):
-    """Leitura "ao vivo", só-leitura (não grava nada) — chamada sozinha toda
-    vez que a aba Migração da Ficha é aberta, pra mostrar o resumo por
-    modelo e o % de progresso sempre em dia com a planilha, sem precisar
-    clicar em "Importar da planilha" (que é a ação pesada, grava os
-    veículos). % vem da linha "Total" do resumo por modelo (Comunicou/Total)
-    — mais leve que reler a aba Migração inteira só pra essa conta."""
+    """Calcula o resumo por modelo e o % de progresso em cima de
+    `migracao_veiculos`, normalizando status e contagens para a Ficha.
+    (pedido do usuário — a tabela agora é alimentada pela API da SSX, não
+    precisa mais ler a planilha do Google pra isso; `ler_resumo_modelos_planilha_migracao`
+    ficou sem uso aqui, mas continua existindo pro fluxo de importação manual
+    antigo). % vem da linha "Total" do resumo por modelo (Comunicou/Total)."""
     migracao = migracoes_sql.buscar_migracao(migracao_id)
     if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    link_planilha = migracao.get("link_planilha")
-    if not link_planilha:
-        return jsonify(ok=False, error="Essa migração não tem planilha vinculada."), 400
-    try:
-        resumo_modelos = planilha_migracao.ler_resumo_modelos_planilha_migracao(link_planilha)
-    except planilha_migracao.PlanilhaMigracaoError as err:
-        return jsonify(ok=False, error=str(err)), 502
-    except HttpError as err:
-        return jsonify(ok=False, error=f"Erro do Google Sheets ao ler a planilha: {err}"), 502
+    migracoes_sql.recalcular_e_persistir_progresso(migracao_id)
+    resumo_modelos = migracoes_sql.calcular_resumo_modelos_local(migracao_id)
     total_linha = next((r for r in resumo_modelos if r["modelo"].strip().lower() == "total"), None)
     percentual_migracao = None
     if total_linha:
@@ -3717,45 +3786,172 @@ def importar_veiculos_planilha_cliente(cliente_id, migracao_id):
     except HttpError as err:
         return jsonify(ok=False, error=f"Erro do Google Sheets ao ler a planilha: {err}"), 502
     migracoes_sql.importar_veiculos_planilha(migracao_id, veiculos)
-    qtd_clientes = len({v["cliente"] for v in veiculos})
-    qtd_placas = len({v["veiculo"] for v in veiculos})
-    # Progresso da migração = % de veículos com status "Migrado" (equivalente
-    # ao "Comunicou" da planilha) sobre o total importado agora.
-    migrados = sum(1 for v in veiculos if v["status"] == "Migrado")
-    percentual_migracao = round(100 * migrados / len(veiculos)) if veiculos else 0
-    migracoes_sql.atualizar_contagens(migracao_id, qtd_clientes, qtd_placas, percentual_migracao)
-    # Resumo por modelo (tabela da aba "Infos gerais") — são fórmulas da
-    # própria planilha, só lidas prontas aqui (ver docstring da função);
-    # falha em lê-lo não deve derrubar a importação dos veículos, que já
-    # aconteceu com sucesso nesse ponto.
-    try:
-        resumo_modelos = planilha_migracao.ler_resumo_modelos_planilha_migracao(link_planilha)
-    except Exception:
-        resumo_modelos = []
+    contagens = migracoes_sql.recalcular_e_persistir_progresso(migracao_id)
+    qtd_clientes = contagens["qtd_clientes"]
+    qtd_placas = contagens["qtd_placas"]
+    percentual_migracao = contagens["percentual_migracao"]
+    resumo_modelos = migracoes_sql.calcular_resumo_modelos_local(migracao_id)
     return jsonify(
         ok=True, importados=len(veiculos), qtd_clientes=qtd_clientes, qtd_placas=qtd_placas,
         percentual_migracao=percentual_migracao, resumo_modelos=resumo_modelos,
     )
 
 
+# --- Sincronização de Veículos SSX + Verificação de Comunicação ---
+# Mesmo padrão de job/thread/polling de deletar_veiculos_executar/
+# _executar_deletar_veiculos (app.py, seção "DELETAR VEÍCULOS EM MASSA") —
+# token resolvido na requisição, thread não depende de `session`. Ver plano
+# aprovado "Sincronização de Veículos SSX" pro raciocínio completo.
+VERIFICAR_COMUNICACAO_SSX_JOBS = {}
+VERIFICAR_COMUNICACAO_SSX_JOBS_LOCK = threading.Lock()
+SSX_LIST_TIMEOUT_SEGUNDOS = 120
+SSX_LIST_RETRIES = 1
+
+
+def _executar_sincronizar_veiculos_ssx(job_id, migracao_id, token):
+    try:
+        veiculos_locais = migracoes_sql.listar_veiculos(migracao_id)
+        veiculos_ssx = requisicao_padrao(
+            "/Administration/Vehicle/List", None, token,
+            timeout=SSX_LIST_TIMEOUT_SEGUNDOS, retries=SSX_LIST_RETRIES,
+        )
+        modelos_rastreador = requisicao_padrao(
+            "/Administration/Tracker/ListTrackerModel", None, token,
+            timeout=SSX_LIST_TIMEOUT_SEGUNDOS, retries=SSX_LIST_RETRIES,
+        )
+        diff = ssx_veiculos_sync.calcular_diff_sincronizacao(
+            veiculos_locais,
+            veiculos_ssx or [],
+            modelos_rastreador or [],
+        )
+        migracoes_sql.atualizar_job_sincronizacao_ssx(job_id, "concluido", diff=diff)
+    except requests.exceptions.RequestException as e:
+        migracoes_sql.atualizar_job_sincronizacao_ssx(
+            job_id, "erro", erro=f"Falha ao consultar a SSX: {e}"
+        )
+    except Exception as e:
+        app.logger.exception("Falha inesperada na sincronização SSX (job %s)", job_id)
+        migracoes_sql.atualizar_job_sincronizacao_ssx(
+            job_id, "erro", erro=f"Falha ao processar a sincronização: {e}"
+        )
+
+
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/sincronizar", methods=["POST"])
+@requer_operador
+def sincronizar_veiculos_ssx_iniciar(cliente_id, migracao_id):
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    token, erro_resp, status = _token_para_cliente(cliente_id)
+    if erro_resp:
+        return erro_resp, status
+
+    job_id = uuid.uuid4().hex
+    migracoes_sql.criar_job_sincronizacao_ssx(migracao_id, job_id)
+    threading.Thread(
+        target=_executar_sincronizar_veiculos_ssx,
+        args=(job_id, migracao_id, token),
+        daemon=True,
+    ).start()
+    return jsonify(ok=True, job_id=job_id)
+
+
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/sincronizar/status/<job_id>")
+def sincronizar_veiculos_ssx_status(cliente_id, migracao_id, job_id):
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    resultado = migracoes_sql.buscar_job_sincronizacao_ssx(migracao_id, job_id)
+    if not resultado:
+        return jsonify(ok=False, error="Job não encontrado."), 404
+    return jsonify(ok=True, **resultado)
+
+
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/sincronizar/aplicar/<job_id>", methods=["POST"])
+@requer_operador
+def sincronizar_veiculos_ssx_aplicar(cliente_id, migracao_id, job_id):
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    resultado, erro = migracoes_sql.aplicar_job_sincronizacao_ssx(migracao_id, job_id)
+    if erro == "nao_encontrado":
+        return jsonify(ok=False, error="Job não encontrado para esta migração."), 404
+    if erro:
+        return jsonify(ok=False, error="Resultado da sincronização não encontrado. Rode a sincronização novamente."), 400
+    return jsonify(ok=True, **resultado)
+
+
+def _executar_verificar_comunicacao_ssx(job_id, migracao_id, token):
+    try:
+        veiculos_locais = migracoes_sql.listar_veiculos(migracao_id)
+        monitorados = requisicao_padrao(
+            "/Administration/Tracker/ListMonitoredTrackedUnits", None, token,
+            timeout=SSX_LIST_TIMEOUT_SEGUNDOS, retries=SSX_LIST_RETRIES,
+        ) or []
+        desatualizados = requisicao_padrao(
+            "/Administration/Tracker/ListOutdatedTrackedUnits", None, token,
+            timeout=SSX_LIST_TIMEOUT_SEGUNDOS, retries=SSX_LIST_RETRIES,
+        ) or []
+        resultado = ssx_veiculos_sync.calcular_status_comunicacao(
+            veiculos_locais,
+            monitorados,
+            desatualizados,
+        )
+        migracoes_sql.aplicar_status_comunicacao_ssx(resultado)
+        migracoes_sql.recalcular_e_persistir_progresso(migracao_id)
+        # Dado bruto da SSX (`detalhe`) não precisa ir pro front, que só
+        # pinta status + mostra o marco já persistido no banco.
+        status_por_veiculo = {vid: r["status"] for vid, r in resultado.items()}
+        with VERIFICAR_COMUNICACAO_SSX_JOBS_LOCK:
+            VERIFICAR_COMUNICACAO_SSX_JOBS[job_id] = {"status": "concluido", "status_por_veiculo": status_por_veiculo}
+    except requests.exceptions.RequestException as e:
+        with VERIFICAR_COMUNICACAO_SSX_JOBS_LOCK:
+            VERIFICAR_COMUNICACAO_SSX_JOBS[job_id] = {"status": "erro", "erro": f"Falha ao consultar a SSX: {e}"}
+    except Exception as e:
+        app.logger.exception("Falha inesperada na verificação de comunicação SSX (job %s)", job_id)
+        with VERIFICAR_COMUNICACAO_SSX_JOBS_LOCK:
+            VERIFICAR_COMUNICACAO_SSX_JOBS[job_id] = {"status": "erro", "erro": f"Falha ao processar a verificação de comunicação: {e}"}
+
+
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/verificar-comunicacao", methods=["POST"])
+@requer_operador
+def verificar_comunicacao_ssx_iniciar(cliente_id, migracao_id):
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
+        return jsonify(ok=False, error="Migração não encontrada."), 404
+    token, erro_resp, status = _token_para_cliente(cliente_id)
+    if erro_resp:
+        return erro_resp, status
+
+    job_id = uuid.uuid4().hex
+    with VERIFICAR_COMUNICACAO_SSX_JOBS_LOCK:
+        VERIFICAR_COMUNICACAO_SSX_JOBS[job_id] = {"status": "rodando"}
+    threading.Thread(
+        target=_executar_verificar_comunicacao_ssx,
+        args=(job_id, migracao_id, token),
+        daemon=True,
+    ).start()
+    return jsonify(ok=True, job_id=job_id)
+
+
+@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/verificar-comunicacao/status/<job_id>")
+def verificar_comunicacao_ssx_status(cliente_id, migracao_id, job_id):
+    with VERIFICAR_COMUNICACAO_SSX_JOBS_LOCK:
+        job = VERIFICAR_COMUNICACAO_SSX_JOBS.get(job_id)
+        if not job:
+            return jsonify(ok=False, error="Job não encontrado."), 404
+        resultado = dict(job)
+    return jsonify(ok=True, **resultado)
+
+
 @app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>", methods=["PATCH"])
 def atualizar_contagens_migracao_cliente(cliente_id, migracao_id):
-    """Atualiza só qtd_clientes/qtd_placas, já calculados no navegador a partir
-    da lista de veículos carregada — evita reler a tabela inteira a cada linha
-    criada/excluída."""
-    data = request.get_json(force=True) or {}
-    qtd_clientes = _para_int(data["qtd_clientes"]) if "qtd_clientes" in data else None
-    qtd_placas = _para_int(data["qtd_placas"]) if "qtd_placas" in data else None
-    if qtd_clientes is None and qtd_placas is None:
-        return jsonify(ok=False, error="Nada para atualizar."), 400
-    if not migracoes_sql.atualizar_contagens(migracao_id, qtd_clientes, qtd_placas):
+    """Recalcula os totais no servidor após criação ou exclusão de um veículo."""
+    migracao = migracoes_sql.buscar_migracao(migracao_id)
+    if not migracao or migracao["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    resposta = {}
-    if qtd_clientes is not None:
-        resposta["qtd_clientes"] = qtd_clientes
-    if qtd_placas is not None:
-        resposta["qtd_placas"] = qtd_placas
-    return jsonify(ok=True, **resposta)
+    contagens = migracoes_sql.recalcular_e_persistir_progresso(migracao_id)
+    return jsonify(ok=True, **contagens)
 
 
 def _contar(query):
@@ -3772,10 +3968,11 @@ def dashboard_indicadores():
 
 
 def _carregar_dashboard():
-    # Implantação (legado, ainda em Firestore) continua com contagem agregada.
-    total_implantacao = _contar(db.collection(IMPLANTACAO_CLIENTES_COLLECTION))
-    implantacao_ativos = total_implantacao - _contar(
-        db.collection(IMPLANTACAO_CLIENTES_COLLECTION).where(filter=FieldFilter("etapa", "==", "concluido")))
+    # Implantação (Postgres, tabela clientes) — contagem direto no banco.
+    # Antes lia a coleção Firestore legada (IMPLANTACAO_CLIENTES_COLLECTION),
+    # que parou de receber cliente novo desde a virada pra Postgres e ficava
+    # com número parado/errado.
+    total_implantacao, implantacao_ativos = clientes_sql.contar_clientes_implantacao()
 
     # Migração (modelo unificado, Postgres) — mesma métrica de antes
     # (total de tentativas rastreadas vs. quantas já concluíram todas as

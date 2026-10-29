@@ -59,6 +59,36 @@
 
 - **API da SSX** (`BASE_URL`) — importação de cadastros, consultas,
   autenticação em nome do cliente.
+- **Verificação de comunicação na Migração** — as listas de unidades
+  monitoradas/desatualizadas são cruzadas pelo `IdTracker` (`Tracker` na
+  resposta da SSX), diretamente com `id_equipamento` da ficha, sem usar
+  `TrackerIntegrationCode` nem placa. Veículos sem `id_equipamento` não são
+  correspondidos ou confirmados; confirmações históricas desses registros
+  também são limpas ao recalcular a lista. Cada lista é consultada uma vez por
+  verificação.
+- **Timeouts de consultas SSX em migrações grandes** — Vehicle/List,
+  Tracker/ListTrackerModel e as duas listas de comunicação usam timeout de
+  leitura de 120 segundos e uma repetição em falha de rede ou gateway
+  transitório (502/503/504). Outros endpoints mantêm o timeout padrão de 20
+  segundos. A tela informa que a operação pode levar alguns minutos, limita o
+  polling a 10 minutos e os jobs registram erros inesperados para não ficarem
+  presos em `rodando`.
+- **Sincronização de veículos SSX** — consulta `Vehicle/List` e
+  `Tracker/ListTrackerModel`; resolve `IdModelTracker` para `TrackerModel` e
+  grava o nome retornado no campo local `equipamento`. Para veículos sem
+  código de integração, usa a placa como último critério para casar registros
+  já existentes. Prévia e resultado ficam em `migracao_ssx_sync_jobs` por até
+  sete dias, em vez de depender da memória do processo; aplicar a prévia e
+  marcá-la como aplicada ocorre na mesma transação e é idempotente. A tela
+  limita a 50 detalhes de cada tipo, mantendo os totais completos.
+- **Planilha de veículos** — a listagem não recalcula nem grava a migração
+  durante um GET. A interface mantém os dados para busca/filtros, mas monta
+  somente 100 linhas por página para evitar milhares de controles no DOM.
+- **Contagem da Migração** — `migracoes_sql.normalizar_status_veiculo`
+  define `Sem rastreador` quando `id_equipamento` está vazio (e retorna para
+  `Aguardando` ao preencher o ID, exceto quando o status é `Cancelado`).
+  `Sem rastreador` e `Cancelado` são excluídos dos totais e percentuais; as
+  linhas permanecem armazenadas e disponíveis na tabela.
 - **SMS Market** — envio de comando em massa aos rastreadores.
 - **API de Integrações do ssxdesk** (`ssxdesk_api.py`) — chamados de suporte
   do cliente, buscados pelo IdCentral (bloco "Chamados abertos" na Visão

@@ -122,6 +122,27 @@ manter a curva de aprendizado baixa entre um conversor e outro, e permitir
 reaproveitar a mesma base de validação no Validador de Planilha de
 Importação.
 
+## Verificação de comunicação da Migração por `IdTracker`
+
+As listas `ListMonitoredTrackedUnits` e `ListOutdatedTrackedUnits` da SSX
+identificam o rastreador pela propriedade `Tracker` (`IdTracker`), distinta
+de `TrackerIntegrationCode`. O botão Verificar comunicação compara esse
+`IdTracker` diretamente com o campo `id_equipamento` da ficha, sem traduzir
+o código de integração nem recorrer à placa. Veículos sem `id_equipamento`
+não são correspondidos nem confirmados; confirmações históricas desses
+registros são removidas ao atualizar a lista. Cada lista é consultada uma vez
+por verificação.
+
+## Equipamento da Migração preenchido pelo modelo SSX
+
+O campo `equipamento` na ficha representa o nome do modelo do rastreador.
+Durante a sincronização, `Vehicle/List.IdModelTracker` é resolvido por
+`Tracker/ListTrackerModel` para `TrackerModel`; o nome é gravado em veículos
+novos e atualizado nos existentes quando a API retorna um modelo conhecido.
+Modelo ausente ou não resolvido não apaga valor já preenchido. Se os códigos
+de integração não permitirem localizar um veículo existente, a placa é usada
+como último critério de correspondência para evitar duplicá-lo.
+
 ## Avaliações de NPS (Wootric) persistidas localmente, não consultadas ao vivo
 
 A integração com a Wootric (bloco "Avaliações NPS" da Ficha) começou

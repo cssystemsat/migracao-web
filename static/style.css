@@ -1,3 +1,24 @@
+/* Inter self-hosted — em vez de depender do CDN do Google Fonts (que pode
+   ser bloqueado por extensão/rede corporativa e cair silenciosamente pra
+   fonte do sistema, parecida mas não igual). Um arquivo variável cobre os
+   pesos 400–700 por subset. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/inter-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 :root {
   --azul: #1d4ed8;
   --azul-escuro: #1e3a8a;
@@ -20,7 +41,9 @@
   --painel: #ffffff;
   --fundo-pagina: var(--cinza-100);
   --radius: 7px;
+  --radius-lg: 8px;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 2px 10px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 /* Tema escuro — troca as cores de superfície/texto; --branco continua fixo
@@ -46,6 +69,7 @@
   --turquesa: #5eead4;
   --laranja: #fb923c;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.25);
   color-scheme: dark;
 }
 :root[data-theme="dark"] .saida-corpo { background: #10151f; }
@@ -56,6 +80,27 @@
 :root[data-theme="dark"] .feed-post-aniversario { background: #14532d; border-color: #166534; }
 
 * { box-sizing: border-box; }
+
+/* Ícones da sidebar (Google Material Symbols, carregado no <head> do
+   index.html) — mesma fonte/ícones do mockup, usada via ligadura de texto
+   (ex.: <span class="material-symbols-outlined">grid_view</span>) em vez de
+   SVG desenhado à mão. Receita padrão do Google pros "variable axes". */
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
 
 /* Interface dimensionada pra ficar confortável em 100% de zoom do navegador
    (equivalente ao que antes só se conseguia em 80%) — a base de 14px (em vez
@@ -68,11 +113,21 @@ html { font-size: 87.5%; }
 html, body { height: 100%; }
 body {
   margin: 0;
-  font-family: "Segoe UI", Arial, sans-serif;
-  background: var(--fundo-pagina);
-  color: var(--cinza-900);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+:root[data-theme="dark"] body { background: var(--fundo-pagina); color: var(--cinza-900); }
+
+/* Scrollbar fina, no padrão do mockup (Tailwind slate) — some por padrão no
+   resto do app (ver regra mais abaixo pros elementos que ainda escondem). */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 /* O grid de sidebar/topbar/conteudo é só da tela principal do app (index.html,
    cujo <body> sempre carrega data-usuario-perfil) — sem esse escopo, ele vazava
    pra tela de login (login_app.html, <body> sem esse atributo) e espremia o
@@ -88,9 +143,13 @@ body[data-usuario-perfil] {
 
 .topbar {
   grid-area: topbar;
-  background: var(--painel);
-  border-bottom: 1px solid var(--cinza-200);
-  padding: 6px 13px;
+  height: 56px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-bottom: none;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
+  padding: 0 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -98,6 +157,7 @@ body[data-usuario-perfil] {
   gap: 6px;
   min-width: 0;
 }
+:root[data-theme="dark"] .topbar { background: rgba(22, 28, 43, 0.9); }
 
 /* Vive dentro de Ferramentas Auxiliares (não mais na topbar), então usa o
    tamanho padrão dos outros formulários — o encolhimento anterior era só
@@ -793,21 +853,53 @@ table.tabela-credenciais th { background: var(--cinza-100); }
 .app-usuario-nome { font-weight: 600; }
 
 .app-usuario-menu { position: relative; }
-.btn-engrenagem-usuario {
-  width: 29px;
-  height: 29px;
-  padding: 0;
+
+/* Botões de ícone soltos da topbar (tema). */
+.topbar-icone-btn { width: 28px; height: 28px; padding: 0; background: none; border: none; border-radius: 4px; color: #475569; display: flex; align-items: center; justify-content: center; position: relative; }
+.topbar-icone-btn:hover:not(:disabled) { background: var(--cinza-100); color: var(--cinza-900); }
+.topbar-icone-btn .material-symbols-outlined { font-size: 20px; }
+.topbar-icone-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Bolinha do sininho — só decorativa (o botão ainda não tem função real por
+   trás, ver title="Notificações (em breve)"). */
+#topbar-notificacoes::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--cinza-100);
-  color: var(--cinza-700);
-  font-size: 1.05rem;
+  background: #0f326d;
+}
+
+/* Avatar + nome/cargo do usuário (antes só o avatar sozinho). */
+.topbar-usuario-btn { display: flex; align-items: center; gap: 8px; padding: 2px; background: none; border: none; border-radius: var(--radius); }
+.topbar-usuario-btn:hover:not(:disabled) { background: var(--cinza-100); }
+.topbar-avatar {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: #0f326d;
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
-.btn-engrenagem-usuario:hover { background: var(--cinza-200); }
-.topbar-avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.topbar-usuario-btn:hover:not(:disabled) .topbar-avatar,
+.topbar-usuario-btn:focus-visible .topbar-avatar {
+  box-shadow: 0 0 0 2px var(--painel), 0 0 0 4px var(--azul);
+}
+.topbar-avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; display: block; }
+.topbar-avatar-placeholder { width: 12px; height: 12px; }
+.topbar-usuario-texto { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; }
+.topbar-usuario-texto .topbar-usuario-nome { font-size: 12px; line-height: 15px; font-weight: 500; color: #0f172a; }
+.topbar-usuario-cargo { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.33px; color: #94a3b8; }
+@media (max-width: 700px) {
+  .topbar-usuario-texto { display: none; }
+}
 
 .app-menu-dropdown {
   position: absolute;
@@ -1165,6 +1257,16 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .timeline-card-acoes button { width: auto; padding: 2px 5px; font-size: 0.7rem; }
 
 .veiculos-migracao-corpo { width: 100%; }
+.veiculos-migracao-paginacao {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  color: var(--cinza-600);
+  font-size: 0.85rem;
+}
+.veiculos-migracao-paginacao button { width: auto; margin: 0; }
 
 .veiculos-migracao-filtros { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 11px; }
 .veiculos-migracao-filtros input[type="text"] {
@@ -1195,6 +1297,7 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .veiculo-chip-status.chip-enviado { background: #fef9c3; color: #854d0e; border-color: transparent; }
 .veiculo-chip-status.chip-migrado { background: #dcfce7; color: #166534; border-color: transparent; }
 .veiculo-chip-status.chip-cancelado { background: #e5e7eb; color: #374151; border-color: transparent; }
+.veiculo-chip-status.chip-sem-rastreador { background: #f3f4f6; color: #4b5563; border-color: transparent; }
 
 /* Tabela de veículos: mais respiro e menos "grade de planilha" (sem a borda
    vertical entre células) que o .tabela-saida padrão — a cor de fundo por
@@ -1226,6 +1329,30 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 }
 .veiculo-comando-input:hover, .veiculo-comando-input:focus { background: var(--painel); border-color: var(--cinza-500); }
 
+/* Linha de filtro "contém" por coluna, estilo Excel (ver trFiltros em
+   script.js) — fica embaixo do cabeçalho ordenável. Não acompanha o sticky
+   da 1ª linha do cabeçalho (ficaria sobreposta nela ao rolar); rola com o
+   corpo da tabela mesmo, é a opção mais simples e sem depender de altura
+   calculada do cabeçalho de cima. */
+table.tabela-saida tr.veiculos-migracao-filtros-coluna th {
+  position: static;
+  padding-top: 4px;
+  padding-bottom: 6px;
+  text-transform: none;
+  background: var(--cinza-100);
+}
+.veiculo-filtro-coluna-input {
+  width: 100%;
+  min-width: 90px;
+  padding: 4px 6px;
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+  font-weight: 400;
+  background: var(--painel);
+}
+.veiculo-filtro-coluna-input:focus { border-color: var(--azul); }
+
 .btn-enviar-icone {
   background: var(--verde);
   color: var(--branco);
@@ -1249,22 +1376,42 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
   background: var(--painel);
 }
 
+table.tabela-saida th.th-ordenavel { cursor: pointer; user-select: none; }
+table.tabela-saida th.th-ordenavel:hover { background: var(--cinza-200, #e5e7eb); }
+
 table.tabela-saida tr.linha-status-aguardando td { background: #dbeafe; }
 table.tabela-saida tr.linha-status-enviado td { background: #fef9c3; }
 table.tabela-saida tr.linha-status-migrado td { background: #dcfce7; }
 table.tabela-saida tr.linha-status-enviar td { background: #fee2e2; }
 table.tabela-saida tr.linha-status-cancelado td { background: #e5e7eb; }
+table.tabela-saida tr.linha-status-sem-rastreador td { background: #f3f4f6; }
 table.tabela-saida tr.linha-status-aguardando:hover td { background: #bfdbfe; }
 table.tabela-saida tr.linha-status-enviado:hover td { background: #fef08a; }
 table.tabela-saida tr.linha-status-migrado:hover td { background: #bbf7d0; }
 table.tabela-saida tr.linha-status-enviar:hover td { background: #fecaca; }
 table.tabela-saida tr.linha-status-cancelado:hover td { background: #d1d5db; }
+table.tabela-saida tr.linha-status-sem-rastreador:hover td { background: #e5e7eb; }
 
 .veiculo-comando-textarea {
   resize: vertical;
   min-height: 2.4em;
   font-family: inherit;
 }
+
+.veiculo-cliente-ssx { color: var(--texto-secundario, #6b7280); font-size: 0.85rem; }
+
+.badge-veiculo-nao-cadastrado,
+.badge-migracao-confirmada,
+.badge-migracao-nao-confirmada {
+  display: inline-flex; align-items: center; font-size: 0.68rem; font-weight: 700;
+  padding: 2px 6px; border-radius: 999px; white-space: nowrap;
+}
+.badge-veiculo-nao-cadastrado { background: #fee2e2; color: #991b1b; }
+.badge-migracao-confirmada { background: #dcfce7; color: #166534; }
+.badge-migracao-nao-confirmada { background: #e5e7eb; color: #4b5563; }
+:root[data-theme="dark"] .badge-veiculo-nao-cadastrado { background: #7f1d1d; color: #fecaca; }
+:root[data-theme="dark"] .badge-migracao-confirmada { background: #14532d; color: #bbf7d0; }
+:root[data-theme="dark"] .badge-migracao-nao-confirmada { background: #374151; color: #d1d5db; }
 
 .veiculo-contagem-cliente {
   font-size: 0.75rem;
@@ -1819,7 +1966,7 @@ table.conversor-edicao-tabela tr.conversor-edicao-linha-erro td { background: #f
 /* Título da faixa ("Tokens Extraídos"): pequeno, no mesmo estilo dos rótulos da tela. */
 .quebra-string-bytes-titulo {
   margin-bottom: 2px;
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--cinza-500);
@@ -1959,10 +2106,29 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
 
 /* --- FASE 1: nova navegação (topbar + sidebar de 4 áreas + Dashboard) --- */
 
-.topbar-esquerda { flex: 1; min-width: 0; display: flex; align-items: center; gap: 13px; }
-/* Título da página vive aqui (não mais dentro de cada painel). */
-.topbar-titulo { margin: 0; font-size: 1rem; font-weight: 700; color: var(--cinza-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px; min-width: 0; }
-.topbar-busca { flex: 1; max-width: 256px; min-width: 0; position: relative; }
+.topbar-esquerda { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+
+.topbar-marca { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px; border: none; border-radius: var(--radius); background: none; color: inherit; font: inherit; text-align: left; }
+.topbar-marca:hover:not(:disabled) { background: var(--cinza-100); }
+.topbar-marca-icone { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 4px; background: #0f326d; color: #fff; flex-shrink: 0; }
+.topbar-marca-icone .material-symbols-outlined { font-size: 18px; }
+.topbar-marca-nome { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--cinza-900); white-space: nowrap; }
+
+.topbar-divisor { width: 1px; height: 20px; background: #e2e8f0; flex-shrink: 0; }
+.topbar-divisor-sm { height: 16px; }
+
+/* Breadcrumb — "Clientes / <nome do cliente>" só aparece na Ficha (ver
+   atualizarTituloTopbar); nas outras telas é só o nome da tela mesmo. */
+.topbar-breadcrumb { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 16px; }
+.topbar-breadcrumb-raiz { color: var(--cinza-700); text-decoration: none; white-space: nowrap; }
+.topbar-breadcrumb-raiz:hover { color: var(--azul); text-decoration: underline; }
+.topbar-breadcrumb-sep { color: var(--cinza-500); }
+.topbar-breadcrumb-atual { font-size: 12px; font-weight: 600; color: var(--cinza-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+.topbar-busca { width: 288px; max-width: 32vw; min-width: 0; position: relative; }
+@media (max-width: 900px) {
+  .topbar-busca { display: none; }
+}
 
 /* Títulos que agora estão na topbar — escondidos dentro das telas (o
    subtítulo, quando tem, continua). Minha conta e Ficha mantêm o próprio
@@ -1975,17 +2141,40 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
 .saida-header:has(#saida-titulo.oculto-topbar):not(:has(.saida-header-botoes button:not(.hidden))) { display: none; }
 .topbar-busca input {
   width: 100%;
+  height: 24px;
   box-sizing: border-box;
-  padding: 5px 42px 5px 22px;
-  border: 1px solid var(--cinza-300);
-  border-radius: var(--radius);
-  font-size: 0.8rem;
-  background: var(--cinza-100);
+  padding: 4px 48px 5px 36px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 15px;
+  background: #f1f5f9;
   color: var(--cinza-900);
 }
-.topbar-busca input:focus { background: var(--painel); border-color: var(--azul); outline: none; box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15); }
-.topbar-busca-icone { position: absolute; left: 7px; top: 50%; transform: translateY(-50%); color: var(--cinza-500); pointer-events: none; }
-.topbar-busca-atalho { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-family: inherit; font-size: 0.62rem; font-weight: 600; line-height: 1; color: var(--cinza-500); background: var(--painel); border: 1px solid var(--cinza-300); border-radius: 4px; padding: 2px 4px; pointer-events: none; }
+.topbar-busca input::placeholder { color: #94a3b8; }
+.topbar-busca input:focus { background: var(--painel); outline: none; box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15); }
+.topbar-busca-icone { position: absolute; left: 14px; top: 5px; color: #94a3b8; pointer-events: none; }
+.topbar-busca-atalho {
+  position: absolute;
+  right: 8px;
+  top: 2px;
+  display: flex;
+  align-items: center;
+  width: auto;
+  height: 20px;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: #94a3b8;
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border-radius: 2px;
+  padding: 2px 6px;
+  pointer-events: none;
+}
 .topbar-busca input:focus ~ .topbar-busca-atalho { display: none; }
 
 /* Lista de resultados da busca global (ir para o cliente). */
@@ -2006,58 +2195,35 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
 
 .sidebar {
   grid-area: sidebar;
-  width: 200px;
+  width: 256px;
   flex-shrink: 0;
   background: var(--painel);
-  border-right: 1px solid var(--cinza-200);
-  padding: 8px;
+  border-right: none;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
   overflow-x: hidden;
   overflow-y: auto;
   transition: width 0.3s ease;
 }
-.sidebar-topo {
+/* Marca e controle de recolher compartilham o topo da sidebar. */
+.sidebar-topo-linha {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  padding: 2px 2px 11px;
-  margin-bottom: 5px;
-  border-bottom: 1px solid var(--cinza-200);
+  height: 56px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  gap: 8px;
+  border-bottom: none;
   flex-shrink: 0;
 }
-.sidebar-logo {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  background: none;
-  border: none;
-  padding: 2px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  text-align: left;
-}
-#sidebar-logo:hover:not(:disabled) { background: none; }
-.sidebar-logo,
-.sidebar-logo:focus,
-.sidebar-logo:focus-visible,
-.sidebar-logo:active {
-  outline: none;
-  box-shadow: none;
-  -webkit-tap-highlight-color: transparent;
-}
-.sidebar-logo-texto {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--azul-escuro);
-  white-space: nowrap;
-}
-.sidebar-logo-texto span { color: var(--vermelho); }
-
+.sidebar-marca { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 110px; min-width: 0; }
+.sidebar-marca-imagem { display: block; width: min(100%, 110px); height: 40px; object-fit: contain; }
+.sidebar-marca-escura { display: none; }
+:root[data-theme="dark"] .sidebar-marca-clara { display: none; }
+:root[data-theme="dark"] .sidebar-marca-escura { display: block; }
 .sidebar-toggle {
   display: flex;
   align-items: center;
@@ -2065,61 +2231,142 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
   width: 27px;
   height: 27px;
   padding: 0;
-  margin: 0;
+  margin-left: 0;
   background: none;
+  border: none;
   color: var(--cinza-700);
-  border-radius: var(--radius);
+  border-radius: 4px;
   flex-shrink: 0;
 }
 /* :not(:disabled) pra ganhar do button:hover geral (fundo azul, sumia o ícone). */
 .sidebar-toggle:hover:not(:disabled) { background: var(--cinza-100); color: var(--cinza-900); }
-/* Recolhido: só o sanduíche, centralizado (o texto "Migração 4.0" some). */
-.sidebar.recolhida .sidebar-topo { justify-content: center; padding: 2px 0 11px; }
-.sidebar.recolhida .sidebar-logo { display: none; }
+.sidebar-toggle .material-symbols-outlined { font-size: 18px; }
 
 .sidebar-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
+  gap: 12px;
+  width: calc(100% - 24px);
+  margin: 0 12px;
   text-align: left;
-  padding: 8px 10px;
-  border-radius: var(--radius);
+  padding: 5px 12px;
+  height: 34px;
+  box-sizing: border-box;
+  border-radius: 4px;
   background: none;
   border: none;
   color: var(--cinza-700);
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  transition: background 0.12s, color 0.12s;
 }
 .sidebar-item:hover:not(:disabled) { background: var(--cinza-100); }
-.sidebar-item.ativo { background: #dbeafe; color: var(--azul-escuro); font-weight: 700; }
-:root[data-theme="dark"] .sidebar-item.ativo { background: rgba(96, 165, 250, 0.16); }
-.sidebar-item-icone { flex-shrink: 0; }
+.sidebar-item.ativo { background: #eff6ff; color: #2563eb; font-weight: 600; }
+:root[data-theme="dark"] .sidebar-item.ativo { background: rgba(37, 99, 235, 0.18); color: #93c5fd; }
+.sidebar-item-icone { flex-shrink: 0; font-size: 15px; width: 15px; text-align: center; color: var(--cinza-700); }
+.sidebar-item.ativo .sidebar-item-icone { color: #2563eb; }
+:root[data-theme="dark"] .sidebar-item.ativo .sidebar-item-icone { color: #93c5fd; }
 .sidebar-item-texto { white-space: nowrap; }
+.sidebar-grupo { display: flex; flex-direction: column; gap: 1px; }
+.sidebar-grupo-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - 24px);
+  height: 36px;
+  margin: 0 12px;
+  padding: 5px 12px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--cinza-700);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  text-align: left;
+}
+.sidebar-grupo-toggle:hover:not(:disabled) { background: var(--cinza-100); }
+.sidebar-grupo-toggle.ativo { color: var(--cinza-900); }
+.sidebar-grupo-toggle .sidebar-item-icone { font-size: 18px; width: 18px; }
+.sidebar-grupo-seta { margin-left: auto; font-size: 18px; color: #94a3b8; transition: transform 0.15s ease; }
+.sidebar-grupo-toggle[aria-expanded="false"] .sidebar-grupo-seta { transform: rotate(-90deg); }
+.sidebar-subnav { display: flex; flex-direction: column; gap: 1px; margin: 0 12px 3px 38px; padding-left: 10px; border-left: 2px solid #e8eef6; }
+:root[data-theme="dark"] .sidebar-subnav { border-left-color: var(--cinza-200); }
+.sidebar-subitem { width: 100%; margin: 0; height: 32px; padding: 4px 8px; gap: 10px; }
+.sidebar-subitem .sidebar-item-icone { font-size: 15px; }
+.sidebar-subitem .sidebar-item-texto { overflow: hidden; text-overflow: ellipsis; }
 
-/* "Voltar" discreto: texto pequeno e cinza logo abaixo do logo, sem fundo. */
+/* Na Ficha, o contexto do cliente vem antes da navegação geral (mesma ordem
+   do mockup) — como os dois blocos são irmãos diretos de .sidebar (flex
+   column), basta reordenar visualmente em vez de mexer no DOM/JS que já
+   mostra/esconde cada um pelo id. */
+#sidebar-cliente { order: 1; display: flex; flex-direction: column; gap: 2px; padding-bottom: 12px; }
+#sidebar-raiz { order: 2; display: flex; flex-direction: column; gap: 2px; padding-bottom: 12px; }
+
+/* Rótulo de seção ("Navegação geral" / "Contexto operacional"). */
+/* nowrap+overflow sempre ligados (não só quando .recolhida) — a sidebar
+   anima a largura em 0.3s, então sem isso o texto quebra em 2 linhas no
+   meio da transição (largura ainda estreita) e só vira 1 linha no final. */
+.sidebar-secao-titulo { padding: 4px 8px; margin: 0 12px; font-size: 11px; line-height: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.33px; color: #94a3b8; white-space: nowrap; overflow: hidden; }
+#sidebar-raiz > .sidebar-secao-titulo { margin-top: 12px; }
+/* Recolhido: o texto do rótulo some, mas o espaço de uma linha continua lá —
+   senão os ícones de "Navegação geral" colam direto embaixo dos de
+   "Contexto operacional". white-space+overflow trava a altura numa linha só
+   (sem isso o texto quebra na largura estreita e o espaço fica maior). */
+.sidebar.recolhida .sidebar-secao-titulo { color: transparent; white-space: nowrap; overflow: hidden; }
+
+/* Card "Cliente em foco" — mesmo padrão visual do restante da Ficha
+   (fundo sutil, cantos arredondados), com o nome em destaque. Sem o
+   botão de alternar cliente do mockup (↕) — a busca global (Ctrl+K) já
+   cobre essa troca. */
+/* Tirado por pedido — o elemento continua no DOM (ficha-sidebar-nome é
+   atualizado por script.js em todo load da Ficha) só escondido via CSS, pra
+   não quebrar esse código sem motivo. */
+.sidebar-cliente-card { display: none; }
+:root[data-theme="dark"] .sidebar-cliente-card { background: var(--cinza-100); }
+.sidebar-cliente-topo { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sidebar-cliente-rotulo { font-size: 11px; line-height: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.55px; color: #94a3b8; }
+.sidebar-cliente-ativo { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.33px; padding: 2px 4px; border-radius: 12px; background: #ecfeff; color: #0e7490; }
+:root[data-theme="dark"] .sidebar-cliente-ativo { background: rgba(14, 116, 144, 0.25); color: #67e8f9; }
+.sidebar.recolhida .sidebar-cliente-card { display: none; }
+
+/* "Voltar" — vive dentro de .sidebar-topo-linha, ao lado do botão de
+   recolher (ver acima); só aparece na Ficha. */
 .sidebar-voltar {
   display: flex;
   align-items: center;
-  gap: 3px;
-  width: 100%;
-  margin: -2px 0 3px;
-  padding: 3px 8px;
+  gap: 4px;
+  width: calc(100% - 24px);
+  margin: 4px 12px 0;
+  padding: 4px 8px;
   background: none;
   border: none;
-  border-radius: var(--radius);
-  color: var(--cinza-500);
-  font-size: 0.78rem;
+  border-radius: 4px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 16px;
   font-weight: 500;
   text-align: left;
   flex-shrink: 0;
 }
-.sidebar-voltar:hover:not(:disabled) { background: none; color: var(--cinza-900); }
-.sidebar.recolhida .sidebar-voltar { justify-content: center; padding: 3px; }
+.sidebar-voltar-invisivel { visibility: hidden; pointer-events: none; }
+.sidebar-voltar .sidebar-item-icone { font-size: 12px; width: 12px; color: #475569; }
+.sidebar-voltar:hover:not(:disabled) { background: var(--cinza-100); color: var(--cinza-900); }
+.sidebar.recolhida .sidebar-topo-linha { justify-content: flex-start; padding: 0 12px; gap: 0; }
+.sidebar.recolhida .sidebar-marca { display: none; }
+.sidebar.recolhida .sidebar-toggle { width: 24px; height: 24px; margin-left: 0; }
 
 .sidebar.recolhida { width: 51px; }
-.sidebar.recolhida .sidebar-item { justify-content: center; padding: 8px; }
-.sidebar.recolhida .sidebar-item-texto { display: none; }
+.sidebar.recolhida .sidebar-item,
+.sidebar.recolhida .sidebar-grupo-toggle { justify-content: center; padding: 8px; }
+.sidebar.recolhida .sidebar-voltar { justify-content: center; width: calc(100% - 12px); margin: 4px 6px 0; padding: 8px; }
+.sidebar.recolhida .sidebar-item-texto,
+.sidebar.recolhida .sidebar-grupo-seta,
+.sidebar.recolhida .sidebar-subnav { display: none; }
+.sidebar.recolhida .sidebar-grupo-toggle { width: calc(100% - 12px); margin: 0 6px; }
+.sidebar.recolhida .sidebar-item { width: calc(100% - 12px); margin: 0 6px; }
+.sidebar.recolhida .sidebar-grupo-toggle .sidebar-item-icone { width: 18px; }
 
 .conteudo { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
 
@@ -2684,66 +2931,105 @@ button.kmarcos-stat:hover:not(:disabled) { background: var(--cinza-100); opacity
 /* --- FASE 3a: sidebar contextual + Ficha do Cliente --- */
 
 .sidebar-cliente-nome {
-  padding: 3px 10px 10px;
-  margin-bottom: 5px;
-  border-bottom: 1px solid var(--cinza-200);
-  font-weight: 700;
-  font-size: 0.92rem;
-  color: var(--cinza-900);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 20px;
+  letter-spacing: -0.375px;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.sidebar.recolhida .sidebar-cliente-nome { display: none; }
 
-.ficha-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 13px; flex-wrap: wrap; margin-bottom: 14px; }
-.ficha-header h2 { margin: 0; font-size: 1.3rem; }
-/* Nome do cliente + tag "Migração" (só quando tem) na mesma linha. */
+/* "Executive Header Cockpit" — cartão branco no topo da Ficha, com o nome,
+   os chips de diagnóstico e as ações rápidas. */
+/* -11px faz o cartão "sangrar" até a borda do .panel (que tem 11px de
+   padding) — senão sobraria uma moldura cinza em volta dele. */
+#ficha-cliente-cabecalho { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); padding: 16px 24px; margin: -11px -11px 16px; }
+:root[data-theme="dark"] #ficha-cliente-cabecalho { background: var(--painel); }
+.ficha-header { display: flex; align-items: center; justify-content: space-between; gap: 13px; flex-wrap: wrap; margin-bottom: 14px; }
+/* Nome+IdCentral e as tags de diagnóstico, lado a lado na mesma linha
+   (quebra só se não couber) — não empilhados um embaixo do outro. */
+.ficha-header-info { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; row-gap: 8px; min-width: 0; }
+.ficha-header h2 { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.6px; color: #0f172a; }
+/* Nome do cliente + IdCentral + tag "Migração" (só quando tem) na mesma linha. */
 .ficha-header-titulo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ficha-header-idcentral { font-family: "Consolas", monospace; font-size: 12px; line-height: 16px; font-weight: 500; color: #475569; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; }
+.ficha-header-info .ficha-tags-resumo { margin: 0; }
 
-.ficha-engrenagem { flex-shrink: 0; }
+.ficha-header-acoes { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.ficha-engrenagem {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: #f1f5f9;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+  color: #475569;
+}
+/* Azul exato do mockup (#2563eb / hover #004ac6) só nos CTAs de "Nova
+   Tarefa" da Ficha — não mexe no .btn-primary verde usado no resto do app. */
+.ficha-header-nova-tarefa, .ficha-painel-tarefas .minha-conta-tarefas-topo .btn-primary {
+  width: auto; margin-top: 0; padding: 8px 16px; background: #2563eb; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); border-radius: 4px; font-size: 12px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.ficha-header-nova-tarefa svg { flex-shrink: 0; }
+.ficha-header-nova-tarefa:hover:not(:disabled), .ficha-painel-tarefas .minha-conta-tarefas-topo .btn-primary:hover:not(:disabled) {
+  background: #004ac6;
+}
 
 .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 11px; margin: 13px 0; }
 /* Mesma "família" visual do .stat-tile (cantos mais arredondados, sombra
    leve) mas sem aumentar a fonte — aqui são vários fatos pequenos lado a
    lado, não KPIs isolados, e um valor gigante quebraria a grade. */
 .info-item { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 11px; }
-.info-item-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cinza-500); margin-bottom: 3px; }
-.info-item-valor { font-size: 0.92rem; font-weight: 700; }
+.info-item-label { font-size: 11px; line-height: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cinza-500); margin-bottom: 3px; }
+.info-item-valor { font-size: 15px; line-height: 20px; font-weight: 600; }
 
 .stepper-legenda { margin: -10px 0 16px; font-size: 0.85rem; text-align: center; }
 .stepper-legenda.ok { color: var(--verde-escuro); }
 .stepper-legenda.atrasado { color: var(--vermelho); font-weight: 700; }
 .stepper-legenda.concluido { color: var(--cinza-500); }
 
-.stepper { display: flex; align-items: flex-start; margin: 8px 0 16px; }
-.stepper-etapa { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 5px; }
+.stepper { display: flex; align-items: flex-start; margin: 10px 0 16px; }
+.stepper-etapa { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
 .stepper-etapa:not(:last-child)::after {
   content: "";
   position: absolute;
-  top: 11px;
-  left: calc(50% + 16px);
-  right: calc(-50% + 16px);
+  top: 17px;
+  left: calc(50% + 19px);
+  right: calc(-50% + 19px);
   height: 2px;
   background: var(--cinza-300);
 }
 .stepper-etapa.concluida:not(:last-child)::after { background: var(--verde); }
 .stepper-bolha {
-  width: 21px;
-  height: 21px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: 700;
   flex-shrink: 0;
   border: 2px solid var(--cinza-300);
   color: var(--cinza-500);
   background: var(--painel);
+  box-shadow: var(--shadow);
   position: relative;
   z-index: 1;
 }
 .stepper-etapa.concluida .stepper-bolha { background: var(--verde); border-color: var(--verde); color: #fff; }
 .stepper-etapa.ativa .stepper-bolha { background: var(--azul); border-color: var(--azul); color: #fff; }
-.stepper-nome { font-size: 0.76rem; color: var(--cinza-700); max-width: 88px; }
+/* Marco em andamento que já venceu o prazo — mesmo tom de vermelho do resto
+   dos avisos de atraso da Ficha, pra destacar no stepper qual marco é o
+   culpado sem precisar ler o texto ao lado. */
+.stepper-etapa.atrasada .stepper-bolha { background: #fef2f2; border-color: var(--vermelho); color: var(--vermelho); }
+:root[data-theme="dark"] .stepper-etapa.atrasada .stepper-bolha { background: rgba(185, 28, 28, 0.2); }
+.stepper-etapa.atrasada .stepper-nome { color: var(--vermelho); font-weight: 700; }
+.stepper-nome { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--cinza-700); max-width: 88px; }
 .stepper-etapa.ativa .stepper-nome { font-weight: 700; color: var(--cinza-900); }
 
 .ficha-secao { margin-bottom: 14px; }
@@ -2837,27 +3123,35 @@ input:disabled, select:disabled, input.input-travado {
 /* Tags de destaque da Visão Geral (Momento/Flag/Etapa/Persona) — cor fixa
    (não segue tema claro/escuro), igual às cores de status da tabela de
    veículos: o significado da cor importa mais que combinar com o tema. */
-.ficha-tags-resumo { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
-/* Título e tags mais juntos: só quando as tags vêm logo abaixo do cabeçalho. */
-.ficha-header:has(+ .ficha-tags-resumo) { margin-bottom: 6px; }
+.ficha-tags-resumo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; }
 .tag-resumo {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  padding: 3px 10px;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.33px;
+  padding: 2px 10px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: 12px;
   white-space: nowrap;
 }
 .tag-resumo svg { flex-shrink: 0; }
-.tag-momento { background: #eff6ff; color: #1e3a8a; border-color: #bfdbfe; }
-.tag-etapa { background: #f5f3ff; color: #5b21b6; border-color: #ddd6fe; }
-.tag-persona { background: #f9fafb; color: #374151; border-color: #d1d5db; }
-.tag-flag-yellow { background: #fefce8; color: #854d0e; border-color: #fde68a; }
-.tag-flag-red { background: #fef2f2; color: #dc2626; border-color: #fca5a5; }
-.tag-flag-black { background: #f3f4f6; color: #111827; border-color: #9ca3af; }
+.tag-resumo-bolinha { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.tag-momento { background: #eff6ff; color: #1e3a8a; border-color: transparent; }
+/* Momento crítico (ver FICHA_MOMENTOS_CRITICOS) vira âmbar em vez do azul
+   neutro — mesmo destaque do mockup pra "Sumido" etc. */
+.tag-momento-critico { background: #fffbeb; color: #b45309; border-color: transparent; }
+.tag-etapa { background: #f5f3ff; color: #5b21b6; border-color: transparent; }
+.tag-persona { background: #f1f5f9; color: #475569; border-color: transparent; }
+.tag-flag-yellow { background: #fffbeb; color: #b45309; border-color: transparent; }
+.tag-flag-red { background: #fef2f2; color: #b91c1c; border-color: transparent; }
+.tag-flag-black { background: #18181b; color: #ffffff; border-color: transparent; }
+/* Chip sólido, mesmo espírito do selo "Atrasado há N dias" em destaque no
+   cabeçalho do cliente — precisa saltar mais aos olhos que o Red Flag (que é
+   um estado, não uma contagem correndo). Cor fixa (igual às outras tags). */
+.tag-atrasado-solido { background: #ba1a1a; color: #ffffff; border-color: transparent; font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
 
 .marco-linha {
   display: flex;
@@ -3026,35 +3320,89 @@ input:disabled, select:disabled, input.input-travado {
    atenção → resumo/tarefas → progresso → operacional) em vez de lista de
    seções soltas. Cada bloco vira um cartão (.ficha-painel) pra dar hierarquia
    visual clara sem mexer em .ficha-secao (ainda usada pelas outras abas). */
-.ficha-painel { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 13px 14px; margin-bottom: 14px; }
+.ficha-painel { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: 16px; margin-bottom: 24px; }
 .ficha-painel:last-child { margin-bottom: 0; }
-.ficha-painel > h3 { margin: 0 0 10px; font-size: 0.95rem; font-weight: 600; }
+.ficha-painel > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 15px; line-height: 20px; font-weight: 600; }
 .ficha-painel .info-item-valor { font-weight: 500; }
+
+/* Ícone do título de "Atenção" — círculo rosa no mesmo espírito dos ícones
+   dos cards de contato/alerta, só pra ancorar visualmente o card mais
+   crítico da Visão Geral. */
+.ficha-alertas-icone {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 9px; flex-shrink: 0;
+  background: #fef2f2; color: var(--vermelho);
+}
+:root[data-theme="dark"] .ficha-alertas-icone { background: rgba(185, 28, 28, 0.2); }
+/* Banner por fora rosa (como o mockup), tiles brancas por dentro — inverte o
+   que tinha antes (card branco com tiles rosa). */
+.ficha-painel.ficha-alertas { background: #fef2f2; border-color: #fecaca; }
+:root[data-theme="dark"] .ficha-painel.ficha-alertas { background: rgba(185, 28, 28, 0.12); border-color: rgba(185, 28, 28, 0.45); }
 
 /* Sub-abas da Ficha (Geral / Informações do Cliente / Progresso / Histórico),
    acima do nome do cliente. Estilo de aba com sublinhado no ativo. */
-.ficha-subabas { display: flex; gap: 3px; overflow-x: auto; border-bottom: 1px solid var(--cinza-200); margin: 0 0 11px; scrollbar-width: none; -ms-overflow-style: none; }
+.ficha-subabas { display: flex; gap: 16px; overflow-x: auto; border-bottom: none; margin: 0 0 11px; scrollbar-width: none; -ms-overflow-style: none; }
 .ficha-subabas::-webkit-scrollbar { display: none; }
-.ficha-subaba { width: auto; margin: 0 0 -1px; padding: 6px 10px; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--cinza-500); font-size: 0.88rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.ficha-subaba { width: auto; margin: 0 0 -1px; padding: 4px 0 8px; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: #475569; font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .ficha-subaba:hover { color: var(--cinza-900); }
-.ficha-subaba.ativo { color: var(--azul-escuro); border-bottom-color: var(--azul); }
+.ficha-subaba.ativo { color: #0f326d; font-weight: 600; border-bottom-color: #0f326d; }
 .ficha-historico-item { padding: 7px 0; border-bottom: 1px solid var(--cinza-200); font-size: 0.88rem; }
 
 /* Cards da Visão Geral (CSM, Comercial, Decisor, Região) lado a lado, no
    padrão dos tiles da Ficha: fundo cinza, ícone + rótulo, nome em destaque.
    Empilha em tela estreita. */
-.ficha-contatos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 13px; }
-.ficha-contato-card { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 10px 11px; border-radius: var(--radius); background: #fafbfc; }
+.ficha-contatos-secao { margin-bottom: 24px; }
+.ficha-contatos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ficha-contato-card { position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 13px; border-radius: 12px; border: 1px solid var(--cinza-200); background: var(--painel); transition: border-color 0.15s; }
+.ficha-contato-card:hover { border-color: var(--cinza-300); }
 :root[data-theme="dark"] .ficha-contato-card { background: var(--cinza-100); }
-.ficha-contato-topo { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 0.78rem; font-weight: 500; color: var(--cinza-500); padding-right: 24px; }
+.ficha-contato-topo { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 0.78rem; font-weight: 500; color: var(--cinza-500); padding-right: 24px; }
 .ficha-contato-topo svg { flex-shrink: 0; color: var(--verde-escuro); }
-.ficha-contato-topo span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ficha-contato-nome { font-size: 0.95rem; font-weight: 600; color: var(--cinza-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ficha-contato-detalhe { font-size: 0.78rem; color: var(--cinza-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ficha-contato-wpp { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #25d366; background: rgba(37, 211, 102, 0.12); text-decoration: none; transition: background 0.15s, color 0.15s; }
+.ficha-contato-topo-rotulo { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; font-size: 11px; line-height: 14px; letter-spacing: 0.03em; font-weight: 600; }
+/* Pílula de papel (Owner/Vendas/Foco/UF) — rótulo curto e fixo por tipo de
+   card, só pra bater o olho mais rápido que CSM ≠ Comercial ≠ Decisor;
+   mesma paleta dos avatares. */
+.ficha-contato-papel { margin-left: auto; flex-shrink: 0; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.03em; padding: 1px 7px; border-radius: 4px; }
+.ficha-contato-papel-azul { background: #dce9ff; color: #004ac6; }
+.ficha-contato-papel-violeta { background: #f5f3ff; color: #6d28d9; }
+.ficha-contato-papel-verde { background: #ecfdf5; color: #047857; }
+.ficha-contato-papel-turquesa { background: #ecfeff; color: #0e7490; }
+.ficha-contato-papel-cinza { background: var(--cinza-200); color: var(--cinza-500); }
+:root[data-theme="dark"] .ficha-contato-papel-azul { background: rgba(0, 74, 198, 0.22); color: #93c5fd; }
+:root[data-theme="dark"] .ficha-contato-papel-violeta { background: rgba(109, 40, 217, 0.22); color: #d8b4fe; }
+:root[data-theme="dark"] .ficha-contato-papel-verde { background: rgba(4, 120, 87, 0.22); color: #86efac; }
+:root[data-theme="dark"] .ficha-contato-papel-turquesa { background: rgba(14, 116, 144, 0.25); color: #67e8f9; }
+/* Avatar com iniciais, cor fixa por tipo de contato (CSM/Comercial/Decisor/
+   Região) — só decoração visual, não representa um dado novo. */
+.ficha-contato-avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: 50%; font-size: 0.68rem; font-weight: 700;
+}
+.ficha-contato-avatar-azul { background: #dce9ff; color: #004ac6; }
+.ficha-contato-avatar-violeta { background: #f5f3ff; color: #6d28d9; }
+.ficha-contato-avatar-verde { background: #ecfdf5; color: #047857; }
+.ficha-contato-avatar-turquesa { background: #ecfeff; color: #0e7490; }
+.ficha-contato-avatar-cinza { background: var(--cinza-200); color: var(--cinza-500); }
+:root[data-theme="dark"] .ficha-contato-avatar-azul { background: rgba(0, 74, 198, 0.22); color: #93c5fd; }
+:root[data-theme="dark"] .ficha-contato-avatar-violeta { background: rgba(109, 40, 217, 0.22); color: #d8b4fe; }
+:root[data-theme="dark"] .ficha-contato-avatar-verde { background: rgba(4, 120, 87, 0.22); color: #86efac; }
+:root[data-theme="dark"] .ficha-contato-avatar-turquesa { background: rgba(14, 116, 144, 0.25); color: #67e8f9; }
+.ficha-contato-nome { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--cinza-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ficha-contato-detalhe { font-size: 12px; line-height: 16px; color: var(--cinza-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ficha-contato-wpp { position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #25d366; background: rgba(37, 211, 102, 0.12); text-decoration: none; transition: background 0.15s, color 0.15s; }
 .ficha-contato-wpp:hover { background: #25d366; color: #ffffff; }
 :root[data-theme="dark"] .ficha-contato-wpp { background: rgba(37, 211, 102, 0.18); }
-.ficha-contato-rotulo { font-size: 0.78rem; font-weight: 500; color: var(--cinza-500); }
+.ficha-contato-rotulo { display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cinza-500); }
+.ficha-alerta-rotulo-icone { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 7px; background: #fee2e2; color: #ba1a1a; flex-shrink: 0; }
+:root[data-theme="dark"] .ficha-alerta-rotulo-icone { background: rgba(185, 28, 28, 0.25); }
+/* Severidade por tipo de alerta (ver "severidade" em coletarFichaAlertas):
+   Marco atrasado = vermelho, Implantação parada = âmbar, Momento crítico =
+   neutro — mesma distinção do mockup, em vez de tudo vermelho igual antes. */
+.ficha-alerta-card-amarelo .ficha-alerta-rotulo-icone { background: #fffbeb; color: #b45309; }
+:root[data-theme="dark"] .ficha-alerta-card-amarelo .ficha-alerta-rotulo-icone { background: rgba(180, 83, 9, 0.22); }
+.ficha-alerta-card-amarelo .ficha-contato-rotulo { color: #b45309; }
+.ficha-alerta-card-neutro .ficha-alerta-rotulo-icone { background: var(--cinza-100); color: var(--cinza-700); }
+.ficha-alerta-card-neutro .ficha-contato-rotulo { color: var(--cinza-700); }
 @media (max-width: 900px) {
   .ficha-contatos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -3064,21 +3412,30 @@ input:disabled, select:disabled, input.input-travado {
 
 /* Atenção: cada alerta é um card do mesmo padrão dos contatos, com o tom
    vermelho. */
-.ficha-alertas-grade { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.ficha-alerta-card { border-color: #fecaca; background: #fef2f2; }
-.ficha-alerta-card .ficha-contato-rotulo { color: var(--vermelho); }
-.ficha-alerta-texto { font-size: 0.95rem; font-weight: 500; color: var(--cinza-900); line-height: 1.3; }
-:root[data-theme="dark"] .ficha-alerta-card { border-color: rgba(185, 28, 28, 0.4); background: rgba(185, 28, 28, 0.15); }
+.ficha-alertas-grade { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ficha-alerta-card { border-color: #e2e8f0; background: var(--painel); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }
+.ficha-alerta-card .ficha-contato-rotulo { color: #ba1a1a; font-weight: 700; }
+.ficha-alerta-texto { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--cinza-900); }
+:root[data-theme="dark"] .ficha-alerta-card { border-color: var(--cinza-200); background: var(--cinza-100); }
 @media (max-width: 700px) {
   .ficha-alertas-grade { grid-template-columns: 1fr; }
 }
 
-.ficha-grid-hub { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 13px; align-items: start; margin-bottom: 14px; }
-.ficha-grid-hub.ficha-grid-hub-unica { grid-template-columns: 1fr; }
-.ficha-grid-hub .ficha-painel, .ficha-grid-hub .ficha-painel-tarefas { margin-bottom: 0; }
+/* Duas colunas da Visão Geral (50/50, igual ao mockup): esquerda = Tarefas +
+   NPS + Chamados; direita = Dados cadastrais + Operacional. Empilha abaixo
+   de 900px. */
+.ficha-colunas { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.ficha-coluna { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.ficha-coluna .ficha-painel, .ficha-coluna .ficha-painel-tarefas { margin-bottom: 0; }
 @media (max-width: 900px) {
-  .ficha-grid-hub { grid-template-columns: 1fr; }
+  .ficha-colunas { grid-template-columns: 1fr; }
 }
+
+/* Seção "Contatos Essenciais da Conta" — título + contagem acima da grade de
+   cards (ver construirFichaContatosSecao). */
+.ficha-contatos-secao-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.ficha-contatos-secao-titulo h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.ficha-contatos-secao-titulo span { font-size: 0.8rem; color: var(--cinza-500); }
 
 .ficha-alertas .alerta-item { display: flex; align-items: flex-start; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--cinza-200); font-size: 0.88rem; }
 .ficha-alertas .alerta-item:last-child { border-bottom: none; }
@@ -3087,7 +3444,7 @@ input:disabled, select:disabled, input.input-travado {
 /* Chamados de suporte (ssxdesk) — bloco "Chamados abertos" da Visão Geral e
    sub-aba "Suporte" do Histórico (ver construirLinhaChamado em script.js). */
 .ficha-chamados-lista { display: flex; flex-direction: column; gap: 6px; }
-.ficha-chamado-item { border: 1px solid var(--cinza-200); border-radius: var(--radius); overflow: hidden; }
+.ficha-chamado-item { border: 1px solid var(--cinza-200); border-radius: 10px; overflow: hidden; }
 .ficha-chamado-cabecalho {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
   padding: 9px 11px; background: none; border: none; cursor: pointer; text-align: left; font: inherit; color: inherit;
@@ -3151,13 +3508,18 @@ input:disabled, select:disabled, input.input-travado {
    "Migração" ganham o mesmo subtítulo usado em Informações operacionais. */
 .ficha-dados-cadastrais h4 { margin: 13px 0 6px; font-size: 0.85rem; color: var(--cinza-700); }
 .ficha-dados-cadastrais h4:first-of-type { margin-top: 13px; }
+/* Tiles de dado cadastral no mockup são preenchimento cinza plano, sem borda
+   nem sombra (diferente do .info-item "card" usado no resto do app) —
+   escopado só aqui pra não mudar a Implantação/Migração. */
+.ficha-dados-cadastrais .info-item { background: #f1f5f9; border: none; box-shadow: none; border-radius: 8px; }
+:root[data-theme="dark"] .ficha-dados-cadastrais .info-item { background: var(--cinza-100); }
 
 /* Card de Documentos (ficha de entrada, contrato) — mesma linha ERP: ícone +
    rótulo + status à esquerda, ações à direita; quebra em coluna no mobile. */
 .ficha-documentos-lista { display: flex; flex-direction: column; gap: 8px; }
 .ficha-documento-linha {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 10px 11px; border-radius: var(--radius); background: #fafbfc; flex-wrap: wrap;
+  padding: 10px 11px; border-radius: 10px; background: #fafbfc; flex-wrap: wrap;
 }
 :root[data-theme="dark"] .ficha-documento-linha { background: var(--cinza-100); }
 .ficha-documento-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
@@ -3176,11 +3538,18 @@ input:disabled, select:disabled, input.input-travado {
   .ficha-documento-acoes { justify-content: flex-start; }
 }
 
-.credencial-compacta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.9rem; font-weight: 600; }
-.credencial-compacta button { width: auto; margin-top: 0; }
+.credencial-compacta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; font-weight: 500; padding: 12px; border-radius: 8px; border: 1px solid var(--cinza-200); }
+.credencial-compacta button { width: auto; margin-top: 0; margin-left: auto; }
 .credencial-compacta-ok { color: var(--verde-escuro); }
 .credencial-compacta-erro { color: var(--vermelho); }
 .credencial-compacta-pendente { color: var(--amarelo-escuro); }
+/* Vira ribbon colorido (fundo + borda no tom do status), mesma ideia do
+   mockup de "Indicadores Operacionais": mais fácil de notar que uma linha de
+   texto solta. */
+.credencial-compacta:has(.credencial-compacta-erro) { background: #fef2f2; border-color: #fecaca; }
+.credencial-compacta:has(.credencial-compacta-ok) { background: #f0fdf4; border-color: #bbf7d0; }
+:root[data-theme="dark"] .credencial-compacta:has(.credencial-compacta-erro) { background: rgba(185, 28, 28, 0.15); border-color: rgba(185, 28, 28, 0.4); }
+:root[data-theme="dark"] .credencial-compacta:has(.credencial-compacta-ok) { background: rgba(22, 101, 52, 0.18); border-color: rgba(22, 101, 52, 0.45); }
 
 /* Ajuste da foto de perfil: quadrado com a imagem, máscara escurecendo tudo
    fora do círculo (o formato do avatar), zoom embaixo. */
@@ -3222,7 +3591,8 @@ input:disabled, select:disabled, input.input-travado {
 :root[data-theme="dark"] .kmarcos-stat-parado .kmarcos-stat-valor { color: #fbbf24; }
 :root[data-theme="dark"] .kmarcos-stat-parado.ativo, :root[data-theme="dark"] .kmarcos-stat-parado.ativo:hover:not(:disabled) { background: #451a03; }
 
-.motivo-atraso { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--cinza-200); border-radius: var(--radius); background: var(--cinza-100); font-size: 0.85rem; display: flex; flex-direction: column; gap: 3px; }
+.motivo-atraso { margin-top: 8px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: var(--painel); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); font-size: 0.85rem; display: flex; flex-direction: column; gap: 3px; }
+:root[data-theme="dark"] .motivo-atraso { background: var(--cinza-100); border-color: var(--cinza-200); }
 .motivo-atraso-linha { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
 .motivo-atraso-acao { color: var(--azul-escuro); font-weight: 600; font-size: 0.82rem; }
 .motivo-atraso-meta { color: var(--cinza-500); font-size: 0.76rem; }

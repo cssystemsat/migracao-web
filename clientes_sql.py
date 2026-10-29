@@ -84,6 +84,24 @@ def listar_clientes():
     return lista
 
 
+def contar_clientes_implantacao():
+    """Total de clientes com implantação e quantos ainda estão ativos (etapa
+    != "concluido") — usado pelo card "Implantação" do /api/dashboard.
+    Substitui a contagem que lia direto do Firestore (coleção legada
+    IMPLANTACAO_CLIENTES_COLLECTION, sem cliente novo desde a virada pra
+    Postgres — ficava parada/errada). `tem_implantacao` filtra fora os
+    clientes que só têm migração (criados pela tela de Migração, sem par em
+    Implantação)."""
+    with obter_sessao_leitura() as sessao:
+        total = sessao.query(func.count(Cliente.id)).filter(Cliente.tem_implantacao.is_(True)).scalar() or 0
+        concluidos = (
+            sessao.query(func.count(Cliente.id))
+            .filter(Cliente.tem_implantacao.is_(True), Cliente.etapa == "concluido")
+            .scalar() or 0
+        )
+    return total, total - concluidos
+
+
 def listar_clientes_resumo():
     """Igual a `listar_clientes`, mas só com as colunas usadas pela listagem
     de clientes em Migração (`_carregar_clientes_migracao` em app.py) — essa
