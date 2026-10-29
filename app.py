@@ -3335,7 +3335,11 @@ def cancelar_migracao_cliente(cliente_id, migracao_id):
     atual = migracoes_sql.buscar_migracao(migracao_id)
     if not atual or atual["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    data = request.get_json(force=True) or {}
+    # silent=True (não force=True): a tela de Controle de Migração chama essa
+    # rota sem corpo nenhum pra cancelar rápido (sem motivo) — force=True
+    # estourava 400 do próprio Flask ao tentar decodificar corpo vazio como
+    # JSON, antes mesmo de chegar aqui.
+    data = request.get_json(silent=True) or {}
     migracao = migracoes_sql.cancelar_migracao(
         migracao_id, time.strftime("%Y-%m-%d"), str(data.get("motivo", "")).strip(),
     )
