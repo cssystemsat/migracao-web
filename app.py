@@ -40,6 +40,7 @@ import conversorkml
 import credenciais_sql
 import feed_sql
 import migracoes_sql
+import municipios_sql
 import planilha_migracao
 import ssx_veiculos_sync
 import ssx_http
@@ -2839,9 +2840,11 @@ def _gravar_import_clientes(resultado):
 
 # --- LOCALIDADES (Estado/Cidade do Decisor) ---
 # Estado é lista fixa (nunca muda). Município vem da API de Localidades do
-# IBGE (pública, sem chave) — cache em memória por UF pra não repetir a
-# chamada externa toda vez que alguém abrir o mesmo estado.
-_CACHE_MUNICIPIOS_IBGE = {}
+# IBGE, mas essa rota NUNCA chama o IBGE direto — lê só do cache em banco
+# (ver models.MunicipioIbge/municipios_sql.py). Quem alimenta a tabela é
+# sincronizar_municipios_ibge.py (seed inicial) ou a rota de sincronizar
+# abaixo (quando o IBGE incluir/alterar algum município) — nunca a cada
+# Ficha/tela aberta, que era o que sobrecarregava a instância antes.
 
 
 @app.route("/api/localidades/estados")
@@ -2854,8 +2857,18 @@ def listar_municipios_ibge(uf):
     uf = uf.strip().upper()
     if uf not in SIGLAS_ESTADOS_BRASIL:
         return jsonify(ok=False, error="UF inválida."), 400
-    if uf in _CACHE_MUNICIPIOS_IBGE:
-        return jsonify(ok=True, municipios=_CACHE_MUNICIPIOS_IBGE[uf], cache=True)
+    return jsonify(ok=True, municipios=municipios_sql.listar_por_uf(uf))
+
+
+@app.route("/api/localidades/municipios/<uf>/sincronizar", methods=["POST"])
+@requer_operador
+def sincronizar_municipios_ibge(uf):
+    """Única rota que bate na API do IBGE — usada só quando o IBGE incluir/
+    alterar um município e precisar atualizar o cache em banco antes do
+    próximo seed manual. Não é chamada automaticamente em nenhum fluxo."""
+    uf = uf.strip().upper()
+    if uf not in SIGLAS_ESTADOS_BRASIL:
+        return jsonify(ok=False, error="UF inválida."), 400
     try:
         r = requests.get(
             f"https://servicodados.ibge.gov.br/api/v1/localidades/estados/{uf}/municipios",
@@ -2864,9 +2877,9 @@ def listar_municipios_ibge(uf):
         r.raise_for_status()
         municipios = sorted(m["nome"] for m in r.json())
     except (requests.exceptions.RequestException, ValueError, KeyError):
-        return jsonify(ok=False, error="Não foi possível carregar os municípios agora. Tente novamente."), 502
-    _CACHE_MUNICIPIOS_IBGE[uf] = municipios
-    return jsonify(ok=True, municipios=municipios, cache=False)
+        return jsonify(ok=False, error="Não foi possível atualizar os municípios agora. Tente novamente."), 502
+    municipios_sql.substituir_municipios_uf(uf, municipios)
+    return jsonify(ok=True, municipios=municipios)
 
 
 @app.route("/api/clientes/<int:cliente_id>/eventos", methods=["GET"])

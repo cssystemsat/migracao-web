@@ -511,6 +511,25 @@ class FeedPostCurtida(Base):
     criado_em: Mapped[datetime] = mapped_column(default=_agora)
 
 
+class MunicipioIbge(Base):
+    """Cache em banco dos municípios por UF, vindos da API de Localidades do
+    IBGE (ver municipios_sql.py) — a rota /api/localidades/municipios/<uf>
+    lê só daqui, nunca chama o IBGE na hora que alguém abre a tela. A API
+    só é batida pelo script sincronizar_municipios_ibge.py, roda manual
+    (seed inicial ou quando o IBGE inclui/altera algum município — evento
+    raro, não precisa de sincronização automática)."""
+
+    __tablename__ = "municipios_ibge"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uf: Mapped[str] = mapped_column(index=True)
+    nome: Mapped[str] = mapped_column()
+
+    __table_args__ = (
+        UniqueConstraint("uf", "nome", name="uq_municipio_ibge_uf_nome"),
+    )
+
+
 class FeedComentario(Base):
     __tablename__ = "feed_comentarios"
 
