@@ -16704,7 +16704,8 @@ el("btn-abrir-comandos-modelos").addEventListener("click", () => {
 el("comandos-modal-fechar").addEventListener("click", () => overlayComandos.classList.add("hidden"));
 
 // --- USUÁRIOS DA FERRAMENTA (login próprio do app, não confundir com "Logins salvos" da SSX) ---
-const overlayUsuarios = el("overlay-usuarios");
+// Vive dentro da tela Configurações (painel Administração do sistema), não
+// mais num modal — mesmos ids, só o container mudou.
 const listaUsuarios = el("lista-usuarios");
 const formNovoUsuario = el("form-novo-usuario");
 const inputUsuarioNome = el("usuario-nome");
@@ -16715,7 +16716,6 @@ const inputUsuarioResponsavel = el("usuario-responsavel");
 const btnSalvarUsuario = el("btn-salvar-usuario");
 const btnCancelarEdicaoUsuario = el("btn-cancelar-edicao-usuario");
 const usuarioFormTitulo = el("usuario-form-titulo");
-const btnGerenciarUsuarios = el("btn-gerenciar-usuarios");
 
 let usuariosCache = [];
 let editandoUsuarioId = null;
@@ -16899,16 +16899,32 @@ document.addEventListener("click", (e) => {
   }
 });
 
-if (btnGerenciarUsuarios) {
-  btnGerenciarUsuarios.addEventListener("click", () => {
+const btnConfiguracoes = el("btn-configuracoes");
+if (btnConfiguracoes) {
+  btnConfiguracoes.addEventListener("click", () => {
     appMenuDropdown.classList.add("hidden");
-    resetFormUsuario();
-    mostrarErroUsuarios("");
-    overlayUsuarios.classList.remove("hidden");
-    carregarAppUsuarios();
+    irParaTela("configuracoes");
   });
 }
-el("usuarios-fechar").addEventListener("click", () => overlayUsuarios.classList.add("hidden"));
+
+// --- CONFIGURAÇÕES (admin) — sub-navegação local: Administração do sistema / Integrações ---
+const sidebarConfig = el("sidebar-config");
+const configNavAdmin = el("config-nav-admin");
+const configNavIntegracoes = el("config-nav-integracoes");
+const configPainelAdmin = el("config-painel-admin");
+const configPainelIntegracoes = el("config-painel-integracoes");
+
+function mostrarConfigPainel(painel) {
+  configNavAdmin.classList.toggle("ativo", painel === "admin");
+  configNavIntegracoes.classList.toggle("ativo", painel === "integracoes");
+  configPainelAdmin.classList.toggle("hidden", painel !== "admin");
+  configPainelIntegracoes.classList.toggle("hidden", painel !== "integracoes");
+  if (painel === "admin") { resetFormUsuario(); mostrarErroUsuarios(""); carregarAppUsuarios(); }
+}
+if (configNavAdmin) {
+  configNavAdmin.addEventListener("click", () => mostrarConfigPainel("admin"));
+  configNavIntegracoes.addEventListener("click", () => mostrarConfigPainel("integracoes"));
+}
 
 // --- MINHA SENHA (troca a própria senha de acesso à ferramenta) ---
 const overlayMinhaSenha = el("overlay-minha-senha");
@@ -17453,6 +17469,7 @@ const TELAS_NAV = {
   ficha: el("tela-ficha-cliente"),
   "minha-conta": el("tela-minha-conta"),
   feed: el("tela-feed"),
+  configuracoes: el("tela-configuracoes"),
 };
 const NAV_BOTOES = {
   dashboard: el("nav-dashboard"),
@@ -17481,6 +17498,7 @@ const CAMINHO_POR_TELA = {
   migracao: "/migracao",
   ferramentas: "/ferramentas",
   "minha-conta": "/minha-conta",
+  configuracoes: "/configuracoes",
 };
 const TELA_POR_CAMINHO_RAIZ = {
   "/": "dashboard",
@@ -17489,6 +17507,7 @@ const TELA_POR_CAMINHO_RAIZ = {
   "/migracao": "migracao",
   "/ferramentas": "ferramentas",
   "/minha-conta": "minha-conta",
+  "/configuracoes": "configuracoes",
 };
 
 // Sub-telas de "Ferramentas Auxiliares" (cards -> Área de Importação e Consulta
@@ -17738,6 +17757,7 @@ const TITULO_TOPBAR_POR_TELA = {
   ferramentas: "Ferramentas Auxiliares",
   ficha: "Ficha do cliente",
   "minha-conta": "Minha conta",
+  configuracoes: "Configurações",
 };
 const TITULO_TOPBAR_POR_SUB = {
   "importacao-consulta": "Área de Importação e Consulta",
@@ -17777,6 +17797,12 @@ function atualizarTituloTopbar(tela, sub) {
 
 function irParaTela(tela, opcoes) {
   opcoes = opcoes || {};
+
+  // Configurações é admin-only — o botão já some do menu pra quem não é,
+  // mas isso aqui barra navegação direta (voltar/avançar do navegador,
+  // URL digitada) tentando cair nessa tela sem ser admin. O backend também
+  // barra (GET /configuracoes), essa é só a camada de UI.
+  if (tela === "configuracoes" && USUARIO_PERFIL_ATUAL !== "adm") tela = "dashboard";
 
   const novoSub = tela === "ferramentas" && FERRAMENTAS_SUBTELAS[opcoes.sub] ? opcoes.sub : null;
   const estadoHistoricoAtual = history.state;
@@ -17835,8 +17861,10 @@ function irParaTela(tela, opcoes) {
 
   const naFicha = tela === "ficha";
   // A navegação geral permanece disponível em todas as telas; na Ficha, ela
-  // convive com a navegação contextual do cliente.
+  // convive com a navegação contextual do cliente. Em Configurações, idem
+  // com o bloco "Administração do sistema / Integrações".
   sidebarCliente.classList.toggle("hidden", !naFicha);
+  sidebarConfig.classList.toggle("hidden", tela !== "configuracoes");
 
   if (!opcoes.semHistorico) {
     const caminho = naFicha
@@ -17861,6 +17889,7 @@ function irParaTela(tela, opcoes) {
   if (tela === "feed") carregarFeed();
   if (tela === "ficha") carregarFichaCliente(opcoes.idcentral);
   if (tela === "minha-conta") { carregarMinhaConta(); carregarMinhasTarefas(); }
+  if (tela === "configuracoes") mostrarConfigPainel("admin");
   if (entrandoNaImportacaoConsulta) { atualizarSaidaHeader("Saída", true); mostrarPlaceholder("Autentique-se e escolha uma consulta ou importação."); }
 }
 
@@ -18314,6 +18343,7 @@ function destinoVoltar() {
   }
   if (telaNavAtual === "ficha") return { tela: fichaOrigem || "dashboard" };
   if (telaNavAtual === "minha-conta") return { tela: "dashboard" };
+  if (telaNavAtual === "configuracoes") return { tela: "dashboard" };
   return null;
 }
 

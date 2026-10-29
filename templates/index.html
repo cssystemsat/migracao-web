@@ -131,6 +131,18 @@
         <span class="sidebar-item-texto">Histórico</span>
       </button>
     </div>
+
+    <div id="sidebar-config" class="hidden" role="navigation" aria-label="Configurações de administrador">
+      <div class="sidebar-secao-titulo">Configurações</div>
+      <button type="button" class="sidebar-item" id="config-nav-admin" title="Administração do sistema">
+        <span class="material-symbols-outlined sidebar-item-icone">admin_panel_settings</span>
+        <span class="sidebar-item-texto">Administração do sistema</span>
+      </button>
+      <button type="button" class="sidebar-item" id="config-nav-integracoes" title="Integrações">
+        <span class="material-symbols-outlined sidebar-item-icone">cable</span>
+        <span class="sidebar-item-texto">Integrações</span>
+      </button>
+    </div>
   </nav>
 
   <header class="topbar">
@@ -185,7 +197,7 @@
             </span>
           </label>
           {% if app_usuario_perfil == 'adm' %}
-            <button type="button" id="btn-gerenciar-usuarios" class="app-menu-item">Gerenciar usuários</button>
+            <button type="button" id="btn-configuracoes" class="app-menu-item">Configurações</button>
           {% endif %}
           <a href="{{ url_for('logout_app') }}" class="app-menu-item app-menu-sair">Sair da ferramenta</a>
         </div>
@@ -1876,6 +1888,49 @@
           </div>
         </div>
       </section>
+
+      <section id="tela-configuracoes" class="panel hidden">
+        <div class="conteudo-header">
+          <div>
+            <h2 class="conteudo-titulo">Configurações</h2>
+            <p class="conteudo-subtitulo">Administração do sistema e integrações — visível só para administradores</p>
+          </div>
+        </div>
+
+        <div id="config-painel-admin">
+          <p id="usuarios-erro" class="placeholder hidden" style="color:#b91c1c"></p>
+          <div id="lista-usuarios" class="lista-credenciais"></div>
+
+          <h4 class="form-credencial-titulo" id="usuario-form-titulo">Adicionar usuário</h4>
+          <form id="form-novo-usuario" class="form-credencial">
+            <input type="text" id="usuario-nome" placeholder="Usuário" required>
+            <input type="password" id="usuario-senha" placeholder="Senha (deixe em branco pra manter, ao editar)">
+            <input type="text" id="usuario-responsavel" placeholder="Nome de exibição (opcional)" title="Como esse login aparece nos selects de Responsável/Consultor Comercial — se vazio, usa o nome de usuário.">
+            <select id="usuario-tipo-acesso" title="Define o que esse login pode fazer no app">
+              <option value="adm">Administrador — acesso total, gerencia outros usuários</option>
+              <option value="analista" selected>Analista — opera só nos clientes da própria carteira</option>
+              <option value="visualizacao">Visualização — só lê, nenhuma ação</option>
+            </select>
+            <select id="usuario-area" title="Área do usuário na empresa — quem tem uma área de CS pode ter clientes na própria carteira">
+              <option value="">Sem área definida</option>
+              <option value="CS - Implantação">CS - Implantação</option>
+              <option value="CS - Onboarding">CS - Onboarding</option>
+              <option value="CS - Ongoing">CS - Ongoing</option>
+              <option value="Treinamento">Treinamento</option>
+              <option value="Suporte">Suporte</option>
+              <option value="Comercial">Comercial</option>
+            </select>
+            <div class="form-credencial-botoes">
+              <button type="submit" id="btn-salvar-usuario" class="btn-primary">Adicionar</button>
+              <button type="button" id="btn-cancelar-edicao-usuario" class="btn-secondary hidden">Cancelar edição</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="config-painel-integracoes" class="hidden">
+          <p class="placeholder">Configuração de integrações (SSX, Wootric, Google Sheets) — em breve.</p>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -1993,44 +2048,6 @@
           <div class="form-credencial-botoes">
             <button type="submit" id="btn-salvar-credencial" class="btn-primary">Adicionar</button>
             <button type="button" id="btn-cancelar-edicao-credencial" class="btn-secondary hidden">Cancelar edição</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div id="overlay-usuarios" class="overlay hidden">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>Gerenciar usuários</h3>
-        <button id="usuarios-fechar" class="btn-secondary">Fechar</button>
-      </div>
-      <div class="modal-body">
-        <p id="usuarios-erro" class="placeholder hidden" style="color:#b91c1c"></p>
-        <div id="lista-usuarios" class="lista-credenciais"></div>
-
-        <h4 class="form-credencial-titulo" id="usuario-form-titulo">Adicionar usuário</h4>
-        <form id="form-novo-usuario" class="form-credencial">
-          <input type="text" id="usuario-nome" placeholder="Usuário" required>
-          <input type="password" id="usuario-senha" placeholder="Senha (deixe em branco pra manter, ao editar)">
-          <input type="text" id="usuario-responsavel" placeholder="Nome de exibição (opcional)" title="Como esse login aparece nos selects de Responsável/Consultor Comercial — se vazio, usa o nome de usuário.">
-          <select id="usuario-tipo-acesso" title="Define o que esse login pode fazer no app">
-            <option value="adm">Administrador — acesso total, gerencia outros usuários</option>
-            <option value="analista" selected>Analista — opera só nos clientes da própria carteira</option>
-            <option value="visualizacao">Visualização — só lê, nenhuma ação</option>
-          </select>
-          <select id="usuario-area" title="Área do usuário na empresa — quem tem uma área de CS pode ter clientes na própria carteira">
-            <option value="">Sem área definida</option>
-            <option value="CS - Implantação">CS - Implantação</option>
-            <option value="CS - Onboarding">CS - Onboarding</option>
-            <option value="CS - Ongoing">CS - Ongoing</option>
-            <option value="Treinamento">Treinamento</option>
-            <option value="Suporte">Suporte</option>
-            <option value="Comercial">Comercial</option>
-          </select>
-          <div class="form-credencial-botoes">
-            <button type="submit" id="btn-salvar-usuario" class="btn-primary">Adicionar</button>
-            <button type="button" id="btn-cancelar-edicao-usuario" class="btn-secondary hidden">Cancelar edição</button>
           </div>
         </form>
       </div>

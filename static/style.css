@@ -2301,7 +2301,7 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
    do mockup) — como os dois blocos são irmãos diretos de .sidebar (flex
    column), basta reordenar visualmente em vez de mexer no DOM/JS que já
    mostra/esconde cada um pelo id. */
-#sidebar-cliente { order: 1; display: flex; flex-direction: column; gap: 2px; padding-bottom: 12px; }
+#sidebar-cliente, #sidebar-config { order: 1; display: flex; flex-direction: column; gap: 2px; padding-bottom: 12px; }
 #sidebar-raiz { order: 2; display: flex; flex-direction: column; gap: 2px; padding-bottom: 12px; }
 
 /* Rótulo de seção ("Navegação geral" / "Contexto operacional"). */

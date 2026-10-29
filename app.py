@@ -1134,6 +1134,16 @@ def tela_minha_conta():
     return _renderizar_shell()
 
 
+@app.route("/configuracoes")
+def tela_configuracoes():
+    # Página só pra admin — quem não é cai de volta no Dashboard (o próprio
+    # menu do avatar já esconde o link pra quem não é admin, isso aqui é só
+    # pra barrar acesso direto pela URL).
+    if not _sou_admin():
+        return redirect(url_for("index"))
+    return _renderizar_shell()
+
+
 @app.route("/feed")
 def tela_feed():
     return _renderizar_shell()
