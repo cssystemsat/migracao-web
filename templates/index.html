@@ -1793,11 +1793,12 @@
         </div>
 
         <div id="ferramentas-sub-quebra-string" class="ferramentas-subtela hidden">
-          <div class="conteudo-header">
+          <div class="conteudo-header conteudo-header-com-acao">
             <div>
               <h2 class="conteudo-titulo">Quebra-String</h2>
               <p class="conteudo-subtitulo">Decodificador e analisador de pacotes de telemetria</p>
             </div>
+            <button type="button" id="btn-quebra-string-disponiveis" class="btn-secondary quebra-string-disponiveis" aria-haspopup="dialog">Disponíveis</button>
           </div>
           <div class="quebra-string-layout">
             <label class="campo-migracao">
@@ -1807,20 +1808,7 @@
             <div class="quebra-string-acoes">
               <button id="btn-quebra-string" class="btn-primary" disabled>Quebrar string</button>
               <button type="button" id="btn-quebra-string-limpar" class="btn-secondary" disabled>Limpar</button>
-              <button type="button" id="btn-quebra-string-homologados" class="btn-secondary" aria-expanded="false" aria-controls="quebra-string-homologados">Equipamentos homologados</button>
             </div>
-            <section id="quebra-string-homologados" class="quebra-string-homologados hidden" aria-labelledby="quebra-string-homologados-titulo">
-              <h3 id="quebra-string-homologados-titulo">Protocolos e equipamentos com leitura implementada</h3>
-              <p>Nesta ferramenta, “homologado” indica que o protocolo tem decodificador disponível. A compatibilidade pode variar conforme o modelo e a versão do firmware; isso não representa certificação do fabricante.</p>
-              <ul>
-                <li><strong>Concox e compatíveis</strong> — GT06</li>
-                <li><strong>BWS IoT</strong> — E3</li>
-                <li><strong>Jmak</strong> — J-R12 (String, JSON e Zip)</li>
-                <li><strong>Suntech 4G</strong></li>
-                <li><strong>Mobilogix</strong> — MT2000 (T Message)</li>
-                <li><strong>Teltonika</strong> — AVL Codec 8/Codec 8 Extended e login com IMEI</li>
-              </ul>
-            </section>
             <div id="quebra-string-bytes" class="quebra-string-bytes"></div>
             <div id="quebra-string-resultado" class="quebra-string-resultado"></div>
           </div>
@@ -3343,6 +3331,26 @@
           <button type="button" id="btn-conversor-edicao-reverter" class="btn-secondary">Reverter para original</button>
           <button type="button" id="btn-conversor-edicao-fechar" class="btn-secondary conversor-edicao-btn-fechar">Fechar</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-quebra-string-disponiveis" class="overlay hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="quebra-string-disponiveis-titulo">
+      <div class="modal-header">
+        <h3 id="quebra-string-disponiveis-titulo">Equipamentos disponíveis</h3>
+        <button type="button" id="quebra-string-disponiveis-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body quebra-string-disponiveis-conteudo">
+        <p>Protocolos com decodificador disponível nesta ferramenta. A compatibilidade pode variar conforme o modelo e a versão do firmware.</p>
+        <ul>
+          <li><strong>Concox e compatíveis</strong> — GT06</li>
+          <li><strong>BWS IoT</strong> — E3</li>
+          <li><strong>Jmak</strong> — J-R12 (String, JSON e Zip)</li>
+          <li><strong>Suntech 4G</strong></li>
+          <li><strong>Mobilogix</strong> — MT2000 (T Message)</li>
+          <li><strong>Teltonika</strong> — AVL Codec 8/Codec 8 Extended e login com IMEI</li>
+        </ul>
       </div>
     </div>
   </div>

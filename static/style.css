@@ -1944,17 +1944,10 @@ table.conversor-edicao-tabela tr.conversor-edicao-linha-erro td { background: #f
 .quebra-string-acoes { display: flex; align-items: center; gap: 6px; margin-top: -6px; }
 .quebra-string-acoes button { width: auto; padding: 5px 11px; margin: 0; }
 .quebra-string-acoes .btn-primary { padding: 5px 14px; }
-.quebra-string-homologados {
-  padding: 11px 14px;
-  border: 1px solid var(--cinza-200);
-  border-radius: 6px;
-  background: var(--cinza-100);
-  font-size: 0.84rem;
-}
-.quebra-string-homologados h3 { margin: 0 0 5px; font-size: 0.9rem; }
-.quebra-string-homologados p { margin: 0 0 7px; color: var(--cinza-700); }
-.quebra-string-homologados ul { margin: 0; padding-left: 20px; }
-.quebra-string-homologados li + li { margin-top: 3px; }
+.quebra-string-disponiveis { width: auto; flex-shrink: 0; margin: 0; padding: 6px 11px; }
+.quebra-string-disponiveis-conteudo p { margin: 0 0 9px; color: var(--cinza-700); }
+.quebra-string-disponiveis-conteudo ul { margin: 0; padding-left: 20px; }
+.quebra-string-disponiveis-conteudo li + li { margin-top: 5px; }
 /* "Ver posição no mapa": barra fina colada no topo da tabela (ação do resultado), link pequeno à direita. */
 .quebra-string-tabela-barra { display: flex; justify-content: flex-end; margin: 0 0 3px; }
 .quebra-string-mapa {

@@ -14150,8 +14150,9 @@ el("btn-convare-importar-api").addEventListener("click", () => {
 const quebraStringInput = el("quebra-string-input");
 const quebraStringBytesView = el("quebra-string-bytes");
 const btnQuebraString = el("btn-quebra-string");
-const btnQuebraStringHomologados = el("btn-quebra-string-homologados");
-const quebraStringHomologados = el("quebra-string-homologados");
+const btnQuebraStringDisponiveis = el("btn-quebra-string-disponiveis");
+const overlayQuebraStringDisponiveis = el("overlay-quebra-string-disponiveis");
+const btnFecharQuebraStringDisponiveis = el("quebra-string-disponiveis-fechar");
 const quebraStringResultado = el("quebra-string-resultado");
 
 // Conjunto padronizado de informações exibidas para qualquer rastreador.
@@ -16202,10 +16203,25 @@ function executarQuebraString() {
 }
 
 btnQuebraString.addEventListener("click", executarQuebraString);
-btnQuebraStringHomologados.addEventListener("click", () => {
-  const abrir = btnQuebraStringHomologados.getAttribute("aria-expanded") !== "true";
-  btnQuebraStringHomologados.setAttribute("aria-expanded", String(abrir));
-  quebraStringHomologados.classList.toggle("hidden", !abrir);
+btnQuebraStringDisponiveis.addEventListener("click", () => {
+  overlayQuebraStringDisponiveis.classList.remove("hidden");
+  btnFecharQuebraStringDisponiveis.focus();
+});
+btnFecharQuebraStringDisponiveis.addEventListener("click", () => {
+  overlayQuebraStringDisponiveis.classList.add("hidden");
+  btnQuebraStringDisponiveis.focus();
+});
+overlayQuebraStringDisponiveis.addEventListener("click", (e) => {
+  if (e.target === overlayQuebraStringDisponiveis) {
+    overlayQuebraStringDisponiveis.classList.add("hidden");
+    btnQuebraStringDisponiveis.focus();
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !overlayQuebraStringDisponiveis.classList.contains("hidden")) {
+    overlayQuebraStringDisponiveis.classList.add("hidden");
+    btnQuebraStringDisponiveis.focus();
+  }
 });
 // Ctrl+Enter no campo também quebra a string.
 quebraStringInput.addEventListener("keydown", (e) => {
