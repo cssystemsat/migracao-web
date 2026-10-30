@@ -55,7 +55,15 @@ def _chamada(path, params=None):
         raise SsxDeskApiError("Limite de requisições à API do ssxdesk excedido (120/min) — tente de novo em instantes.")
     if resp.status_code == 404:
         return None
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as err:
+        status = resp.status_code
+        if status >= 500:
+            mensagem = f"API do ssxdesk temporariamente indisponível (HTTP {status})."
+        else:
+            mensagem = f"API do ssxdesk retornou HTTP {status} ao consultar os chamados."
+        raise SsxDeskApiError(mensagem) from err
     return resp.json()
 
 

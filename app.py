@@ -24,7 +24,7 @@ from googleapiclient.errors import HttpError
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 import cliente_documentos_sql
 import cliente_eventos_sql
@@ -2941,7 +2941,14 @@ def listar_chamados_cliente(cliente_id):
     usado por sistemas externos (ex. Suporte) que não têm API pra resolver
     isso a partir do idcentral", ver models.py) — e cai pro `idcentral`
     normal quando não tiver (a maioria dos clientes bate direto por ali)."""
-    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    try:
+        cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    except SQLAlchemyError:
+        app.logger.exception("Falha ao buscar cliente %s para consultar chamados do ssxdesk", cliente_id)
+        return jsonify(
+            ok=False,
+            error="Não foi possível consultar os dados do cliente no banco agora. Tente novamente em instantes.",
+        ), 503
     if not cliente:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
     idcentral_busca = cliente.get("codigo_idcentral") or cliente["idcentral"]

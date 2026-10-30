@@ -19318,18 +19318,22 @@ const fichaClienteCache = new Map();
 // "erro" = pedido mas falhou; senão {abertos, concluidos}.
 let fichaChamadosAtual = null;
 let fichaChamadosClienteId = null; // de qual cliente é fichaChamadosAtual, pra não misturar com outro aberto em seguida
+let fichaChamadosErro = null;
 
 async function carregarChamadosFicha(clienteId) {
   fichaChamadosAtual = null;
   fichaChamadosClienteId = clienteId;
+  fichaChamadosErro = null;
   try {
     const r = await fetch(`/api/clientes/${clienteId}/chamados`);
     const data = await parseJsonResponse(r);
     if (fichaChamadosClienteId !== clienteId) return; // ficha já trocou de cliente, descarta
     fichaChamadosAtual = data.ok ? { abertos: data.abertos, concluidos: data.concluidos } : "erro";
+    if (!data.ok) fichaChamadosErro = data.error || null;
   } catch (err) {
     if (fichaChamadosClienteId !== clienteId) return;
     fichaChamadosAtual = "erro";
+    fichaChamadosErro = "Não foi possível conectar ao servidor para buscar os chamados.";
   }
   // Só redesenha se a pessoa ainda estiver numa aba que mostra chamados —
   // evita re-render brusco se ela já foi pra Implantação/Marcos/Migração.
@@ -21791,7 +21795,7 @@ function construirFichaHistoricoSuporte(implantacao) {
   if (fichaChamadosAtual === "erro") {
     card.appendChild(construirFichaHistoricoVazio(
       "Não foi possível carregar",
-      "Não consegui buscar os chamados desse cliente no ssxdesk agora. Tenta reabrir a Ficha em instantes."
+      fichaChamadosErro || "Não consegui buscar os chamados desse cliente no ssxdesk agora. Tenta reabrir a Ficha em instantes."
     ));
     return card;
   }
