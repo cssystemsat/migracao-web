@@ -1807,7 +1807,20 @@
             <div class="quebra-string-acoes">
               <button id="btn-quebra-string" class="btn-primary" disabled>Quebrar string</button>
               <button type="button" id="btn-quebra-string-limpar" class="btn-secondary" disabled>Limpar</button>
+              <button type="button" id="btn-quebra-string-homologados" class="btn-secondary" aria-expanded="false" aria-controls="quebra-string-homologados">Equipamentos homologados</button>
             </div>
+            <section id="quebra-string-homologados" class="quebra-string-homologados hidden" aria-labelledby="quebra-string-homologados-titulo">
+              <h3 id="quebra-string-homologados-titulo">Protocolos e equipamentos com leitura implementada</h3>
+              <p>Nesta ferramenta, “homologado” indica que o protocolo tem decodificador disponível. A compatibilidade pode variar conforme o modelo e a versão do firmware; isso não representa certificação do fabricante.</p>
+              <ul>
+                <li><strong>Concox e compatíveis</strong> — GT06</li>
+                <li><strong>BWS IoT</strong> — E3</li>
+                <li><strong>Jmak</strong> — J-R12 (String, JSON e Zip)</li>
+                <li><strong>Suntech 4G</strong></li>
+                <li><strong>Mobilogix</strong> — MT2000 (T Message)</li>
+                <li><strong>Teltonika</strong> — AVL Codec 8/Codec 8 Extended e login com IMEI</li>
+              </ul>
+            </section>
             <div id="quebra-string-bytes" class="quebra-string-bytes"></div>
             <div id="quebra-string-resultado" class="quebra-string-resultado"></div>
           </div>

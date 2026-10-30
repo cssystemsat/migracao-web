@@ -14150,6 +14150,8 @@ el("btn-convare-importar-api").addEventListener("click", () => {
 const quebraStringInput = el("quebra-string-input");
 const quebraStringBytesView = el("quebra-string-bytes");
 const btnQuebraString = el("btn-quebra-string");
+const btnQuebraStringHomologados = el("btn-quebra-string-homologados");
+const quebraStringHomologados = el("quebra-string-homologados");
 const quebraStringResultado = el("quebra-string-resultado");
 
 // Conjunto padronizado de informações exibidas para qualquer rastreador.
@@ -16200,6 +16202,11 @@ function executarQuebraString() {
 }
 
 btnQuebraString.addEventListener("click", executarQuebraString);
+btnQuebraStringHomologados.addEventListener("click", () => {
+  const abrir = btnQuebraStringHomologados.getAttribute("aria-expanded") !== "true";
+  btnQuebraStringHomologados.setAttribute("aria-expanded", String(abrir));
+  quebraStringHomologados.classList.toggle("hidden", !abrir);
+});
 // Ctrl+Enter no campo também quebra a string.
 quebraStringInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.ctrlKey && quebraStringInput.value.trim()) {
