@@ -2347,7 +2347,7 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
   background: none;
   border: none;
   border-radius: 4px;
-  color: #475569;
+  color: var(--cinza-700);
   font-size: 12px;
   line-height: 16px;
   font-weight: 500;
@@ -2355,7 +2355,7 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
   flex-shrink: 0;
 }
 .sidebar-voltar-invisivel { visibility: hidden; pointer-events: none; }
-.sidebar-voltar .sidebar-item-icone { font-size: 12px; width: 12px; color: #475569; }
+.sidebar-voltar .sidebar-item-icone { font-size: 12px; width: 12px; color: var(--cinza-700); }
 .sidebar-voltar:hover:not(:disabled) { background: var(--cinza-100); color: var(--cinza-900); }
 .sidebar.recolhida .sidebar-topo-linha { justify-content: flex-start; padding: 0 12px; gap: 0; }
 .sidebar.recolhida .sidebar-marca { display: none; }
@@ -2702,6 +2702,8 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
    abaixo da tabela (ver renderAtalhosExclusaoResultado). */
 #atalhos-exclusao-resultado { display: flex; flex-direction: column; gap: 10px; }
 .atalhos-exclusao-tabela-wrap { max-height: 288px; }
+.atalhos-exclusao-filtros th { padding-top: 5px; padding-bottom: 5px; }
+.atalhos-exclusao-filtro-coluna { width: 100%; min-width: 90px; box-sizing: border-box; padding: 5px 7px; font: inherit; font-size: 0.8rem; }
 /* .convcli-toolbar-validar (reaproveitada aqui pros dois toolbars — "Selecionar
    elegíveis"/"Desmarcar todos" em cima e "Excluir selecionados" embaixo) já
    vem com border-top/padding-top/margin-bottom pensados pra ficar sozinha
@@ -2939,7 +2941,7 @@ button.kmarcos-stat:hover:not(:disabled) { background: var(--cinza-100); opacity
   font-size: 15px;
   line-height: 20px;
   letter-spacing: -0.375px;
-  color: #0f172a;
+  color: var(--cinza-900);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2955,10 +2957,10 @@ button.kmarcos-stat:hover:not(:disabled) { background: var(--cinza-100); opacity
 /* Nome+IdCentral e as tags de diagnóstico, lado a lado na mesma linha
    (quebra só se não couber) — não empilhados um embaixo do outro. */
 .ficha-header-info { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; row-gap: 8px; min-width: 0; }
-.ficha-header h2 { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.6px; color: #0f172a; }
+.ficha-header h2 { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.6px; color: var(--cinza-900); }
 /* Nome do cliente + IdCentral + tag "Migração" (só quando tem) na mesma linha. */
 .ficha-header-titulo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.ficha-header-idcentral { font-family: "Consolas", monospace; font-size: 12px; line-height: 16px; font-weight: 500; color: #475569; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; }
+.ficha-header-idcentral { font-family: "Consolas", monospace; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--cinza-700); background: var(--cinza-100); padding: 2px 8px; border-radius: 4px; }
 .ficha-header-info .ficha-tags-resumo { margin: 0; }
 
 .ficha-header-acoes { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -2967,10 +2969,10 @@ button.kmarcos-stat:hover:not(:disabled) { background: var(--cinza-100); opacity
   width: 36px;
   height: 36px;
   padding: 0;
-  background: #f1f5f9;
+  background: var(--cinza-100);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   border-radius: 4px;
-  color: #475569;
+  color: var(--cinza-700);
 }
 /* Azul exato do mockup (#2563eb / hover #004ac6) só nos CTAs de "Nova
    Tarefa" da Ficha — não mexe no .btn-primary verde usado no resto do app. */
@@ -3223,8 +3225,17 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-marcos-lista .modal-sidebar-subitem { padding: 8px 10px; font-size: 0.85rem; border: 1px solid var(--cinza-200); }
 .ficha-marcos-titulo { margin: 0 0 5px; }
 .ficha-marcos-layout .btn-primary#btn-salvar-implantacao-marcos { margin-top: 11px; }
+.ficha-objetivos-painel { margin-top: 14px; }
+.ficha-objetivos-lista { border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 0 10px; }
+.ficha-objetivos-lista .placeholder { margin: 10px 0; }
+.ficha-objetivos-form { align-items: center; }
+.ficha-objetivos-form input { flex: 1; min-width: 180px; }
+.ficha-objetivos-form .btn-adicionar-inline { white-space: nowrap; }
+.ficha-objetivos-salvar { width: auto; margin-top: 10px; }
 @media (max-width: 760px) {
   .ficha-marcos-layout { grid-template-columns: 1fr; }
+  .ficha-objetivos-form { align-items: stretch; }
+  .ficha-objetivos-form .btn-adicionar-inline { align-self: flex-start; }
 }
 .btn-link-inline { width: auto; margin: 0 0 0 5px; padding: 0; background: none; border: none; color: var(--azul); font: inherit; cursor: pointer; }
 .btn-link-inline:hover { text-decoration: underline; }
@@ -3347,9 +3358,9 @@ input:disabled, select:disabled, input.input-travado {
    acima do nome do cliente. Estilo de aba com sublinhado no ativo. */
 .ficha-subabas { display: flex; gap: 16px; overflow-x: auto; border-bottom: none; margin: 0 0 11px; scrollbar-width: none; -ms-overflow-style: none; }
 .ficha-subabas::-webkit-scrollbar { display: none; }
-.ficha-subaba { width: auto; margin: 0 0 -1px; padding: 4px 0 8px; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: #475569; font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.ficha-subaba { width: auto; margin: 0 0 -1px; padding: 4px 0 8px; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--cinza-700); font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .ficha-subaba:hover { color: var(--cinza-900); }
-.ficha-subaba.ativo { color: #0f326d; font-weight: 600; border-bottom-color: #0f326d; }
+.ficha-subaba.ativo { color: var(--azul-escuro); font-weight: 600; border-bottom-color: var(--azul-escuro); }
 .ficha-historico-item { padding: 7px 0; border-bottom: 1px solid var(--cinza-200); font-size: 0.88rem; }
 
 /* Cards da Visão Geral (CSM, Comercial, Decisor, Região) lado a lado, no
@@ -3405,6 +3416,7 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-alerta-card-amarelo .ficha-alerta-rotulo-icone { background: #fffbeb; color: #b45309; }
 :root[data-theme="dark"] .ficha-alerta-card-amarelo .ficha-alerta-rotulo-icone { background: rgba(180, 83, 9, 0.22); }
 .ficha-alerta-card-amarelo .ficha-contato-rotulo { color: #b45309; }
+:root[data-theme="dark"] .ficha-alerta-card-amarelo .ficha-contato-rotulo { color: #fbbf24; }
 .ficha-alerta-card-neutro .ficha-alerta-rotulo-icone { background: var(--cinza-100); color: var(--cinza-700); }
 .ficha-alerta-card-neutro .ficha-contato-rotulo { color: var(--cinza-700); }
 @media (max-width: 900px) {
@@ -3419,6 +3431,7 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-alertas-grade { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .ficha-alerta-card { border-color: #e2e8f0; background: var(--painel); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }
 .ficha-alerta-card .ficha-contato-rotulo { color: #ba1a1a; font-weight: 700; }
+:root[data-theme="dark"] .ficha-alerta-card .ficha-contato-rotulo { color: #fca5a5; }
 .ficha-alerta-texto { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--cinza-900); }
 :root[data-theme="dark"] .ficha-alerta-card { border-color: var(--cinza-200); background: var(--cinza-100); }
 @media (max-width: 700px) {
@@ -3718,12 +3731,9 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-timeline-caminho { display: flex; flex-direction: column; gap: 24px; position: relative; }
 .ficha-timeline-caminho > .placeholder { padding: 8px 0 13px; }
 
-/* justify-content: space-between — sem isso, linhas com menos itens que o
-   máximo por linha (FICHA_TIMELINE_ITENS_POR_LINHA) não esticam até a borda
-   (cada item para no max-width e sobra espaço à direita). Com space-between,
-   o primeiro e o último item SEMPRE ficam encostados nas bordas (16px),
-   não importa quantos itens a linha tem. */
-.ficha-timeline-linha { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 5px; padding: 6px 2px 3px; }
+/* Os itens ocupam a largura disponível com espaço reservado no lado da curva,
+   para que a descida permaneça dentro do container sem tocar nos rótulos. */
+.ficha-timeline-linha { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 5px; padding: 6px calc(2px + var(--ficha-timeline-respiro-virada, 0px)) 3px; }
 .ficha-timeline-linha.invertida { flex-direction: row-reverse; }
 
 /* Traçado único "cobrinha" conectando Início + todos os acontecimentos, na
@@ -3737,17 +3747,17 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-timeline-cobrinha-svg { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; overflow: visible; }
 .ficha-timeline-cobrinha-path { fill: none; stroke: var(--cinza-300); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-.ficha-timeline-inicio { display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; position: relative; z-index: 1; padding-top: 1px; }
-.ficha-timeline-inicio-rotulo { font-size: 0.64rem; font-weight: 700; letter-spacing: 0.1em; color: var(--cinza-500); }
-.ficha-timeline-inicio-bolinha { width: 11px; height: 11px; border-radius: 50%; background: #f4b942; box-shadow: 0 0 0 3px #fdecc2; }
-.ficha-timeline-inicio-data { font-size: 0.7rem; font-weight: 700; color: var(--cinza-500); white-space: nowrap; }
+.ficha-timeline-inicio { display: flex; flex-direction: column; align-items: center; gap: 5px; flex-shrink: 0; position: relative; z-index: 1; }
+.ficha-timeline-inicio-rotulo, .ficha-timeline-item-rotulo { font-size: 0.76rem; font-weight: 600; line-height: 1.25; }
+.ficha-timeline-inicio-rotulo { color: var(--cinza-500); }
+.ficha-timeline-inicio-bolinha { width: 10px; height: 10px; flex: 0 0 10px; margin-block: 8px; border-radius: 50%; background: #f4b942; box-shadow: 0 0 0 3px #fdecc2; }
+.ficha-timeline-inicio-data, .ficha-timeline-item-data { font-size: 0.7rem; font-weight: 700; color: var(--cinza-500); white-space: nowrap; }
 
 .ficha-timeline-item { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 5px; flex: 1 1 0; min-width: 77px; max-width: 128px; }
-.ficha-timeline-item-data { font-size: 0.7rem; font-weight: 700; color: var(--cinza-500); }
 .ficha-timeline-item-bolinha { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--painel); box-shadow: 0 0 0 3px rgba(16, 42, 114, 0.12), 0 2px 6px rgba(16, 42, 114, 0.15); cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; padding: 0; }
 .ficha-timeline-item-bolinha:hover { transform: scale(1.1); box-shadow: 0 0 0 4px rgba(16, 42, 114, 0.16), 0 3px 8px rgba(16, 42, 114, 0.2); }
 .ficha-timeline-item-bolinha:focus-visible { outline: 2px solid var(--azul); outline-offset: 2px; }
-.ficha-timeline-item-rotulo { margin: 0; font-size: 0.76rem; font-weight: 600; color: var(--cinza-900); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; transition: color 0.15s; }
+.ficha-timeline-item-rotulo { margin: 0; color: var(--cinza-900); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; transition: color 0.15s; }
 .ficha-timeline-item-bolinha[aria-expanded="true"] ~ .ficha-timeline-item-rotulo { color: var(--azul-escuro); }
 .ficha-timeline-item-detalhe { width: 100%; max-width: 168px; text-align: left; font-size: 0.72rem; line-height: 1.45; color: #fff; background: var(--azul-escuro); border-radius: 10px; padding: 8px 10px; box-shadow: 0 10px 24px rgba(16, 42, 114, 0.25); animation: ficha-timeline-detalhe-entrar 0.12s ease-out; }
 @keyframes ficha-timeline-detalhe-entrar { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
@@ -3755,6 +3765,8 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-timeline-item-detalhe p:last-child { margin-bottom: 0; }
 .ficha-timeline-item-detalhe-titulo { font-weight: 700; font-size: 0.76rem; margin-bottom: 5px !important; }
 .ficha-timeline-item-detalhe strong { color: #b9d7f5; font-weight: 600; }
+:root[data-theme="dark"] .ficha-timeline-item-detalhe { background: #1e3a8a; }
+:root[data-theme="dark"] .ficha-timeline-item-detalhe strong { color: #bfdbfe; }
 
 .ficha-timeline-gap { align-self: center; margin-top: 23px; flex-shrink: 0; white-space: nowrap; font-size: 0.64rem; font-weight: 700; color: var(--cinza-500); background: var(--painel); border: 1px solid var(--cinza-200); border-radius: 999px; padding: 2px 6px; position: relative; z-index: 1; }
 
@@ -3768,10 +3780,11 @@ input:disabled, select:disabled, input.input-travado {
 :root[data-theme="dark"] .ficha-timeline-gap { background: var(--cinza-100); }
 
 @media (max-width: 760px) {
-  .ficha-timeline-linha, .ficha-timeline-linha.invertida { flex-direction: column; align-items: stretch; }
+  .ficha-timeline-linha, .ficha-timeline-linha.invertida { flex-direction: column; align-items: stretch; padding: 6px 2px 3px; }
   .ficha-timeline-cobrinha-svg { display: none; }
   .ficha-timeline-item { flex-direction: row; max-width: none; text-align: left; align-items: center; gap: 8px; }
   .ficha-timeline-item-rotulo { -webkit-line-clamp: 2; }
+  .ficha-timeline-inicio-bolinha { margin-block: 0; }
   .ficha-timeline-gap-entre-linhas { position: static; transform: none; }
   .ficha-timeline-gap { align-self: flex-start; margin: 0 0 0 12px; }
   .ficha-timeline-inicio { flex-direction: row; }
@@ -3851,6 +3864,10 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-chat-mensagem-topo { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 5px; font-size: 0.7rem; color: var(--cinza-500); }
 .ficha-chat-mensagem-setor { padding: 2px 6px; border-radius: 999px; background: var(--cinza-100); color: var(--cinza-700); font-weight: 600; border: 1px solid var(--cinza-200); }
 .ficha-chat-mensagem-tag { padding: 2px 6px; border-radius: 999px; font-weight: 700; }
+.ficha-chat-mensagem-tipo { padding: 2px 6px; border-radius: 999px; font-weight: 700; }
+.ficha-chat-mensagem-tipo[data-tipo="chamado"] { background: #dbeafe; color: #1d4ed8; }
+.ficha-chat-mensagem-tipo[data-tipo="atendimento"] { background: #ccfbf1; color: #0f766e; }
+.ficha-chat-mensagem-tipo[data-tipo="registrado"] { background: #dcfce7; color: #15803d; }
 .ficha-chat-mensagem-sintetico-rotulo { font-style: italic; }
 .ficha-chat-mensagem-titulo { margin: 0 0 3px; font-weight: 700; font-size: 0.95rem; color: var(--cinza-900); }
 .ficha-chat-mensagem-descricao { margin: 0; font-size: 0.85rem; color: var(--cinza-700); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }

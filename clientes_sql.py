@@ -68,6 +68,7 @@ def _cliente_para_dict(c):
         "marcos_itens_extras": c.marcos_itens_extras,
         "marcos_concluidos_manual": c.marcos_concluidos_manual,
         "marcos_prioridades": c.marcos_prioridades,
+        "objetivos_implantacao": c.objetivos_implantacao,
         "motivo_atraso": c.motivo_atraso,
         "ultima_acao": c.ultima_acao,
         "ultima_acao_data": c.ultima_acao_data,

@@ -129,6 +129,12 @@ Conversores disponíveis e status:
 | Abastecimento → SSX | Em construção (placeholder, sem funcionalidade) |
 | Colaboradores → SSX | Em construção (placeholder, sem funcionalidade) |
 
+### Operações em massa
+
+Na operação de exclusão, a lista da SSX pode ser filtrada por texto em cada
+coluna. Para veículos, a tabela mostra identificação, nome do cliente, ID do
+rastreador (`IdTracker`) e código de integração.
+
 ### Validador de Planilha de Importação
 
 Valida uma planilha já no layout oficial da SSX contra as regras de cada

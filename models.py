@@ -222,6 +222,7 @@ class Cliente(Base):
     marcos_itens_extras: Mapped[dict] = mapped_column(JSON, default=dict)
     marcos_concluidos_manual: Mapped[list] = mapped_column(JSON, default=list)
     marcos_prioridades: Mapped[list] = mapped_column(JSON, default=list)
+    objetivos_implantacao: Mapped[list] = mapped_column(JSON, default=list)
     motivo_atraso: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     ultima_acao: Mapped[str] = mapped_column(default="")
@@ -237,6 +238,84 @@ class Cliente(Base):
     # existe depois da primeira sincronização (ver app.py, Sincronizar
     # Planilha). Usado pro front ler indicadores pontuais (ex. "7 - UR's").
     dados_planilha: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class ObjetivoTemplate(Base):
+    """Modelo reutilizável de objetivo de implantação, com sub-atividades
+    próprias — gerenciado só por admin em Configurações → Templates de
+    Objetivos. Usar um template num cliente (ClienteObjetivo.origem_template_id)
+    COPIA os itens pra lá; depois disso os dois vivem independentes (editar ou
+    excluir o template não afeta cópias já criadas — ver docs/HISTORICO_DECISOES.md)."""
+
+    __tablename__ = "objetivo_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome: Mapped[str] = mapped_column()
+    criado_em: Mapped[datetime] = mapped_column(default=_agora)
+    atualizado_em: Mapped[datetime] = mapped_column(default=_agora, onupdate=_agora)
+
+    itens: Mapped[list["ObjetivoTemplateItem"]] = relationship(
+        back_populates="template", cascade="all, delete-orphan", order_by="ObjetivoTemplateItem.ordem"
+    )
+
+
+class ObjetivoTemplateItem(Base):
+    __tablename__ = "objetivo_template_itens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("objetivo_templates.id", ondelete="CASCADE"), index=True)
+    texto: Mapped[str] = mapped_column(Text)
+    ordem: Mapped[int] = mapped_column(default=0)
+
+    template: Mapped["ObjetivoTemplate"] = relationship(back_populates="itens")
+
+
+class ClienteObjetivo(Base):
+    """Objetivo de implantação de UM cliente — criado a partir de um
+    ObjetivoTemplate (cópia dos itens, ver docstring) ou do zero
+    ("personalizado"). Substitui gradualmente Cliente.objetivos_implantacao
+    (JSON antigo, mantido congelado pra rollback — ver HISTORICO_DECISOES.md).
+    `feito` só é usado quando o objetivo não tem sub-atividade nenhuma
+    (compatibilidade com os objetivos antigos migrados do JSON, que eram só um
+    checklist plano, sem sub-itens); havendo itens, o progresso vem deles."""
+
+    __tablename__ = "cliente_objetivos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cliente_id: Mapped[int] = mapped_column(ForeignKey("clientes.id", ondelete="CASCADE"), index=True)
+    nome: Mapped[str] = mapped_column()
+    ordem: Mapped[int] = mapped_column(default=0)
+    feito: Mapped[bool] = mapped_column(default=False)
+
+    # Só referência ("criado a partir de") — SET NULL pra nunca travar a
+    # exclusão do template nem apagar objetivos já em uso nos clientes.
+    origem_template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("objetivo_templates.id", ondelete="SET NULL"), nullable=True
+    )
+    criado_em: Mapped[datetime] = mapped_column(default=_agora)
+
+    itens: Mapped[list["ClienteObjetivoItem"]] = relationship(
+        back_populates="objetivo", cascade="all, delete-orphan", order_by="ClienteObjetivoItem.ordem"
+    )
+
+    __table_args__ = (
+        Index("ix_cliente_objetivos_cliente", "cliente_id", "ordem"),
+    )
+
+
+class ClienteObjetivoItem(Base):
+    __tablename__ = "cliente_objetivo_itens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cliente_objetivo_id: Mapped[int] = mapped_column(
+        ForeignKey("cliente_objetivos.id", ondelete="CASCADE"), index=True
+    )
+    texto: Mapped[str] = mapped_column(Text)
+    feito: Mapped[bool] = mapped_column(default=False)
+    ordem: Mapped[int] = mapped_column(default=0)
+    concluido_em: Mapped[str] = mapped_column(default="")
+
+    objetivo: Mapped["ClienteObjetivo"] = relationship(back_populates="itens")
 
 
 class ClienteEvento(Base):

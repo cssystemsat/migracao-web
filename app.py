@@ -1206,7 +1206,8 @@ def tela_ferramentas_sub(sub):
 
 
 @app.route("/cliente/<idcentral>")
-def tela_ficha_cliente(idcentral):
+@app.route("/cliente/<idcentral>/<aba>")
+def tela_ficha_cliente(idcentral, aba=None):
     return _renderizar_shell()
 
 
@@ -2334,6 +2335,49 @@ def salvar_motivo_atraso_cliente(cliente_id):
         cliente_nome=doc_atual_dict.get("cliente", ""),
     )
     return jsonify(ok=True, motivo_atraso=motivo_atraso)
+
+
+@app.route("/api/clientes/<int:cliente_id>/objetivos-implantacao", methods=["PUT"])
+def salvar_objetivos_implantacao_cliente(cliente_id):
+    data = request.get_json(force=True) or {}
+    objetivos_recebidos = data.get("objetivos")
+    if not isinstance(objetivos_recebidos, list) or len(objetivos_recebidos) > 100:
+        return jsonify(ok=False, error="Informe uma lista válida de até 100 objetivos."), 400
+
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not cliente:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    if not cliente.get("tem_implantacao", True):
+        return jsonify(ok=False, error="Esse cliente não possui Implantação."), 400
+
+    objetivos = []
+    ids = set()
+    for item in objetivos_recebidos:
+        if not isinstance(item, dict):
+            return jsonify(ok=False, error="Cada objetivo precisa conter um identificador e uma descrição."), 400
+        item_id = str(item.get("id", "")).strip()
+        texto = str(item.get("texto", "")).strip()
+        if not item_id or len(item_id) > 64 or not texto or len(texto) > 300 or item_id in ids:
+            return jsonify(ok=False, error="Os objetivos precisam ter identificadores únicos e descrições de até 300 caracteres."), 400
+        ids.add(item_id)
+        objetivos.append({"id": item_id, "texto": texto, "feito": item.get("feito") is True})
+
+    anteriores = cliente.get("objetivos_implantacao") or []
+    if anteriores != objetivos:
+        atualizado = clientes_sql.atualizar_cliente(cliente_id, {"objetivos_implantacao": objetivos})
+        if not atualizado:
+            return jsonify(ok=False, error="Cliente não encontrado."), 404
+        registrar_acao(
+            acao="editar",
+            entidade_tipo="cliente",
+            entidade_id=cliente_id,
+            entidade_nome=cliente.get("cliente", ""),
+            titulo="Objetivos de Implantação atualizados",
+            cliente_id=cliente_id,
+            idcentral=cliente.get("idcentral", ""),
+            cliente_nome=cliente.get("cliente", ""),
+        )
+    return jsonify(ok=True, objetivos=objetivos)
 
 
 @app.route("/api/clientes/<int:cliente_id>/implantado", methods=["PUT"])
@@ -7010,7 +7054,7 @@ def conversor_colaboradores_exportar(file_id, modo):
 # área nenhuma pra montar o checklist.
 ATALHOS_TIPOS = {
     "cliente": {"titulo": "Clientes", "listagem": "clientes", "campo_codigo": "ClientIntegrationCode", "campo_nome": "TradingName", "endpoint_delete": "/Administration/Client/Delete"},
-    "veiculo": {"titulo": "Veículos", "listagem": "veiculos", "campo_codigo": "VehicleIntegrationCode", "campo_nome": "Identification", "endpoint_delete": "/Administration/Vehicle/Delete"},
+    "veiculo": {"titulo": "Veículos", "listagem": "veiculos", "campo_codigo": "VehicleIntegrationCode", "campo_nome": "Identification", "campo_cliente": "ClientTradingName", "campo_id_rastreador": "IdTracker", "endpoint_delete": "/Administration/Vehicle/Delete"},
     "rastreador": {"titulo": "Rastreadores", "listagem": "rastreadores", "campo_codigo": "TrackerIntegrationCode", "campo_nome": "IdTracker", "endpoint_delete": "/Administration/Tracker/Delete"},
     "simcard": {"titulo": "SIM Cards", "listagem": "simcards", "campo_codigo": "ICCID", "campo_nome": "ICCID", "endpoint_delete": "/Administration/SimCard/Delete"},
 }
@@ -7038,7 +7082,12 @@ def atalhos_listar(tipo):
     for r in registros_ssx or []:
         codigo = str(r.get(config["campo_codigo"]) or "").strip()
         nome = str(r.get(config["campo_nome"]) or "").strip() or "(sem nome)"
-        registros.append({"codigo": codigo, "nome": nome, "elegivel": bool(codigo)})
+        registro = {"codigo": codigo, "nome": nome, "elegivel": bool(codigo)}
+        if config.get("campo_cliente"):
+            registro["cliente"] = str(r.get(config["campo_cliente"]) or "").strip()
+        if config.get("campo_id_rastreador"):
+            registro["id_rastreador"] = str(r.get(config["campo_id_rastreador"]) or "").strip()
+        registros.append(registro)
 
     return jsonify(ok=True, titulo=config["titulo"], total=len(registros), registros=registros)
 

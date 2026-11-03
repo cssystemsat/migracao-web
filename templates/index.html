@@ -134,13 +134,17 @@
 
     <div id="sidebar-config" class="hidden" role="navigation" aria-label="Configurações de administrador">
       <div class="sidebar-secao-titulo">Configurações</div>
-      <button type="button" class="sidebar-item" id="config-nav-admin" title="Administração do sistema">
+      <button type="button" class="sidebar-item" id="config-nav-admin" title="Administração de Usuários">
         <span class="material-symbols-outlined sidebar-item-icone">admin_panel_settings</span>
-        <span class="sidebar-item-texto">Administração do sistema</span>
+        <span class="sidebar-item-texto">Administração de Usuários</span>
       </button>
       <button type="button" class="sidebar-item" id="config-nav-integracoes" title="Integrações">
         <span class="material-symbols-outlined sidebar-item-icone">cable</span>
         <span class="sidebar-item-texto">Integrações</span>
+      </button>
+      <button type="button" class="sidebar-item" id="config-nav-templates" title="Templates">
+        <span class="material-symbols-outlined sidebar-item-icone">description</span>
+        <span class="sidebar-item-texto">Templates</span>
       </button>
     </div>
   </nav>
@@ -1894,7 +1898,7 @@
         <div class="conteudo-header">
           <div>
             <h2 class="conteudo-titulo">Configurações</h2>
-            <p class="conteudo-subtitulo">Administração do sistema e integrações — visível só para administradores</p>
+            <p class="conteudo-subtitulo">Administração de usuários, integrações e templates — visível só para administradores</p>
           </div>
         </div>
 
@@ -1954,6 +1958,10 @@
 
         <div id="config-painel-integracoes" class="hidden">
           <p class="placeholder">Configuração de integrações (SSX, Wootric, Google Sheets) — em breve.</p>
+        </div>
+
+        <div id="config-painel-templates" class="hidden">
+          <p class="placeholder">Templates — em breve.</p>
         </div>
       </section>
     </main>
@@ -2362,7 +2370,10 @@
         <button id="implantacao-timeline-fechar" class="btn-secondary">Fechar</button>
       </div>
       <div class="modal-body">
-        <div id="implantacao-timeline-setores"></div>
+        <div class="timeline-cobrinha-toolbar">
+          <button type="button" id="btn-add-implantacao-evento" class="btn-primary">+ Adicionar acontecimento</button>
+        </div>
+        <div id="implantacao-timeline-cobrinha" class="timeline-cobrinha"></div>
       </div>
     </div>
   </div>
@@ -2451,13 +2462,13 @@
     </div>
   </div>
 
-  <!-- Registrar acontecimento a partir do chat da aba Detalhado (Histórico) —
+  <!-- Registrar acontecimento a partir da Timeline ou Detalhado (Histórico) —
        mesmos campos do modal acima, só que com Setor (lá o setor já vem do
        contexto de qual "+" foi clicado; aqui não tem esse contexto). -->
   <div id="overlay-ficha-chat-evento" class="overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <h3>Novo acontecimento</h3>
+        <h3>Adicionar acontecimento</h3>
         <button id="ficha-chat-evento-modal-fechar" class="btn-secondary">Fechar</button>
       </div>
       <div class="modal-body">
@@ -2476,6 +2487,7 @@
                 <option value="Comercial">Comercial</option>
                 <option value="Treinamento">Treinamento</option>
                 <option value="Financeiro">Financeiro</option>
+                <option value="NPS">NPS</option>
               </select>
             </label>
             <label class="campo-migracao">
@@ -2506,7 +2518,7 @@
             <span>Descrição</span>
             <textarea id="ficha-chat-evento-descricao" rows="3"></textarea>
           </label>
-          <button type="submit" id="btn-salvar-ficha-chat-evento" class="btn-primary">Registrar acontecimento</button>
+          <button type="submit" id="btn-salvar-ficha-chat-evento" class="btn-primary">Adicionar acontecimento</button>
         </form>
       </div>
     </div>

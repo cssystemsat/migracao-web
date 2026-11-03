@@ -1909,6 +1909,28 @@ let marcosRascunhoAlterado = false;
 let marcoAberto = null;
 // Cliente (registro de Implantação da Ficha) cujos marcos estão na tela.
 let marcosCliente = null;
+let objetivosImplantacaoCliente = null;
+let objetivosImplantacaoRascunho = [];
+let objetivosImplantacaoAlterado = false;
+let objetivosImplantacaoSalvando = false;
+
+function iniciarRascunhoObjetivosImplantacao(cliente) {
+  if (!cliente) return;
+  objetivosImplantacaoCliente = cliente;
+  objetivosImplantacaoRascunho = (cliente.objetivos_implantacao || []).map((item) => ({ ...item }));
+  objetivosImplantacaoAlterado = false;
+}
+
+function confirmarDescartarObjetivosImplantacao() {
+  if (objetivosImplantacaoSalvando) {
+    alert("Aguarde o salvamento dos objetivos de Implantação terminar.");
+    return false;
+  }
+  if (!objetivosImplantacaoAlterado) return true;
+  if (!confirm("Há alterações nos objetivos de Implantação que ainda não foram salvas. Descartar?")) return false;
+  iniciarRascunhoObjetivosImplantacao(fichaClienteAtual?.implantacao);
+  return true;
+}
 
 function iniciarRascunhoMarcos(cliente) {
   marcosRascunhoAlterado = false;
@@ -11958,6 +11980,7 @@ let atalhosExclusaoTipoAtual = "cliente";
 let atalhosExclusaoRegistros = [];
 let atalhosExclusaoSelecionados = new Set(); // códigos (únicos entre elegíveis)
 let atalhosExclusaoOrdenacao = null; // {chave, direcao} | null
+let atalhosExclusaoFiltros = {};
 let atalhosExclusaoPollTimer = null;
 
 function atalhosAtualizarPillAuth() {
@@ -11989,6 +12012,7 @@ function limparAtalhos() {
   atalhosExclusaoRegistros = [];
   atalhosExclusaoSelecionados = new Set();
   atalhosExclusaoOrdenacao = null;
+  atalhosExclusaoFiltros = {};
   const radioCliente = document.querySelector('input[name="atalhos-exclusao-tipo"][value="cliente"]');
   if (radioCliente) radioCliente.checked = true;
   const resultadoEl = el("atalhos-exclusao-resultado");
@@ -12132,6 +12156,7 @@ async function carregarAtalhosExclusao(tipo) {
   if (tipo === "area") {
     atalhosExclusaoRegistros = [];
     atalhosExclusaoSelecionados = new Set();
+    atalhosExclusaoFiltros = {};
     return mostrarInfoAtalhosExclusao(
       "Não é possível listar Áreas — a SSX não tem endpoint de consulta (List) pra esse cadastro, só Insert/Update/Delete."
     );
@@ -12160,6 +12185,7 @@ async function carregarAtalhosExclusao(tipo) {
     atalhosExclusaoRegistros = data.registros;
     atalhosExclusaoSelecionados = new Set();
     atalhosExclusaoOrdenacao = null;
+    atalhosExclusaoFiltros = {};
     renderAtalhosExclusaoResultado();
   } catch (err) {
     mostrarErroAtalhosExclusao(err.message || String(err));
@@ -12174,6 +12200,21 @@ function renderAtalhosExclusaoResultado() {
   }
 
   const elegiveis = atalhosExclusaoRegistros.filter((r) => r.elegivel);
+  const colunas = [
+    { titulo: atalhosExclusaoTipoAtual === "veiculo" ? "Veículo" : "Cadastro", chave: "nome", valor: (r) => r.nome, largura: 260 },
+  ];
+  if (atalhosExclusaoTipoAtual === "veiculo") {
+    colunas.push(
+      { titulo: "Cliente", chave: "cliente", valor: (r) => r.cliente || "(sem cliente)", largura: 220 },
+      { titulo: "ID do rastreador", chave: "id_rastreador", valor: (r) => r.id_rastreador || "(sem ID do rastreador)", largura: 180 },
+    );
+  }
+  colunas.push({
+    titulo: "Código",
+    chave: "codigo",
+    valor: (r) => r.elegivel ? r.codigo : "Sem código de integração",
+    largura: 200,
+  });
 
   const toolbar = document.createElement("div");
   toolbar.className = "convcli-toolbar-validar";
@@ -12227,27 +12268,46 @@ function renderAtalhosExclusaoResultado() {
   thCheck.style.width = "36px";
   trCabecalho.appendChild(thCheck);
 
-  const criarThOrdenavel = (texto, chave, larguraPadrao) => {
+  const criarThOrdenavel = (coluna) => {
     const th = document.createElement("th");
     th.className = "th-ordenavel";
-    th.style.width = `${larguraPadrao}px`;
-    th.textContent = texto;
-    if (atalhosExclusaoOrdenacao && atalhosExclusaoOrdenacao.chave === chave) {
+    th.style.width = `${coluna.largura}px`;
+    th.textContent = coluna.titulo;
+    if (atalhosExclusaoOrdenacao && atalhosExclusaoOrdenacao.chave === coluna.chave) {
       const seta = document.createElement("span");
       seta.className = "seta-ordenacao";
       seta.textContent = atalhosExclusaoOrdenacao.direcao === 1 ? " ▲" : " ▼";
       th.appendChild(seta);
     }
     th.addEventListener("click", () => {
-      const direcao = atalhosExclusaoOrdenacao && atalhosExclusaoOrdenacao.chave === chave ? -atalhosExclusaoOrdenacao.direcao : 1;
-      atalhosExclusaoOrdenacao = { chave, direcao };
+      const direcao = atalhosExclusaoOrdenacao && atalhosExclusaoOrdenacao.chave === coluna.chave ? -atalhosExclusaoOrdenacao.direcao : 1;
+      atalhosExclusaoOrdenacao = { chave: coluna.chave, direcao };
       renderAtalhosExclusaoResultado();
     });
     return th;
   };
-  trCabecalho.appendChild(criarThOrdenavel("Cadastro", "nome", 260));
-  trCabecalho.appendChild(criarThOrdenavel("Código", "codigo", 200));
+  colunas.forEach((coluna) => trCabecalho.appendChild(criarThOrdenavel(coluna)));
   thead.appendChild(trCabecalho);
+
+  const trFiltros = document.createElement("tr");
+  trFiltros.className = "atalhos-exclusao-filtros";
+  trFiltros.appendChild(document.createElement("th"));
+  colunas.forEach((coluna) => {
+    const th = document.createElement("th");
+    const input = document.createElement("input");
+    input.type = "search";
+    input.className = "atalhos-exclusao-filtro-coluna";
+    input.placeholder = "Filtrar";
+    input.setAttribute("aria-label", `Filtrar ${coluna.titulo}`);
+    input.value = atalhosExclusaoFiltros[coluna.chave] || "";
+    input.addEventListener("input", () => {
+      atalhosExclusaoFiltros[coluna.chave] = input.value;
+      atualizarLinhas();
+    });
+    th.appendChild(input);
+    trFiltros.appendChild(th);
+  });
+  thead.appendChild(trFiltros);
   table.appendChild(thead);
 
   const registrosOrdenados = atalhosExclusaoOrdenacao
@@ -12255,38 +12315,60 @@ function renderAtalhosExclusaoResultado() {
     : atalhosExclusaoRegistros;
 
   const tbody = document.createElement("tbody");
-  registrosOrdenados.forEach((registro) => {
-    const tr = document.createElement("tr");
-
-    const tdCheck = document.createElement("td");
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.disabled = !registro.elegivel;
-    checkbox.checked = atalhosExclusaoSelecionados.has(registro.codigo);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) atalhosExclusaoSelecionados.add(registro.codigo);
-      else atalhosExclusaoSelecionados.delete(registro.codigo);
-      renderAtalhosExclusaoResultado();
-    });
-    tdCheck.appendChild(checkbox);
-    tr.appendChild(tdCheck);
-
-    const tdNome = document.createElement("td");
-    tdNome.textContent = registro.nome;
-    tr.appendChild(tdNome);
-
-    const tdCodigo = document.createElement("td");
-    if (registro.elegivel) {
-      tdCodigo.textContent = registro.codigo;
-    } else {
-      tdCodigo.textContent = "⚠️ Sem código de integração";
-      tdCodigo.title = "Não pode ser excluído por esta operação: a SSX exige código de integração pra excluir.";
-      tdCodigo.style.color = "#b45309";
+  const atualizarLinhas = () => {
+    tbody.replaceChildren();
+    const normalizar = (valor) => String(valor ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("pt-BR");
+    const registrosFiltrados = registrosOrdenados.filter((registro) =>
+      colunas.every((coluna) => {
+        const filtro = normalizar(atalhosExclusaoFiltros[coluna.chave] || "").trim();
+        return !filtro || normalizar(coluna.valor(registro)).includes(filtro);
+      })
+    );
+    legenda.textContent = `${registrosFiltrados.length} de ${atalhosExclusaoRegistros.length} registro(s) exibido(s) — `
+      + `${elegiveis.length} elegível(eis), ${atalhosExclusaoRegistros.length - elegiveis.length} sem código de integração.`;
+    if (registrosFiltrados.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = colunas.length + 1;
+      td.textContent = "Nenhum registro corresponde aos filtros.";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
     }
-    tr.appendChild(tdCodigo);
 
-    tbody.appendChild(tr);
-  });
+    registrosFiltrados.forEach((registro) => {
+      const tr = document.createElement("tr");
+
+      const tdCheck = document.createElement("td");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.disabled = !registro.elegivel;
+      checkbox.checked = atalhosExclusaoSelecionados.has(registro.codigo);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) atalhosExclusaoSelecionados.add(registro.codigo);
+        else atalhosExclusaoSelecionados.delete(registro.codigo);
+        renderAtalhosExclusaoResultado();
+      });
+      tdCheck.appendChild(checkbox);
+      tr.appendChild(tdCheck);
+
+      colunas.forEach((coluna) => {
+        const td = document.createElement("td");
+        td.textContent = coluna.valor(registro);
+        if (coluna.chave === "codigo" && !registro.elegivel) {
+          td.title = "Não pode ser excluído por esta operação: a SSX exige código de integração pra excluir.";
+          td.style.color = "#b45309";
+        }
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+  };
+  atualizarLinhas();
   table.appendChild(tbody);
   wrap.appendChild(table);
   atalhosExclusaoResultado.appendChild(wrap);
@@ -16976,23 +17058,28 @@ if (btnConfiguracoes) {
   });
 }
 
-// --- CONFIGURAÇÕES (admin) — sub-navegação local: Administração do sistema / Integrações ---
+// --- CONFIGURAÇÕES (admin) — sub-navegação local: Administração de Usuários / Integrações / Templates ---
 const sidebarConfig = el("sidebar-config");
 const configNavAdmin = el("config-nav-admin");
 const configNavIntegracoes = el("config-nav-integracoes");
+const configNavTemplates = el("config-nav-templates");
 const configPainelAdmin = el("config-painel-admin");
 const configPainelIntegracoes = el("config-painel-integracoes");
+const configPainelTemplates = el("config-painel-templates");
 
 function mostrarConfigPainel(painel) {
   configNavAdmin.classList.toggle("ativo", painel === "admin");
   configNavIntegracoes.classList.toggle("ativo", painel === "integracoes");
+  configNavTemplates.classList.toggle("ativo", painel === "templates");
   configPainelAdmin.classList.toggle("hidden", painel !== "admin");
   configPainelIntegracoes.classList.toggle("hidden", painel !== "integracoes");
+  configPainelTemplates.classList.toggle("hidden", painel !== "templates");
   if (painel === "admin") { resetFormUsuario(); mostrarErroUsuarios(""); carregarAppUsuarios(); }
 }
 if (configNavAdmin) {
   configNavAdmin.addEventListener("click", () => mostrarConfigPainel("admin"));
   configNavIntegracoes.addEventListener("click", () => mostrarConfigPainel("integracoes"));
+  configNavTemplates.addEventListener("click", () => mostrarConfigPainel("templates"));
 }
 
 // --- MINHA SENHA (troca a própria senha de acesso à ferramenta) ---
@@ -17579,6 +17666,22 @@ const TELA_POR_CAMINHO_RAIZ = {
   "/configuracoes": "configuracoes",
 };
 
+const FICHA_ABA_POR_SEGMENTO = {
+  "visao-geral": "geral",
+  implantacao: "implantacao",
+  marcos: "marcos",
+  migracao: "migracao",
+  historico: "historico",
+};
+const FICHA_SEGMENTO_POR_ABA = Object.fromEntries(
+  Object.entries(FICHA_ABA_POR_SEGMENTO).map(([segmento, aba]) => [aba, segmento])
+);
+
+function caminhoFichaCliente(idcentral, aba) {
+  const segmento = FICHA_SEGMENTO_POR_ABA[aba] || FICHA_SEGMENTO_POR_ABA.geral;
+  return `/cliente/${encodeURIComponent(idcentral)}/${segmento}`;
+}
+
 // Sub-telas de "Ferramentas Auxiliares" (cards -> Área de Importação e Consulta
 // / Envio de Comandos): cada uma tem sua própria URL "/ferramentas/<sub>", igual
 // à Ficha do Cliente usa prefixo em vez de mapa fixo pro idcentral.
@@ -17622,8 +17725,15 @@ function mostrarFerramentasSub(sub) {
 }
 
 function resolverCaminho(caminho) {
-  const mCliente = caminho.match(/^\/cliente\/([^/]+)$/);
-  if (mCliente) return { tela: "ficha", idcentral: decodeURIComponent(mCliente[1]) };
+  const mCliente = caminho.match(/^\/cliente\/([^/]+)(?:\/([^/]+))?$/);
+  if (mCliente) {
+    const segmento = mCliente[2] || FICHA_SEGMENTO_POR_ABA.geral;
+    return {
+      tela: "ficha",
+      idcentral: decodeURIComponent(mCliente[1]),
+      sub: FICHA_ABA_POR_SEGMENTO[segmento] || "geral",
+    };
+  }
   const mFerramentas = caminho.match(/^\/ferramentas\/([^/]+)$/);
   if (mFerramentas && FERRAMENTAS_SUBTELAS[mFerramentas[1]]) return { tela: "ferramentas", sub: mFerramentas[1] };
   return { tela: TELA_POR_CAMINHO_RAIZ[caminho] || "dashboard" };
@@ -17874,6 +17984,9 @@ function irParaTela(tela, opcoes) {
   if (tela === "configuracoes" && USUARIO_PERFIL_ATUAL !== "adm") tela = "dashboard";
 
   const novoSub = tela === "ferramentas" && FERRAMENTAS_SUBTELAS[opcoes.sub] ? opcoes.sub : null;
+  const abaFichaSolicitada = tela === "ficha"
+    ? (FICHA_SEGMENTO_POR_ABA[opcoes.sub] ? opcoes.sub : (fichaAbaAtual || "geral"))
+    : null;
   const estadoHistoricoAtual = history.state;
   const indiceHistoricoApp = Number.isInteger(estadoHistoricoAtual?.indiceHistoricoApp)
     ? estadoHistoricoAtual.indiceHistoricoApp
@@ -17937,15 +18050,27 @@ function irParaTela(tela, opcoes) {
 
   if (!opcoes.semHistorico) {
     const caminho = naFicha
-      ? `/cliente/${encodeURIComponent(opcoes.idcentral)}`
+      ? caminhoFichaCliente(opcoes.idcentral, abaFichaSolicitada)
       : (novoSub ? `/ferramentas/${novoSub}` : (CAMINHO_POR_TELA[tela] || "/"));
     if (window.location.pathname !== caminho) {
       history.pushState({
         tela,
         idcentral: opcoes.idcentral,
-        sub: novoSub,
+        sub: naFicha ? abaFichaSolicitada : novoSub,
         origem: naFicha ? fichaOrigem : undefined,
         indiceHistoricoApp: indiceHistoricoApp + 1,
+      }, "", caminho);
+    }
+  } else if (naFicha) {
+    const caminho = caminhoFichaCliente(opcoes.idcentral, abaFichaSolicitada);
+    if (window.location.pathname !== caminho) {
+      history.replaceState({
+        ...(history.state || {}),
+        tela,
+        idcentral: opcoes.idcentral,
+        sub: abaFichaSolicitada,
+        origem: fichaOrigem,
+        indiceHistoricoApp,
       }, "", caminho);
     }
   }
@@ -17956,7 +18081,7 @@ function irParaTela(tela, opcoes) {
   if (tela === "migracao") { atualizarSaidaHeader("Controle de Migração", false); carregarClientesMigracao(); }
   if (tela === "dashboard") carregarDashboardNovo();
   if (tela === "feed") carregarFeed();
-  if (tela === "ficha") carregarFichaCliente(opcoes.idcentral);
+  if (tela === "ficha") carregarFichaCliente(opcoes.idcentral, abaFichaSolicitada);
   if (tela === "minha-conta") { carregarMinhaConta(); carregarMinhasTarefas(); }
   if (tela === "configuracoes") mostrarConfigPainel("admin");
   if (entrandoNaImportacaoConsulta) { atualizarSaidaHeader("Saída", true); mostrarPlaceholder("Autentique-se e escolha uma consulta ou importação."); }
@@ -17964,8 +18089,9 @@ function irParaTela(tela, opcoes) {
 
 function irParaFicha(idcentral) {
   if (!idcentral) return;
+  if (telaNavAtual === "ficha" && fichaClienteAtual?.idcentral !== String(idcentral) && !podeSairDaAbaFicha()) return;
   const origem = ["implantacao", "migracao", "minha-conta"].includes(telaNavAtual) ? telaNavAtual : "dashboard";
-  irParaTela("ficha", { idcentral, origem });
+  irParaTela("ficha", { idcentral, origem, sub: "geral" });
 }
 
 // --- FEED (publicações da equipe, estilo comunidade) ---
@@ -18308,7 +18434,7 @@ NAV_BOTOES.feed.addEventListener("click", () => irParaTela("feed"));
 
 // Central CRC leva ao Dashboard e protege o checklist de marcos não salvo.
 el("topbar-central-crc").addEventListener("click", () => {
-  if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
+  if (telaNavAtual === "ficha" && !podeSairDaAbaFicha()) return;
   irParaTela("dashboard");
 });
 NAV_BOTOES.dashboard.addEventListener("click", () => irParaTela("dashboard"));
@@ -18433,7 +18559,7 @@ function atualizarSidebarVoltar() {
 }
 
 sidebarVoltar.addEventListener("click", () => {
-  if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
+  if (telaNavAtual === "ficha" && !podeSairDaAbaFicha()) return;
   if (Number.isInteger(history.state?.indiceHistoricoApp) && history.state.indiceHistoricoApp > 0) {
     history.back();
     return;
@@ -18446,7 +18572,7 @@ sidebarVoltar.addEventListener("click", () => {
 // Dashboard — mesmo destino do "Voltar" quando a Ficha foi aberta direto.
 topbarBreadcrumbRaiz.addEventListener("click", (ev) => {
   ev.preventDefault();
-  if (telaNavAtual === "ficha" && !podeSairDaAbaMarcos()) return;
+  if (telaNavAtual === "ficha" && !podeSairDaAbaFicha()) return;
   irParaTela("dashboard");
 });
 
@@ -18581,23 +18707,38 @@ el("btn-aplicar-sync-planilha").addEventListener("click", async () => {
 // Voltar/Avançar do navegador: não empurra uma URL nova, só reflete a que já
 // está na barra de endereço (ou o estado salvo no pushState, se houver).
 window.addEventListener("popstate", (e) => {
-  if (e.state && e.state.tela) {
-    irParaTela(e.state.tela, { semHistorico: true, idcentral: e.state.idcentral, sub: e.state.sub, origem: e.state.origem });
+  const resolvido = resolverCaminho(window.location.pathname);
+  const estado = e.state && e.state.tela ? e.state : {};
+  const sub = resolvido.tela === "ficha" ? (resolvido.sub || estado.sub) : estado.sub;
+  if (resolvido.tela === "ficha"
+    && telaNavAtual === "ficha"
+    && fichaClienteAtual?.idcentral === resolvido.idcentral) {
+    fichaOrigem = estado.origem || fichaOrigem;
+    mostrarFichaAba(sub || "geral", { semHistorico: true });
     return;
   }
-  const resolvido = resolverCaminho(window.location.pathname);
-  irParaTela(resolvido.tela, { semHistorico: true, idcentral: resolvido.idcentral, sub: resolvido.sub });
+  irParaTela(
+    estado.tela || resolvido.tela,
+    {
+      semHistorico: true,
+      idcentral: estado.idcentral || resolvido.idcentral,
+      sub: sub || resolvido.sub,
+      origem: estado.origem,
+    }
+  );
 });
 
 // Sair da aba Marcos com checklist alterado e não salvo pede confirmação.
-function podeSairDaAbaMarcos() {
-  return fichaAbaAtual !== "marcos" || confirmarDescartarMarcos();
+function podeSairDaAbaFicha() {
+  if (fichaAbaAtual === "marcos") return confirmarDescartarMarcos();
+  if (fichaAbaAtual === "implantacao") return confirmarDescartarObjetivosImplantacao();
+  return true;
 }
 ["geral", "implantacao", "marcos", "migracao", "historico"].forEach((aba) => {
   el(`ficha-aba-${aba}`).addEventListener("click", () => {
     // Clicar de novo em "Marcos" re-renderizaria a aba e perderia o rascunho.
     if (aba === fichaAbaAtual && aba === "marcos") return;
-    if (aba !== fichaAbaAtual && !podeSairDaAbaMarcos()) return;
+    if (aba !== fichaAbaAtual && !podeSairDaAbaFicha()) return;
     mostrarFichaAba(aba);
   });
 });
@@ -19407,7 +19548,7 @@ async function carregarWootricFicha(clienteId) {
   }
   // "timeline"/"detalhado" também dependem (avaliações entram misturadas
   // nos acontecimentos, ver construirEventosSinteticosWootric).
-  const AREAS_HISTORICO_COM_WOOTRIC = ["timeline", "detalhado"];
+  const AREAS_HISTORICO_COM_WOOTRIC = ["timeline", "detalhado", "nps"];
   if (fichaWootricClienteId === clienteId
     && (fichaAbaAtual === "geral" || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_WOOTRIC.includes(fichaHistoricoAreaAtual)))) {
     mostrarFichaAba(fichaAbaAtual);
@@ -20916,7 +21057,10 @@ function construirFichaTimelineItem(ev) {
   const bolinha = document.createElement("button");
   bolinha.type = "button";
   bolinha.className = "ficha-timeline-item-bolinha";
-  bolinha.style.backgroundColor = ev.cor || (ev.tag && EVENTO_TAG_COR[ev.tag]) || EVENTO_TAG_COR_PADRAO;
+  bolinha.style.backgroundColor = ev.cor
+    || (ev.tag && EVENTO_TAG_COR[ev.tag])
+    || IMPLANTACAO_SETOR_COR[ev.setor]
+    || EVENTO_TAG_COR_PADRAO;
   bolinha.setAttribute("aria-expanded", "false");
   bolinha.title = `Abrir detalhes: ${ev.titulo}`;
   item.appendChild(bolinha);
@@ -20965,13 +21109,15 @@ function construirFichaTimelineItem(ev) {
 const FICHA_TIMELINE_LARGURA_POR_ITEM = 108;
 const FICHA_TIMELINE_ITENS_POR_LINHA_MIN = 2;
 const FICHA_TIMELINE_ITENS_POR_LINHA_MAX = 6;
+// Espaço horizontal reservado após o último ponto antes da curva de descida.
+const FICHA_TIMELINE_RESPIRO_VIRADA = 88;
 
-// Calcula quantos acontecimentos cabem por linha a partir da largura real
-// disponível no container (chamada no render e de novo a cada resize, pra
-// recalcular a distribuição — nunca um valor fixo pra todas as larguras).
+// Calcula quantos acontecimentos cabem na largura restante após reservar
+// espaço para a curva (recalculado no render e a cada resize).
 function calcularFichaTimelineItensPorLinha(larguraContainer) {
   if (!larguraContainer || larguraContainer <= 0) return 4;
-  const cabem = Math.floor(larguraContainer / FICHA_TIMELINE_LARGURA_POR_ITEM);
+  const larguraUtil = larguraContainer - (2 * FICHA_TIMELINE_RESPIRO_VIRADA);
+  const cabem = Math.floor(larguraUtil / FICHA_TIMELINE_LARGURA_POR_ITEM);
   return Math.max(FICHA_TIMELINE_ITENS_POR_LINHA_MIN, Math.min(FICHA_TIMELINE_ITENS_POR_LINHA_MAX, cabem));
 }
 
@@ -21008,36 +21154,29 @@ function pontoAlemDe(de, para, distancia) {
   return { x: para.x + dx * t, y: para.y + dy * t };
 }
 
-// Distância horizontal de "respiro" entre o último ponto de uma linha e o
-// início da curva de descida pra próxima — sem isso a curva nasce colada
-// em cima do último ponto, sobrepondo a bolinha/título.
-const FICHA_TIMELINE_RESPIRO_VIRADA = 22;
-
 // Monta o "d" de um path reto entre todos os pontos, arredondando cada
 // vértice (onde o traçado muda de direção) com uma curva — é isso que dá o
 // efeito "cobrinha" de uma linha única e contínua em vez de segmentos soltos.
 // `viradas` é um Set com os índices i tais que pontos[i] é o ÚLTIMO ponto de
-// uma linha e pontos[i+1] é o PRIMEIRO da linha seguinte. Nesses casos, em
-// vez de curvar em cima do próprio ponto (que sobrepõe a bolinha/título), o
-// traçado continua reto na mesma direção por um respiro configurável e só
-// DEPOIS curva pra baixo — o ponto do evento vira uma passagem reta (sem
-// arredondar), e quem recebe a curva é um ponto virtual logo além dele.
+// uma linha e pontos[i+1] é o PRIMEIRO da linha seguinte. Nesses casos, o
+// traçado continua reto além do último evento, desce pelo afastamento e volta
+// horizontalmente até o primeiro evento da linha seguinte.
 function montarCaminhoSvgArredondado(pontos, raio, viradas) {
   if (pontos.length < 2) return "";
   viradas = viradas || new Set();
 
-  // Expande a lista real de pontos inserindo, depois de cada "último ponto
-  // de linha", um ponto virtual de respiro na mesma direção do traçado que
-  // vinha — é nele que a curva de descida vai nascer, nunca em cima do
-  // ponto do evento.
+  // Expande cada virada com dois pontos virtuais: o fim do respiro horizontal
+  // e o fim da descida vertical, ambos afastados dos marcadores.
   const expandido = [];
   for (let k = 0; k < pontos.length; k++) {
     const atual = pontos[k];
     const ehVirada = viradas.has(k) && k > 0 && k < pontos.length - 1;
-    expandido.push({ pt: atual, reto: ehVirada });
+    const inicioAposVirada = k > 0 && viradas.has(k - 1);
+    expandido.push({ pt: atual, reto: ehVirada || inicioAposVirada });
     if (ehVirada) {
       const respiro = pontoAlemDe(pontos[k - 1], atual, FICHA_TIMELINE_RESPIRO_VIRADA);
       expandido.push({ pt: respiro, reto: false });
+      expandido.push({ pt: { x: respiro.x, y: pontos[k + 1].y }, reto: false });
     }
   }
 
@@ -21154,17 +21293,31 @@ function renderFichaTimelineCaminho(container, contadorEl, eventosTodos, tagsExc
 
   container.innerHTML = "";
   if (!eventos.length) {
-    container.appendChild(construirFichaHistoricoVazio(
-      "Nenhum acontecimento ainda",
-      filtroAtivo ? "Nenhum acontecimento bate com os filtros marcados." : 'Clique em "Editar acontecimentos" pra começar a registrar.'
-    ));
-    return;
+    // O marcador "Início" não depende de haver acontecimentos — só da data de
+    // entrada do cliente. Sem eventos E sem data de entrada, não há nada pra
+    // desenhar; com data de entrada, mostra só o "Início" sozinho.
+    if (!dataEntrada) {
+      container.appendChild(construirFichaHistoricoVazio(
+        "Nenhum acontecimento ainda",
+        filtroAtivo ? "Nenhum acontecimento bate com os filtros marcados." : 'Clique em "Adicionar acontecimento" pra começar a registrar.'
+      ));
+      return;
+    }
   }
 
   const linhas = [];
-  for (let i = 0; i < eventos.length; i += itensPorLinha) {
-    linhas.push(eventos.slice(i, i + itensPorLinha));
+  let inicioLinha = 0;
+  while (inicioLinha < eventos.length) {
+    // A primeira linha também contém o marcador "Início", então reserva um
+    // lugar a menos para que o traçado tenha espaço até a curva.
+    const limiteLinha = linhas.length === 0 ? Math.max(1, itensPorLinha - 1) : itensPorLinha;
+    linhas.push(eventos.slice(inicioLinha, inicioLinha + limiteLinha));
+    inicioLinha += limiteLinha;
   }
+  // Sem acontecimentos mas com data de entrada: linha única só com o
+  // marcador "Início" (o forEach abaixo precisa de ao menos uma linha pra
+  // entrar no ramo idxLinha === 0 que o desenha).
+  if (!linhas.length) linhas.push([]);
 
   // Badge "N dias" entre a linha atual e a próxima, criado logo após a linha
   // atual (pra manter a ordem certa no DOM no fallback mobile, que volta a
@@ -21177,6 +21330,7 @@ function renderFichaTimelineCaminho(container, contadorEl, eventosTodos, tagsExc
     const invertida = idxLinha % 2 === 1;
     const linha = document.createElement("div");
     linha.className = "ficha-timeline-linha" + (invertida ? " invertida" : "");
+    linha.style.setProperty("--ficha-timeline-respiro-virada", `${FICHA_TIMELINE_RESPIRO_VIRADA}px`);
     let primeiraBolinha = null;
     let ultimaBolinha = null;
 
@@ -21373,13 +21527,12 @@ function construirFichaTimelineCard(implantacao) {
   const opcoesSetores = IMPLANTACAO_SETORES.map((nome) => [nome, nome, IMPLANTACAO_SETOR_COR[nome]]);
   acoes.appendChild(construirFiltroExcelCheckbox("Setor", opcoesSetores, fichaTimelineSetoresExcluidos, rerenderTimelineFiltrada));
 
-  const btnEditar = document.createElement("button");
-  btnEditar.type = "button";
-  btnEditar.className = "btn-secondary";
-  btnEditar.textContent = "Editar acontecimentos";
-  btnEditar.title = "Adicionar, editar ou excluir acontecimentos (abre por setor)";
-  btnEditar.addEventListener("click", () => abrirTimelineImplantacao(implantacao));
-  acoes.appendChild(btnEditar);
+  const btnAdicionar = document.createElement("button");
+  btnAdicionar.type = "button";
+  btnAdicionar.className = "btn-secondary";
+  btnAdicionar.textContent = "Adicionar acontecimento";
+  btnAdicionar.addEventListener("click", () => abrirModalFichaChatEvento(implantacao));
+  acoes.appendChild(btnAdicionar);
 
   toolbar.appendChild(acoes);
   card.appendChild(toolbar);
@@ -21493,6 +21646,7 @@ function construirEventosSinteticosChamados(chamadosConcluidos) {
     id: `sintetico-chamado-${c.id}`,
     setor: "Suporte",
     tag: "Suporte",
+    categoriaChamado: c.category,
     titulo: c.title || "(sem título)",
     descricao: [c.category, c.description].filter(Boolean).join(" — "),
     data: String(c.createdAt || "").slice(0, 10), // ISO datetime -> "AAAA-MM-DD"
@@ -21562,7 +21716,15 @@ function construirFichaChatMensagem(ev) {
     topo.appendChild(tagSpan);
   }
 
-  if (ev.sintetico) {
+  if (ev.tipoHistorico) {
+    const tipoSpan = document.createElement("span");
+    tipoSpan.className = "ficha-chat-mensagem-tipo";
+    tipoSpan.dataset.tipo = ev.tipoHistorico.chave;
+    tipoSpan.textContent = ev.tipoHistorico.rotulo;
+    topo.appendChild(tipoSpan);
+  }
+
+  if (ev.sintetico && !ev.tipoHistorico) {
     const sinteticoSpan = document.createElement("span");
     sinteticoSpan.className = "ficha-chat-mensagem-sintetico-rotulo";
     sinteticoSpan.textContent = ev.sinteticoRotulo || "registrado no cadastro de migração";
@@ -21628,7 +21790,7 @@ function renderFichaChat(container, eventos) {
   if (!eventos.length) {
     container.appendChild(construirFichaHistoricoVazio(
       "Nenhum acontecimento ainda",
-      "Use o campo abaixo pra registrar o primeiro — ele entra direto na conversa."
+      'Clique em "Adicionar acontecimento" para registrar o primeiro.'
     ));
     return;
   }
@@ -21660,12 +21822,9 @@ async function carregarFichaDetalhadoChat(implantacao, forcarRecarga, card) {
   }
 }
 
-// --- Modal "Novo acontecimento" do chat (aba Detalhado) ---
-// Antes era um formulário sempre visível embaixo do chat — comia espaço de
-// tela e sobrava pouca área pra ler as mensagens. Agora é só um botão; o
-// formulário mora num modal próprio (overlay-ficha-chat-evento), reaproveitando
-// os mesmos campos (Setor aqui É um campo, diferente do modal de Implantação/
-// Marcos onde o setor já vem de qual "+" foi clicado).
+// --- Modal "Adicionar acontecimento" compartilhado pela Timeline e Detalhado ---
+// O formulário é compartilhado entre Timeline e Detalhado, e o setor é
+// selecionado no próprio modal.
 const overlayFichaChatEvento = el("overlay-ficha-chat-evento");
 const formFichaChatEvento = el("form-ficha-chat-evento");
 const inputFichaChatEventoTitulo = el("ficha-chat-evento-titulo");
@@ -21712,7 +21871,7 @@ formFichaChatEvento.addEventListener("submit", async (e) => {
     // recarregar na próxima vez que qualquer uma das duas abas for aberta.
     fichaTimelineClienteIdCache = null;
     overlayFichaChatEvento.classList.add("hidden");
-    if (fichaHistoricoAreaAtual === "detalhado" || fichaHistoricoAreaAtual === "timeline") mostrarFichaAba("historico");
+    if (fichaAbaAtual === "historico") mostrarFichaAba("historico");
   } catch (err) {
     alert(`Erro ao registrar: ${String(err)}`);
   } finally {
@@ -21757,14 +21916,9 @@ function construirFichaDetalhadoChat(implantacao) {
   return card;
 }
 
-// Abas por área dentro da aba Histórico do sidebar — "Timeline" (padrão ao
-// abrir) é o atalho pra linha do tempo de Implantação, "Detalhado" é o
-// conteúdo que antes se chamava "Geral" (tentativas de migração). "Suporte"
-// mostra os chamados do ssxdesk (ver construirFichaHistoricoSuporte);
-// "Treinamento" e "Financeiro" mostram os acontecimentos reais desses
-// setores (ver construirFichaHistoricoSetor) — "CS"/"Comercial" ainda não
-// têm fonte de registros associada; ficam com um placeholder até existir o
-// que filtrar.
+// Abas por área no Histórico: CS agrupa Implantação/Migração; as demais
+// áreas mostram os acontecimentos do setor correspondente, com Suporte e
+// NPS reunindo também suas fontes automáticas.
 const FICHA_HISTORICO_AREAS = [
   ["timeline", "Timeline"],
   ["detalhado", "Detalhado"],
@@ -21773,9 +21927,10 @@ const FICHA_HISTORICO_AREAS = [
   ["suporte", "Suporte"],
   ["comercial", "Comercial"],
   ["financeiro", "Financeiro"],
+  ["nps", "NPS"],
 ];
 let fichaHistoricoAreaAtual = "timeline";
-let fichaSuporteFiltroCategoria = ""; // "" = todos; senão CHAMADO_CATEGORIA_GERAL/CHAMADO_CATEGORIA_ATENDIMENTO_CHAT
+let fichaSuporteFiltroCategoria = "";
 
 function construirFichaHistoricoAbas(ativa) {
   const nav = document.createElement("div");
@@ -21798,32 +21953,16 @@ function construirFichaHistoricoAbas(ativa) {
   return nav;
 }
 
-// Sub-aba "Suporte" do Histórico — chamados CONCLUÍDOS do ssxdesk (os em
-// aberto já aparecem na Visão Geral, ver construirFichaChamadosAbertosCard).
-// Mesmos 3 estados de fichaChamadosAtual: null (carregando), "erro", ou dado.
+// Sub-aba "Suporte" combina acontecimentos manuais com chamados concluídos e
+// atendimentos do SSXDesk; os chamados abertos ficam na Visão Geral.
 const FICHA_SUPORTE_FILTROS_CATEGORIA = [
   ["", "Todos os tipos"],
-  [CHAMADO_CATEGORIA_GERAL, "Geral"],
-  [CHAMADO_CATEGORIA_ATENDIMENTO_CHAT, "Atendimento Chat"],
+  ["chamado", "Chamado"],
+  ["atendimento", "Atendimento"],
+  ["registrado", "Acontecimento registrado"],
 ];
 
-function construirFichaHistoricoSuporte(implantacao) {
-  const card = document.createElement("div");
-  card.className = "ficha-painel";
-  const deOutroCliente = fichaChamadosClienteId !== implantacao?.id;
-  if (deOutroCliente || fichaChamadosAtual === null) {
-    card.appendChild(construirFichaHistoricoVazio("Carregando...", "Buscando os chamados desse cliente no ssxdesk."));
-    return card;
-  }
-  if (fichaChamadosAtual === "erro") {
-    card.appendChild(construirFichaHistoricoVazio(
-      "Não foi possível carregar",
-      fichaChamadosErro || "Não consegui buscar os chamados desse cliente no ssxdesk agora. Tenta reabrir a Ficha em instantes."
-    ));
-    return card;
-  }
-
-  // Filtro por tipo (Geral / Atendimento Chat) — ver CHAMADO_CATEGORIA_*.
+function construirFichaHistoricoSuporteToolbar(card) {
   const toolbar = document.createElement("div");
   toolbar.className = "ficha-suporte-toolbar";
   const selectCategoria = document.createElement("select");
@@ -21841,45 +21980,113 @@ function construirFichaHistoricoSuporte(implantacao) {
   });
   toolbar.appendChild(selectCategoria);
   card.appendChild(toolbar);
+}
 
-  const filtrados = fichaChamadosAtual.concluidos.filter(
-    (c) => !fichaSuporteFiltroCategoria || c.category === fichaSuporteFiltroCategoria
+function montarEventosFichaSuporte(eventosManuais, chamados) {
+  const manuais = (eventosManuais || [])
+    .filter((ev) => ev.setor === "Suporte")
+    .map((ev) => ({ ...ev, tipoHistorico: { chave: "registrado", rotulo: "Acontecimento registrado" } }));
+  const sinteticos = construirEventosSinteticosChamados(chamados).map((ev) => ({
+    ...ev,
+    tipoHistorico: ev.categoriaChamado === CHAMADO_CATEGORIA_ATENDIMENTO_CHAT
+      ? { chave: "atendimento", rotulo: "Atendimento" }
+      : { chave: "chamado", rotulo: "Chamado" },
+  }));
+  return manuais.concat(sinteticos).sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+}
+
+function renderFichaHistoricoSuporte(card, implantacao, eventosManuais, erroEventos) {
+  card.innerHTML = "";
+  construirFichaHistoricoSuporteToolbar(card);
+
+  const carregandoChamados = fichaChamadosClienteId !== implantacao.id || fichaChamadosAtual === null;
+  const erroChamados = !carregandoChamados && fichaChamadosAtual === "erro";
+  if (carregandoChamados) {
+    const aviso = document.createElement("p");
+    aviso.className = "placeholder";
+    aviso.textContent = "Buscando chamados e atendimentos do SSXDesk...";
+    card.appendChild(aviso);
+  } else if (erroChamados) {
+    const aviso = document.createElement("p");
+    aviso.className = "placeholder";
+    aviso.textContent = `Não foi possível carregar chamados do SSXDesk: ${fichaChamadosErro || "tente novamente mais tarde."}`;
+    card.appendChild(aviso);
+  }
+  if (erroEventos) {
+    const aviso = document.createElement("p");
+    aviso.className = "placeholder";
+    aviso.textContent = `Não foi possível carregar acontecimentos registrados: ${erroEventos}`;
+    card.appendChild(aviso);
+  }
+
+  let eventos = montarEventosFichaSuporte(
+    eventosManuais,
+    carregandoChamados || erroChamados ? [] : fichaChamadosConcluidosAtuais(implantacao.id)
   );
-  if (!filtrados.length) {
+  if (fichaSuporteFiltroCategoria) {
+    eventos = eventos.filter((ev) => ev.tipoHistorico.chave === fichaSuporteFiltroCategoria);
+  }
+  if (!eventos.length && !carregandoChamados) {
     card.appendChild(construirFichaHistoricoVazio(
       "Nada por aqui",
       fichaSuporteFiltroCategoria
-        ? `Esse cliente não tem chamado concluído do tipo "${fichaSuporteFiltroCategoria}".`
-        : "Esse cliente não tem chamado concluído no ssxdesk."
+        ? "Não há registros deste tipo para esse cliente."
+        : "Esse cliente ainda não tem chamados, atendimentos ou acontecimentos registrados no Suporte."
     ));
     return card;
   }
 
   const h = document.createElement("h3");
-  h.textContent = `Chamados concluídos (${filtrados.length})`;
+  h.textContent = `Histórico do Suporte (${eventos.length})`;
   card.appendChild(h);
-  card.appendChild(construirListaChamados(filtrados, "Nenhum chamado concluído."));
+  const lista = document.createElement("div");
+  lista.className = "ficha-chat-lista";
+  card.appendChild(lista);
+  renderFichaChat(lista, eventos);
+}
+
+async function carregarFichaHistoricoSuporte(implantacao, card) {
+  try {
+    const eventos = await obterFichaTimelineEventos(implantacao.id, false);
+    if (card.isConnected) renderFichaHistoricoSuporte(card, implantacao, eventos);
+  } catch (err) {
+    if (!card.isConnected) return;
+    renderFichaHistoricoSuporte(card, implantacao, [], String(err));
+  }
+}
+
+function construirFichaHistoricoSuporte(implantacao) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel";
+  if (!implantacao) {
+    card.appendChild(construirFichaHistoricoVazio(
+      "Sem Implantação", "Esse cliente não tem Implantação — não há histórico de Suporte pra mostrar."
+    ));
+    return card;
+  }
+  if (fichaTimelineClienteIdCache === implantacao.id) {
+    renderFichaHistoricoSuporte(card, implantacao, fichaTimelineEventosCache);
+  } else {
+    card.innerHTML = '<p class="placeholder">Carregando acontecimentos do Suporte...</p>';
+    carregarFichaHistoricoSuporte(implantacao, card);
+  }
   return card;
 }
 
-// Sub-aba genérica de Histórico por Setor (hoje só "Financeiro" — ver
-// construirFichaHistorico) — mostra os acontecimentos REAIS (não
-// sintéticos) desse setor, no mesmo formato de bolha do chat Detalhado.
-// Usa o mesmo cache/fonte de dados da Timeline (fichaTimelineEventosCache),
-// carregando sob demanda se a pessoa cair direto nessa sub-aba sem passar
-// por Timeline/Detalhado antes.
-function renderFichaHistoricoSetor(card, eventosTodos, setor) {
+// Sub-abas de Histórico por setor: usam a fonte de eventos da Timeline e
+// podem incluir registros sintéticos que já aparecem no Detalhado.
+function renderFichaHistoricoSetor(card, eventosTodos, setores, nomeArea = setores[0]) {
   card.innerHTML = "";
   const eventosDoSetor = (eventosTodos || [])
-    .filter((ev) => ev.setor === setor)
+    .filter((ev) => setores.includes(ev.setor))
     .slice()
     .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
   if (!eventosDoSetor.length) {
-    card.appendChild(construirFichaHistoricoVazio("Nada por aqui ainda", `Esse cliente não tem acontecimento registrado em ${setor}.`));
+    card.appendChild(construirFichaHistoricoVazio("Nada por aqui ainda", `Esse cliente não tem acontecimento registrado em ${nomeArea}.`));
     return;
   }
   const h = document.createElement("h3");
-  h.textContent = `${setor} (${eventosDoSetor.length})`;
+  h.textContent = `${nomeArea} (${eventosDoSetor.length})`;
   card.appendChild(h);
   const lista = document.createElement("div");
   lista.className = "ficha-chat-lista";
@@ -21887,16 +22094,26 @@ function renderFichaHistoricoSetor(card, eventosTodos, setor) {
   card.appendChild(lista);
 }
 
-async function carregarFichaHistoricoSetor(implantacao, setor, card) {
+function anexarAvisoErroWootric(card, implantacao) {
+  if (fichaWootricClienteId !== implantacao.id || fichaWootricAtual !== "erro") return;
+  const aviso = document.createElement("p");
+  aviso.className = "placeholder";
+  aviso.textContent = "Não foi possível carregar as avaliações da Wootric. Os acontecimentos NPS registrados continuam disponíveis.";
+  card.appendChild(aviso);
+}
+
+async function carregarFichaHistoricoSetor(implantacao, setores, card, nomeArea = setores[0], incluirWootric = false, eventosExtras = []) {
   try {
     const eventos = await obterFichaTimelineEventos(implantacao.id, false);
-    renderFichaHistoricoSetor(card, eventos, setor);
+    const wootric = incluirWootric ? construirEventosSinteticosWootric(fichaWootricAtuaisValidas(implantacao.id)) : [];
+    renderFichaHistoricoSetor(card, eventos.concat(eventosExtras, wootric), setores, nomeArea);
+    if (incluirWootric) anexarAvisoErroWootric(card, implantacao);
   } catch (err) {
     mostrarErroEmNode(card, String(err));
   }
 }
 
-function construirFichaHistoricoSetor(implantacao, setor) {
+function construirFichaHistoricoSetor(implantacao, setores, nomeArea = setores[0], incluirWootric = false, eventosExtras = []) {
   const card = document.createElement("div");
   card.className = "ficha-painel";
   if (!implantacao) {
@@ -21906,10 +22123,12 @@ function construirFichaHistoricoSetor(implantacao, setor) {
     return card;
   }
   if (fichaTimelineClienteIdCache === implantacao.id) {
-    renderFichaHistoricoSetor(card, fichaTimelineEventosCache, setor);
+    const wootric = incluirWootric ? construirEventosSinteticosWootric(fichaWootricAtuaisValidas(implantacao.id)) : [];
+    renderFichaHistoricoSetor(card, fichaTimelineEventosCache.concat(eventosExtras, wootric), setores, nomeArea);
+    if (incluirWootric) anexarAvisoErroWootric(card, implantacao);
   } else {
     card.innerHTML = '<p class="placeholder">Carregando...</p>';
-    carregarFichaHistoricoSetor(implantacao, setor, card);
+    carregarFichaHistoricoSetor(implantacao, setores, card, nomeArea, incluirWootric, eventosExtras);
   }
   return card;
 }
@@ -21923,12 +22142,19 @@ function construirFichaHistorico(implantacao, migracao) {
     wrap.appendChild(construirFichaTimelineCard(implantacao));
   } else if (fichaHistoricoAreaAtual === "detalhado") {
     wrap.appendChild(construirFichaDetalhadoChat(implantacao));
+  } else if (fichaHistoricoAreaAtual === "cs") {
+    const migracoes = construirEventosSinteticosMigracao((fichaClienteAtual && fichaClienteAtual.migracoes) || []);
+    wrap.appendChild(construirFichaHistoricoSetor(implantacao, ["Implantação", "Migração"], "CS", false, migracoes));
+  } else if (fichaHistoricoAreaAtual === "comercial") {
+    wrap.appendChild(construirFichaHistoricoSetor(implantacao, ["Comercial"], "Comercial"));
   } else if (fichaHistoricoAreaAtual === "suporte") {
     wrap.appendChild(construirFichaHistoricoSuporte(implantacao));
   } else if (fichaHistoricoAreaAtual === "treinamento") {
-    wrap.appendChild(construirFichaHistoricoSetor(implantacao, "Treinamento"));
+    wrap.appendChild(construirFichaHistoricoSetor(implantacao, ["Treinamento"], "Treinamento"));
   } else if (fichaHistoricoAreaAtual === "financeiro") {
-    wrap.appendChild(construirFichaHistoricoSetor(implantacao, "Financeiro"));
+    wrap.appendChild(construirFichaHistoricoSetor(implantacao, ["Financeiro"], "Financeiro"));
+  } else if (fichaHistoricoAreaAtual === "nps") {
+    wrap.appendChild(construirFichaHistoricoSetor(implantacao, ["NPS"], "NPS", true));
   } else {
     const nomeArea = (FICHA_HISTORICO_AREAS.find(([chave]) => chave === fichaHistoricoAreaAtual) || [])[1] || "";
     const card = document.createElement("div");
@@ -22025,6 +22251,7 @@ function construirFichaImplantacao(implantacao, migracao) {
     wrap.appendChild(p);
     return wrap;
   }
+  if (objetivosImplantacaoCliente?.id !== implantacao.id) iniciarRascunhoObjetivosImplantacao(implantacao);
 
   const sec = document.createElement("div");
   sec.className = "ficha-secao";
@@ -22055,7 +22282,130 @@ function construirFichaImplantacao(implantacao, migracao) {
   sec.appendChild(acoes);
 
   wrap.appendChild(sec);
+  wrap.appendChild(construirPainelObjetivosImplantacao());
   return wrap;
+}
+
+function construirPainelObjetivosImplantacao() {
+  const painel = document.createElement("section");
+  painel.className = "ficha-painel ficha-objetivos-painel";
+  const titulo = document.createElement("h3");
+  titulo.textContent = "Objetivos de Implantação";
+  painel.appendChild(titulo);
+
+  const resumo = document.createElement("p");
+  const feitos = objetivosImplantacaoRascunho.filter((item) => item.feito).length;
+  resumo.className = `marco-resumo${objetivosImplantacaoRascunho.length > 0 && feitos === objetivosImplantacaoRascunho.length ? " concluido" : ""}`;
+  resumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
+  painel.appendChild(resumo);
+
+  const lista = document.createElement("div");
+  lista.className = "ficha-objetivos-lista";
+  if (objetivosImplantacaoRascunho.length === 0) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhum objetivo cadastrado. Adicione os objetivos definidos para esta implantação.";
+    lista.appendChild(vazio);
+  }
+  objetivosImplantacaoRascunho.forEach((item) => {
+    const linha = document.createElement("div");
+    linha.className = "marco-linha";
+    if (item.feito) linha.classList.add("feito");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = item.feito === true;
+    checkbox.setAttribute("aria-label", `Marcar objetivo como ${checkbox.checked ? "pendente" : "concluído"}`);
+    checkbox.addEventListener("change", () => {
+      item.feito = checkbox.checked;
+      objetivosImplantacaoAlterado = true;
+      atualizarPainelObjetivosImplantacao();
+    });
+
+    const texto = document.createElement("span");
+    texto.textContent = item.texto;
+    linha.append(checkbox, texto);
+
+    const remover = document.createElement("button");
+    remover.type = "button";
+    remover.className = "btn-remover-item-marco";
+    remover.textContent = "×";
+    remover.title = "Remover objetivo";
+    remover.setAttribute("aria-label", `Remover objetivo: ${item.texto}`);
+    remover.addEventListener("click", () => {
+      objetivosImplantacaoRascunho = objetivosImplantacaoRascunho.filter((objetivo) => objetivo.id !== item.id);
+      objetivosImplantacaoAlterado = true;
+      atualizarPainelObjetivosImplantacao();
+    });
+    linha.appendChild(remover);
+    lista.appendChild(linha);
+  });
+  painel.appendChild(lista);
+
+  const form = document.createElement("form");
+  form.className = "marco-extra-form ficha-objetivos-form";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 300;
+  input.placeholder = "Descreva um objetivo...";
+  input.setAttribute("aria-label", "Novo objetivo de Implantação");
+  const adicionar = document.createElement("button");
+  adicionar.type = "submit";
+  adicionar.className = "btn-adicionar-inline";
+  adicionar.textContent = "Adicionar objetivo";
+  form.append(input, adicionar);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const textoNovo = input.value.trim();
+    if (!textoNovo) return;
+    objetivosImplantacaoRascunho.push({ id: novoIdItemMarco(), texto: textoNovo, feito: false });
+    objetivosImplantacaoAlterado = true;
+    atualizarPainelObjetivosImplantacao();
+  });
+  painel.appendChild(form);
+
+  const salvar = document.createElement("button");
+  salvar.type = "button";
+  salvar.className = "btn-primary ficha-objetivos-salvar";
+  salvar.textContent = "Salvar objetivos";
+  salvar.disabled = !objetivosImplantacaoAlterado;
+  salvar.addEventListener("click", salvarObjetivosImplantacao);
+  painel.appendChild(salvar);
+  return painel;
+}
+
+function atualizarPainelObjetivosImplantacao() {
+  const atual = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
+  if (!atual) return;
+  atual.replaceWith(construirPainelObjetivosImplantacao());
+}
+
+async function salvarObjetivosImplantacao() {
+  const cliente = objetivosImplantacaoCliente;
+  if (!cliente || !objetivosImplantacaoAlterado || objetivosImplantacaoSalvando) return;
+  objetivosImplantacaoSalvando = true;
+  const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
+  if (painel) painel.querySelectorAll("input, button").forEach((controle) => { controle.disabled = true; });
+  try {
+    const response = await fetch(`/api/clientes/${cliente.id}/objetivos-implantacao`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ objetivos: objetivosImplantacaoRascunho }),
+    });
+    const data = await parseJsonResponse(response);
+    if (!data.ok) {
+      alert(`Erro ao salvar objetivos: ${data.error || "falha desconhecida"}`);
+      return;
+    }
+    cliente.objetivos_implantacao = data.objetivos;
+    objetivosImplantacaoRascunho = data.objetivos.map((item) => ({ ...item }));
+    objetivosImplantacaoAlterado = false;
+  } catch (error) {
+    alert(`Erro ao salvar objetivos: ${String(error)}`);
+  } finally {
+    objetivosImplantacaoSalvando = false;
+    if (fichaClienteAtual?.implantacao?.id === cliente.id) atualizarPainelObjetivosImplantacao();
+  }
 }
 
 // E-mail de boas-vindas. Texto padrão da Systemsat com os dados de acesso do
@@ -22472,7 +22822,37 @@ function marcarFichaAbaAtiva(id, ativo) {
   if (ativo) botao.setAttribute("aria-current", "page"); else botao.removeAttribute("aria-current");
 }
 
-function mostrarFichaAba(aba) {
+function atualizarUrlAbaFicha(aba, substituir) {
+  const rotaAtual = resolverCaminho(window.location.pathname);
+  const idcentral = fichaClienteAtual?.idcentral
+    || (history.state?.tela === "ficha" ? history.state.idcentral : rotaAtual.idcentral);
+  if (!idcentral) return;
+  const caminho = caminhoFichaCliente(idcentral, aba);
+  if (window.location.pathname === caminho) {
+    if (history.state?.sub !== aba) {
+      history.replaceState({ ...(history.state || {}), tela: "ficha", idcentral, sub: aba }, "", caminho);
+    }
+    return;
+  }
+  const estadoHistoricoAtual = history.state;
+  const indiceHistoricoApp = Number.isInteger(estadoHistoricoAtual?.indiceHistoricoApp)
+    ? estadoHistoricoAtual.indiceHistoricoApp
+    : 0;
+  const novoEstado = {
+    ...(estadoHistoricoAtual || {}),
+    tela: "ficha",
+    idcentral,
+    sub: aba,
+    origem: fichaOrigem,
+    indiceHistoricoApp: substituir ? indiceHistoricoApp : indiceHistoricoApp + 1,
+  };
+  if (substituir) history.replaceState(novoEstado, "", caminho);
+  else history.pushState(novoEstado, "", caminho);
+}
+
+function mostrarFichaAba(aba, opcoes = {}) {
+  if (!FICHA_SEGMENTO_POR_ABA[aba]) aba = "geral";
+  atualizarUrlAbaFicha(aba, Boolean(opcoes.semHistorico));
   fichaAbaAtual = aba;
   marcarFichaAbaAtiva("ficha-aba-geral", aba === "geral");
   marcarFichaAbaAtiva("ficha-aba-implantacao", aba === "implantacao");
@@ -22503,13 +22883,16 @@ function aplicarVisibilidadeAbasFicha(data) {
   // Cliente criado pela tela de Migração sem par na Implantação
   // (tem_implantacao=false) tem menu enxuto: só Visão Geral, Migração e
   // Histórico — sem Implantação/Marcos, que não existem pra ele.
-  const semImplantacao = data.implantacao && data.implantacao.tem_implantacao === false;
+  const semImplantacao = !data.implantacao || data.implantacao.tem_implantacao === false;
   el("ficha-aba-implantacao").classList.toggle("hidden", semImplantacao);
   el("ficha-aba-marcos").classList.toggle("hidden", semImplantacao);
   return semImplantacao;
 }
 
-async function carregarFichaCliente(idcentral, aba = "geral") {
+let fichaClienteCarregamentoToken = 0;
+
+async function carregarFichaCliente(idcentral, aba = fichaAbaAtual || "geral") {
+  const carregamentoToken = ++fichaClienteCarregamentoToken;
   fichaClienteAtual = null;
   el("ficha-sidebar-nome").textContent = "Carregando...";
   const cabecalho = el("ficha-cliente-cabecalho");
@@ -22526,6 +22909,7 @@ async function carregarFichaCliente(idcentral, aba = "geral") {
   try {
     const r = await fetch(`/api/ficha/${encodeURIComponent(idcentral)}`);
     const data = await parseJsonResponse(r);
+    if (carregamentoToken !== fichaClienteCarregamentoToken) return;
     if (!data.ok) {
       el("ficha-sidebar-nome").textContent = "Não encontrado";
       el("ficha-aba-migracao").classList.add("hidden");
@@ -22544,9 +22928,13 @@ async function carregarFichaCliente(idcentral, aba = "geral") {
     cabecalho.innerHTML = "";
     cabecalho.appendChild(construirFichaHeader(data.implantacao, data.migracao, true));
     const semImplantacao = aplicarVisibilidadeAbasFicha(data);
+    const rotaAtual = resolverCaminho(window.location.pathname);
+    const abaAtual = rotaAtual.tela === "ficha" && rotaAtual.idcentral === String(idcentral)
+      ? rotaAtual.sub
+      : aba;
     const abasEscondidas = semImplantacao ? ["implantacao", "marcos"] : [];
-    const abaFinal = (aba === "migracao" && !data.migracao) || abasEscondidas.includes(aba) ? "geral" : aba;
-    mostrarFichaAba(abaFinal);
+    const abaFinal = (abaAtual === "migracao" && !data.migracao) || abasEscondidas.includes(abaAtual) ? "geral" : abaAtual;
+    mostrarFichaAba(abaFinal, { semHistorico: abaFinal !== abaAtual });
     // Chamados do ssxdesk: busca em segundo plano, nunca atrasa a Ficha —
     // quando chegar, carregarChamadosFicha redesenha a aba sozinha se ainda
     // fizer sentido (ver a função).
@@ -22556,6 +22944,7 @@ async function carregarFichaCliente(idcentral, aba = "geral") {
     // quando chegar, se ainda fizer sentido.
     if (data.implantacao) carregarWootricFicha(data.implantacao.id);
   } catch (err) {
+    if (carregamentoToken !== fichaClienteCarregamentoToken) return;
     mostrarErroEmNode(corpo, String(err));
   }
 }
