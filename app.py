@@ -2928,34 +2928,6 @@ _CAMPOS_CHAMADO_RESUMO = (
 )
 
 
-@app.route("/api/_diag/ssxdesk-key", methods=["GET"])
-def _diag_ssxdesk_key():
-    """Diagnóstico TEMPORÁRIO pra confirmar qual valor de SSXDESK_API_KEY o
-    processo em produção está realmente lendo, sem expor a chave inteira —
-    remover depois de resolvido o chamado sobre erro 403 na API do ssxdesk."""
-    chave = os.environ.get("SSXDESK_API_KEY")
-    if not chave:
-        return jsonify(ok=True, definida=False)
-    try:
-        resp = requests.get(
-            "https://desk.systemsat.com.br/api/integrations/v1/companies",
-            headers={"Authorization": f"Bearer {chave}"},
-            params={"limit": 1},
-            timeout=15,
-        )
-    except requests.RequestException as err:
-        return jsonify(ok=True, definida=True, tamanho=len(chave), ultimos_6=chave[-6:], erro_conexao=str(err))
-    return jsonify(
-        ok=True,
-        definida=True,
-        tamanho=len(chave),
-        ultimos_6=chave[-6:],
-        status_ssxdesk=resp.status_code,
-        headers_resposta=dict(resp.headers),
-        corpo_resposta=resp.text[:500],
-    )
-
-
 @app.route("/api/clientes/<int:cliente_id>/chamados", methods=["GET"])
 def listar_chamados_cliente(cliente_id):
     """Chamados de suporte do ssxdesk pro cliente — "abertos" alimenta o
