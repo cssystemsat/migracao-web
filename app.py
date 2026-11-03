@@ -2928,6 +2928,17 @@ _CAMPOS_CHAMADO_RESUMO = (
 )
 
 
+@app.route("/api/_diag/ssxdesk-key", methods=["GET"])
+def _diag_ssxdesk_key():
+    """Diagnóstico TEMPORÁRIO pra confirmar qual valor de SSXDESK_API_KEY o
+    processo em produção está realmente lendo, sem expor a chave inteira —
+    remover depois de resolvido o chamado sobre erro 403 na API do ssxdesk."""
+    chave = os.environ.get("SSXDESK_API_KEY")
+    if not chave:
+        return jsonify(ok=True, definida=False)
+    return jsonify(ok=True, definida=True, tamanho=len(chave), ultimos_6=chave[-6:])
+
+
 @app.route("/api/clientes/<int:cliente_id>/chamados", methods=["GET"])
 def listar_chamados_cliente(cliente_id):
     """Chamados de suporte do ssxdesk pro cliente — "abertos" alimenta o
