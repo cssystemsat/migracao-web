@@ -22564,23 +22564,64 @@ function construirFichaImplantacao(implantacao, migracao) {
 function construirPainelObjetivosImplantacao() {
   const painel = document.createElement("section");
   painel.className = "ficha-painel ficha-objetivos-painel";
+  const podeEditar = USUARIO_PERFIL_ATUAL !== "visualizacao";
+  const feitos = objetivosImplantacaoRascunho.filter((item) => objetivoImplantacaoFeito(item)).length;
+  const cabecalho = document.createElement("div");
+  cabecalho.className = "ficha-objetivos-cabecalho";
+  const tituloGrupo = document.createElement("div");
+  tituloGrupo.className = "ficha-objetivos-titulo-grupo";
+  const tituloLinha = document.createElement("div");
+  tituloLinha.className = "ficha-objetivos-titulo-linha";
+  const iconeTitulo = document.createElement("span");
+  iconeTitulo.className = "material-symbols-outlined ficha-objetivos-icone";
+  iconeTitulo.textContent = "checklist";
+  iconeTitulo.setAttribute("aria-hidden", "true");
   const titulo = document.createElement("h3");
   titulo.textContent = "Objetivos de Implantação";
-  painel.appendChild(titulo);
+  tituloLinha.append(iconeTitulo, titulo);
+  const descricao = document.createElement("p");
+  descricao.className = "ficha-objetivos-descricao";
+  descricao.textContent = "Defina as metas essenciais e acompanhe a evolução desta conta";
+  tituloGrupo.append(tituloLinha, descricao);
 
-  const resumo = document.createElement("p");
-  const feitos = objetivosImplantacaoRascunho.filter((item) => objetivoImplantacaoFeito(item)).length;
-  resumo.className = `marco-resumo${objetivosImplantacaoRascunho.length > 0 && feitos === objetivosImplantacaoRascunho.length ? " concluido" : ""}`;
-  resumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
-  painel.appendChild(resumo);
+  const resumo = document.createElement("span");
+  resumo.className = "ficha-objetivos-contador";
+  const pontoResumo = document.createElement("span");
+  pontoResumo.className = "ficha-objetivos-contador-ponto";
+  pontoResumo.setAttribute("aria-hidden", "true");
+  const textoResumo = document.createElement("span");
+  textoResumo.className = "ficha-objetivos-contador-texto";
+  textoResumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
+  resumo.append(pontoResumo, textoResumo);
+  resumo.classList.toggle(
+    "concluido",
+    objetivosImplantacaoRascunho.length > 0 && feitos === objetivosImplantacaoRascunho.length,
+  );
+  cabecalho.append(tituloGrupo, resumo);
+  painel.appendChild(cabecalho);
 
   const lista = document.createElement("div");
-  lista.className = "ficha-objetivos-lista";
-  const podeEditar = USUARIO_PERFIL_ATUAL !== "visualizacao";
+  lista.className = `ficha-objetivos-lista${objetivosImplantacaoRascunho.length ? "" : " vazia"}`;
   if (objetivosImplantacaoRascunho.length === 0) {
-    const vazio = document.createElement("p");
-    vazio.className = "placeholder";
-    vazio.textContent = "Nenhum objetivo cadastrado. Adicione os objetivos definidos para esta implantação.";
+    const vazio = document.createElement("div");
+    vazio.className = "ficha-objetivos-vazio";
+    const iconeVazioWrap = document.createElement("span");
+    iconeVazioWrap.className = "ficha-objetivos-vazio-icone";
+    const iconeVazio = document.createElement("span");
+    iconeVazio.className = "material-symbols-outlined";
+    iconeVazio.textContent = "checklist";
+    iconeVazio.setAttribute("aria-hidden", "true");
+    iconeVazioWrap.appendChild(iconeVazio);
+    const textoVazio = document.createElement("div");
+    textoVazio.className = "ficha-objetivos-vazio-texto";
+    const tituloVazio = document.createElement("strong");
+    tituloVazio.textContent = "Nenhum objetivo cadastrado";
+    const descricaoVazia = document.createElement("p");
+    descricaoVazia.textContent = podeEditar
+      ? "Adicione os objetivos definidos para esta implantação escolhendo um template pronto ou criando uma meta personalizada abaixo."
+      : "Ainda não há objetivos cadastrados para esta implantação.";
+    textoVazio.append(tituloVazio, descricaoVazia);
+    vazio.append(iconeVazioWrap, textoVazio);
     lista.appendChild(vazio);
   }
   objetivosImplantacaoRascunho.forEach((item) => {
@@ -22741,8 +22782,14 @@ function construirPainelObjetivosImplantacao() {
   painel.appendChild(lista);
 
   if (podeEditar) {
-    const areaAdicionar = document.createElement("div");
+    const acoes = document.createElement("div");
+    acoes.className = "ficha-objetivos-acoes";
+    const areaAdicionar = document.createElement("section");
     areaAdicionar.className = "ficha-objetivos-adicionar";
+    const labelTemplate = document.createElement("h4");
+    labelTemplate.textContent = "Templates recomendados";
+    const linhaTemplate = document.createElement("div");
+    linhaTemplate.className = "ficha-objetivos-template-linha";
     const seletorTemplate = document.createElement("select");
     seletorTemplate.setAttribute("aria-label", "Selecionar template de objetivo");
     const opcaoInicial = document.createElement("option");
@@ -22751,8 +22798,12 @@ function construirPainelObjetivosImplantacao() {
     seletorTemplate.appendChild(opcaoInicial);
     const adicionarTemplate = document.createElement("button");
     adicionarTemplate.type = "button";
-    adicionarTemplate.className = "btn-secondary";
-    adicionarTemplate.textContent = "Usar template";
+    adicionarTemplate.className = "btn-secondary ficha-objetivos-usar-template";
+    const iconeTemplate = document.createElement("span");
+    iconeTemplate.className = "material-symbols-outlined";
+    iconeTemplate.textContent = "library_add";
+    iconeTemplate.setAttribute("aria-hidden", "true");
+    adicionarTemplate.append(iconeTemplate, document.createTextNode("Usar template"));
     adicionarTemplate.addEventListener("click", () => {
       const template = (objetivosTemplatesCache || []).find((entrada) => String(entrada.id) === seletorTemplate.value);
       if (!template) return;
@@ -22772,23 +22823,35 @@ function construirPainelObjetivosImplantacao() {
       atualizarPainelObjetivosImplantacao();
     });
     const estadoTemplates = document.createElement("span");
-    estadoTemplates.className = "placeholder";
-    areaAdicionar.append(seletorTemplate, adicionarTemplate, estadoTemplates);
-    painel.appendChild(areaAdicionar);
+    estadoTemplates.className = "ficha-objetivos-template-estado";
+    estadoTemplates.setAttribute("role", "status");
+    linhaTemplate.append(seletorTemplate, adicionarTemplate);
+    areaAdicionar.append(labelTemplate, linhaTemplate, estadoTemplates);
     carregarTemplatesObjetivosParaFicha(seletorTemplate, adicionarTemplate, estadoTemplates);
 
     const form = document.createElement("form");
-    form.className = "marco-extra-form ficha-objetivos-form";
+    form.className = "ficha-objetivos-personalizado";
+    const labelPersonalizado = document.createElement("label");
+    labelPersonalizado.textContent = "Objetivo personalizado";
+    labelPersonalizado.htmlFor = "ficha-objetivo-personalizado-nome";
+    const linhaPersonalizada = document.createElement("div");
+    linhaPersonalizada.className = "ficha-objetivos-personalizado-linha";
     const input = document.createElement("input");
+    input.id = "ficha-objetivo-personalizado-nome";
     input.type = "text";
     input.maxLength = 300;
-    input.placeholder = "Nome do objetivo personalizado...";
+    input.placeholder = "Ex: Validar instalação dos primeiros 10 veículos...";
     input.setAttribute("aria-label", "Novo objetivo personalizado de Implantação");
     const adicionar = document.createElement("button");
     adicionar.type = "submit";
-    adicionar.className = "btn-adicionar-inline";
-    adicionar.textContent = "Criar objetivo personalizado";
-    form.append(input, adicionar);
+    adicionar.className = "ficha-objetivos-criar";
+    const iconeAdicionar = document.createElement("span");
+    iconeAdicionar.className = "material-symbols-outlined";
+    iconeAdicionar.textContent = "add";
+    iconeAdicionar.setAttribute("aria-hidden", "true");
+    adicionar.append(iconeAdicionar, document.createTextNode("Criar objetivo personalizado"));
+    linhaPersonalizada.append(input, adicionar);
+    form.append(labelPersonalizado, linhaPersonalizada);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const nome = input.value.trim();
@@ -22804,17 +22867,30 @@ function construirPainelObjetivosImplantacao() {
       objetivosImplantacaoAlterado = true;
       atualizarPainelObjetivosImplantacao();
     });
-    painel.appendChild(form);
+    acoes.append(areaAdicionar, form);
+    painel.appendChild(acoes);
   }
 
-  const salvar = document.createElement("button");
-  salvar.type = "button";
-  salvar.className = "btn-primary ficha-objetivos-salvar";
-  salvar.textContent = "Salvar objetivos";
-  salvar.disabled = !objetivosImplantacaoAlterado;
-  salvar.hidden = !podeEditar;
-  salvar.addEventListener("click", salvarObjetivosImplantacao);
-  painel.appendChild(salvar);
+  if (podeEditar) {
+    const rodape = document.createElement("div");
+    rodape.className = "ficha-objetivos-rodape";
+    const salvar = document.createElement("button");
+    salvar.type = "button";
+    salvar.className = "btn-primary ficha-objetivos-salvar";
+    const iconeSalvar = document.createElement("span");
+    iconeSalvar.className = "material-symbols-outlined";
+    iconeSalvar.textContent = "save";
+    iconeSalvar.setAttribute("aria-hidden", "true");
+    salvar.append(iconeSalvar, document.createTextNode("Salvar objetivos"));
+    salvar.disabled = !objetivosImplantacaoAlterado;
+    salvar.addEventListener("click", salvarObjetivosImplantacao);
+    const estadoSalvamento = document.createElement("span");
+    estadoSalvamento.className = "ficha-objetivos-estado-salvamento";
+    estadoSalvamento.textContent = objetivosImplantacaoAlterado ? "Alterações não salvas" : "Tudo salvo";
+    estadoSalvamento.classList.toggle("pendente", objetivosImplantacaoAlterado);
+    rodape.append(salvar, estadoSalvamento);
+    painel.appendChild(rodape);
+  }
   return painel;
 }
 
@@ -22828,12 +22904,14 @@ function atualizarResumoVisualObjetivosImplantacao() {
   const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
   if (!painel) return;
   const feitos = objetivosImplantacaoRascunho.filter((item) => objetivoImplantacaoFeito(item)).length;
-  const resumo = painel.querySelector(".marco-resumo");
+  const resumo = painel.querySelector(".ficha-objetivos-contador");
+  const textoResumo = painel.querySelector(".ficha-objetivos-contador-texto");
+  if (!resumo || !textoResumo) return;
   resumo.classList.toggle(
     "concluido",
     objetivosImplantacaoRascunho.length > 0 && feitos === objetivosImplantacaoRascunho.length,
   );
-  resumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
+  textoResumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
 
   objetivosImplantacaoRascunho.forEach((item, indice) => {
     const objetivo = painel.querySelectorAll(".ficha-objetivo")[indice];
@@ -22855,8 +22933,14 @@ function atualizarResumoVisualObjetivosImplantacao() {
 
 function marcarObjetivosImplantacaoAlterados() {
   objetivosImplantacaoAlterado = true;
-  const salvar = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-salvar");
+  const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
+  const salvar = painel?.querySelector(".ficha-objetivos-salvar");
   if (salvar) salvar.disabled = false;
+  const estadoSalvamento = painel?.querySelector(".ficha-objetivos-estado-salvamento");
+  if (estadoSalvamento) {
+    estadoSalvamento.textContent = "Alterações não salvas";
+    estadoSalvamento.classList.add("pendente");
+  }
 }
 
 async function carregarTemplatesObjetivosParaFicha(seletor, botao, estado) {
