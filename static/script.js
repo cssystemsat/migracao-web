@@ -11997,6 +11997,9 @@ let atalhosExclusaoSelecionados = new Set(); // códigos (únicos entre elegíve
 let atalhosExclusaoOrdenacao = null; // {chave, direcao} | null
 let atalhosExclusaoFiltros = {};
 let atalhosExclusaoAncoraSelecao = null;
+let atalhosExclusaoCheckboxesVisiveis = new Map();
+let atalhosExclusaoContadorEl = null;
+let atalhosExclusaoBtnExcluirEl = null;
 let atalhosExclusaoPollTimer = null;
 
 function atalhosAtualizarPillAuth() {
@@ -12211,19 +12214,20 @@ async function carregarAtalhosExclusao(tipo) {
   }
 }
 
-function atualizarSelecaoAtalhosExclusao() {
-  atalhosExclusaoResultado.querySelectorAll("input[data-atalhos-codigo]").forEach((checkbox) => {
-    checkbox.checked = atalhosExclusaoSelecionados.has(checkbox.dataset.atalhosCodigo);
+function atualizarSelecaoAtalhosExclusao(codigosAlterados = []) {
+  codigosAlterados.forEach((codigo) => {
+    const checkbox = atalhosExclusaoCheckboxesVisiveis.get(codigo);
+    if (checkbox) checkbox.checked = atalhosExclusaoSelecionados.has(codigo);
   });
 
   const total = atalhosExclusaoSelecionados.size;
-  const contador = atalhosExclusaoResultado.querySelector(".atalhos-exclusao-contador");
+  const contador = atalhosExclusaoContadorEl;
   if (contador) {
     contador.className = `status-pill ${total > 0 ? "status-on" : "status-off"} atalhos-exclusao-contador`;
     contador.textContent = `${total} selecionado(s)`;
   }
 
-  const btnExcluir = atalhosExclusaoResultado.querySelector(".atalhos-exclusao-btn-excluir");
+  const btnExcluir = atalhosExclusaoBtnExcluirEl;
   if (btnExcluir) {
     btnExcluir.textContent = `Excluir selecionados (${total})`;
     btnExcluir.disabled = total === 0;
@@ -12232,6 +12236,9 @@ function atualizarSelecaoAtalhosExclusao() {
 
 function renderAtalhosExclusaoResultado() {
   atalhosExclusaoResultado.innerHTML = "";
+  atalhosExclusaoCheckboxesVisiveis = new Map();
+  atalhosExclusaoContadorEl = null;
+  atalhosExclusaoBtnExcluirEl = null;
 
   if (atalhosExclusaoRegistros.length === 0) {
     return mostrarInfoAtalhosExclusao("Nenhum registro encontrado na SSX pra esse tipo de cadastro.");
@@ -12275,10 +12282,14 @@ function renderAtalhosExclusaoResultado() {
   btnSelecionar.className = "btn-secondary";
   btnSelecionar.textContent = "Selecionar elegíveis filtrados";
   btnSelecionar.addEventListener("click", () => {
-    obterRegistrosFiltrados()
-      .filter((registro) => registro.elegivel)
-      .forEach((registro) => atalhosExclusaoSelecionados.add(registro.codigo));
-    atualizarSelecaoAtalhosExclusao();
+    const alterados = [];
+    obterRegistrosFiltrados().forEach((registro) => {
+      if (registro.elegivel && !atalhosExclusaoSelecionados.has(registro.codigo)) {
+        atalhosExclusaoSelecionados.add(registro.codigo);
+        alterados.push(registro.codigo);
+      }
+    });
+    atualizarSelecaoAtalhosExclusao(alterados);
   });
   toolbar.appendChild(btnSelecionar);
 
@@ -12287,8 +12298,9 @@ function renderAtalhosExclusaoResultado() {
   btnDesmarcar.className = "btn-secondary";
   btnDesmarcar.textContent = "Desmarcar todos";
   btnDesmarcar.addEventListener("click", () => {
+    const alterados = Array.from(atalhosExclusaoSelecionados);
     atalhosExclusaoSelecionados = new Set();
-    atualizarSelecaoAtalhosExclusao();
+    atualizarSelecaoAtalhosExclusao(alterados);
   });
   toolbar.appendChild(btnDesmarcar);
 
@@ -12296,6 +12308,7 @@ function renderAtalhosExclusaoResultado() {
   contador.className = "status-pill " + (atalhosExclusaoSelecionados.size > 0 ? "status-on" : "status-off");
   contador.classList.add("atalhos-exclusao-contador");
   contador.textContent = `${atalhosExclusaoSelecionados.size} selecionado(s)`;
+  atalhosExclusaoContadorEl = contador;
   toolbar.appendChild(contador);
 
   atalhosExclusaoResultado.appendChild(toolbar);
@@ -12367,6 +12380,7 @@ function renderAtalhosExclusaoResultado() {
   const tbody = document.createElement("tbody");
   const atualizarLinhas = () => {
     tbody.replaceChildren();
+    atalhosExclusaoCheckboxesVisiveis.clear();
     const registrosFiltrados = obterRegistrosFiltrados();
     legenda.textContent = `${registrosFiltrados.length} de ${atalhosExclusaoRegistros.length} registro(s) exibido(s) — `
       + `${elegiveis.length} elegível(eis), ${atalhosExclusaoRegistros.length - elegiveis.length} sem código de integração.`;
@@ -12388,27 +12402,33 @@ function renderAtalhosExclusaoResultado() {
       checkbox.type = "checkbox";
       checkbox.disabled = !registro.elegivel;
       checkbox.checked = atalhosExclusaoSelecionados.has(registro.codigo);
-      checkbox.dataset.atalhosCodigo = registro.codigo;
+      atalhosExclusaoCheckboxesVisiveis.set(registro.codigo, checkbox);
       checkbox.addEventListener("click", (event) => {
         event.preventDefault();
         const selecionado = !atalhosExclusaoSelecionados.has(registro.codigo);
         const indiceAncora = registrosFiltrados.indexOf(atalhosExclusaoAncoraSelecao);
         const indiceAtual = registrosFiltrados.indexOf(registro);
+        const alterados = [];
         if (event.shiftKey && indiceAncora !== -1) {
           const inicio = Math.min(indiceAncora, indiceAtual);
           const fim = Math.max(indiceAncora, indiceAtual);
           registrosFiltrados.slice(inicio, fim + 1)
             .filter((item) => item.elegivel)
             .forEach((item) => {
-              if (selecionado) atalhosExclusaoSelecionados.add(item.codigo);
-              else atalhosExclusaoSelecionados.delete(item.codigo);
+              if (selecionado && !atalhosExclusaoSelecionados.has(item.codigo)) {
+                atalhosExclusaoSelecionados.add(item.codigo);
+                alterados.push(item.codigo);
+              } else if (!selecionado && atalhosExclusaoSelecionados.delete(item.codigo)) {
+                alterados.push(item.codigo);
+              }
             });
         } else {
           if (selecionado) atalhosExclusaoSelecionados.add(registro.codigo);
           else atalhosExclusaoSelecionados.delete(registro.codigo);
+          alterados.push(registro.codigo);
           atalhosExclusaoAncoraSelecao = registro;
         }
-        atualizarSelecaoAtalhosExclusao();
+        atualizarSelecaoAtalhosExclusao(alterados);
       });
       tdCheck.appendChild(checkbox);
       tr.appendChild(tdCheck);
@@ -12439,6 +12459,7 @@ function renderAtalhosExclusaoResultado() {
   btnExcluir.className = "btn-aviso-risco atalhos-exclusao-btn-excluir";
   btnExcluir.textContent = `Excluir selecionados (${atalhosExclusaoSelecionados.size})`;
   btnExcluir.disabled = atalhosExclusaoSelecionados.size === 0;
+  atalhosExclusaoBtnExcluirEl = btnExcluir;
   btnExcluir.addEventListener("click", () => abrirModalAtalhosExcluir());
   toolbarInferior.appendChild(btnExcluir);
   atalhosExclusaoResultado.appendChild(toolbarInferior);
