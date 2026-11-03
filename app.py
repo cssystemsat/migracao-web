@@ -2938,7 +2938,7 @@ def _diag_ssxdesk_key():
         return jsonify(ok=True, definida=False)
     try:
         resp = requests.get(
-            "https://ssxdesk.ssatx.com.br/api/integrations/v1/companies",
+            "https://desk.systemsat.com.br/api/integrations/v1/companies",
             headers={"Authorization": f"Bearer {chave}"},
             params={"limit": 1},
             timeout=15,

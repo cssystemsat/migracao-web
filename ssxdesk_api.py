@@ -1,6 +1,6 @@
-"""Cliente da API de Integrações do SSX Desk (ssxdesk.ssatx.com.br) — chamados
+"""Cliente da API de Integrações do SSX Desk (desk.systemsat.com.br) — chamados
 de suporte do cliente, buscados pelo IdCentral (ver
-https://ssxdesk.ssatx.com.br/settings, aba de API).
+https://desk.systemsat.com.br/settings, aba de API).
 
 Autenticação: chave de API fixa (`SSXDESK_API_KEY`, Bearer token), igual ao
 padrão de `FIREBASE_CREDENTIALS_JSON`/`DATABASE_URL` — uma única chave pro
@@ -19,7 +19,7 @@ import time
 
 import requests
 
-_BASE_URL = "https://ssxdesk.ssatx.com.br/api/integrations/v1"
+_BASE_URL = "https://desk.systemsat.com.br/api/integrations/v1"
 _API_KEY = os.environ.get("SSXDESK_API_KEY")
 _TIMEOUT_SEGUNDOS = 15
 
@@ -35,7 +35,7 @@ def _chamada(path, params=None):
     if not _API_KEY:
         raise SsxDeskApiError(
             "Variável de ambiente SSXDESK_API_KEY não definida. Configure-a com "
-            "uma chave de API gerada em ssxdesk.ssatx.com.br/settings."
+            "uma chave de API gerada em desk.systemsat.com.br/settings."
         )
     try:
         resp = requests.get(

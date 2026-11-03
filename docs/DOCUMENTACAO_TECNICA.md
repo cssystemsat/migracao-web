@@ -94,7 +94,7 @@
   do cliente, buscados pelo IdCentral (bloco "Chamados abertos" na Visão
   Geral da Ficha + sub-aba Suporte do Histórico). Chave fixa
   (`SSXDESK_API_KEY`, Bearer token), gerada em
-  ssxdesk.ssatx.com.br/settings — não por usuário. Carregado pelo front em
+  desk.systemsat.com.br/settings — não por usuário. Carregado pelo front em
   segundo plano, DEPOIS da Ficha já estar renderizada (rota
   `/api/clientes/<id>/chamados`): uma falha ou lentidão dessa API externa
   nunca pode atrasar a abertura da Ficha. IdCentral não é um filtro direto
