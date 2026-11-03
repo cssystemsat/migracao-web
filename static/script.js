@@ -12211,6 +12211,25 @@ async function carregarAtalhosExclusao(tipo) {
   }
 }
 
+function atualizarSelecaoAtalhosExclusao() {
+  atalhosExclusaoResultado.querySelectorAll("input[data-atalhos-codigo]").forEach((checkbox) => {
+    checkbox.checked = atalhosExclusaoSelecionados.has(checkbox.dataset.atalhosCodigo);
+  });
+
+  const total = atalhosExclusaoSelecionados.size;
+  const contador = atalhosExclusaoResultado.querySelector(".atalhos-exclusao-contador");
+  if (contador) {
+    contador.className = `status-pill ${total > 0 ? "status-on" : "status-off"} atalhos-exclusao-contador`;
+    contador.textContent = `${total} selecionado(s)`;
+  }
+
+  const btnExcluir = atalhosExclusaoResultado.querySelector(".atalhos-exclusao-btn-excluir");
+  if (btnExcluir) {
+    btnExcluir.textContent = `Excluir selecionados (${total})`;
+    btnExcluir.disabled = total === 0;
+  }
+}
+
 function renderAtalhosExclusaoResultado() {
   atalhosExclusaoResultado.innerHTML = "";
 
@@ -12259,7 +12278,7 @@ function renderAtalhosExclusaoResultado() {
     obterRegistrosFiltrados()
       .filter((registro) => registro.elegivel)
       .forEach((registro) => atalhosExclusaoSelecionados.add(registro.codigo));
-    renderAtalhosExclusaoResultado();
+    atualizarSelecaoAtalhosExclusao();
   });
   toolbar.appendChild(btnSelecionar);
 
@@ -12269,12 +12288,13 @@ function renderAtalhosExclusaoResultado() {
   btnDesmarcar.textContent = "Desmarcar todos";
   btnDesmarcar.addEventListener("click", () => {
     atalhosExclusaoSelecionados = new Set();
-    renderAtalhosExclusaoResultado();
+    atualizarSelecaoAtalhosExclusao();
   });
   toolbar.appendChild(btnDesmarcar);
 
   const contador = document.createElement("span");
   contador.className = "status-pill " + (atalhosExclusaoSelecionados.size > 0 ? "status-on" : "status-off");
+  contador.classList.add("atalhos-exclusao-contador");
   contador.textContent = `${atalhosExclusaoSelecionados.size} selecionado(s)`;
   toolbar.appendChild(contador);
 
@@ -12368,6 +12388,7 @@ function renderAtalhosExclusaoResultado() {
       checkbox.type = "checkbox";
       checkbox.disabled = !registro.elegivel;
       checkbox.checked = atalhosExclusaoSelecionados.has(registro.codigo);
+      checkbox.dataset.atalhosCodigo = registro.codigo;
       checkbox.addEventListener("click", (event) => {
         event.preventDefault();
         const selecionado = !atalhosExclusaoSelecionados.has(registro.codigo);
@@ -12387,7 +12408,7 @@ function renderAtalhosExclusaoResultado() {
           else atalhosExclusaoSelecionados.delete(registro.codigo);
           atalhosExclusaoAncoraSelecao = registro;
         }
-        renderAtalhosExclusaoResultado();
+        atualizarSelecaoAtalhosExclusao();
       });
       tdCheck.appendChild(checkbox);
       tr.appendChild(tdCheck);
@@ -12415,7 +12436,7 @@ function renderAtalhosExclusaoResultado() {
   toolbarInferior.className = "convcli-toolbar-validar atalhos-exclusao-toolbar-inferior";
   const btnExcluir = document.createElement("button");
   btnExcluir.type = "button";
-  btnExcluir.className = "btn-aviso-risco";
+  btnExcluir.className = "btn-aviso-risco atalhos-exclusao-btn-excluir";
   btnExcluir.textContent = `Excluir selecionados (${atalhosExclusaoSelecionados.size})`;
   btnExcluir.disabled = atalhosExclusaoSelecionados.size === 0;
   btnExcluir.addEventListener("click", () => abrirModalAtalhosExcluir());
