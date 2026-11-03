@@ -2936,7 +2936,24 @@ def _diag_ssxdesk_key():
     chave = os.environ.get("SSXDESK_API_KEY")
     if not chave:
         return jsonify(ok=True, definida=False)
-    return jsonify(ok=True, definida=True, tamanho=len(chave), ultimos_6=chave[-6:])
+    try:
+        resp = requests.get(
+            "https://ssxdesk.ssatx.com.br/api/integrations/v1/companies",
+            headers={"Authorization": f"Bearer {chave}"},
+            params={"limit": 1},
+            timeout=15,
+        )
+    except requests.RequestException as err:
+        return jsonify(ok=True, definida=True, tamanho=len(chave), ultimos_6=chave[-6:], erro_conexao=str(err))
+    return jsonify(
+        ok=True,
+        definida=True,
+        tamanho=len(chave),
+        ultimos_6=chave[-6:],
+        status_ssxdesk=resp.status_code,
+        headers_resposta=dict(resp.headers),
+        corpo_resposta=resp.text[:500],
+    )
 
 
 @app.route("/api/clientes/<int:cliente_id>/chamados", methods=["GET"])
