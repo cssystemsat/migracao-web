@@ -41,6 +41,7 @@ import credenciais_sql
 import feed_sql
 import migracoes_sql
 import municipios_sql
+import objetivos_sql
 import planilha_migracao
 import ssx_veiculos_sync
 import ssx_http
@@ -2339,6 +2340,8 @@ def salvar_motivo_atraso_cliente(cliente_id):
 
 @app.route("/api/clientes/<int:cliente_id>/objetivos-implantacao", methods=["PUT"])
 def salvar_objetivos_implantacao_cliente(cliente_id):
+    if not _posso_operar():
+        return jsonify(ok=False, error="Perfil de visualização não pode alterar objetivos."), 403
     data = request.get_json(force=True) or {}
     objetivos_recebidos = data.get("objetivos")
     if not isinstance(objetivos_recebidos, list) or len(objetivos_recebidos) > 100:
@@ -2378,6 +2381,180 @@ def salvar_objetivos_implantacao_cliente(cliente_id):
             cliente_nome=cliente.get("cliente", ""),
         )
     return jsonify(ok=True, objetivos=objetivos)
+
+
+def _validar_itens_objetivo(data):
+    if not isinstance(data, list) or len(data) > 100:
+        return None, "Informe uma lista válida de até 100 sub-atividades."
+    itens = []
+    identificadores = set()
+    for item in data:
+        if not isinstance(item, dict):
+            return None, "Cada sub-atividade precisa ser um objeto válido."
+        item_id = item.get("id")
+        if item_id is not None:
+            if isinstance(item_id, bool) or not isinstance(item_id, (int, str)):
+                return None, "Identificador de sub-atividade inválido."
+            item_id = str(item_id).strip()
+            if not item_id or len(item_id) > 64 or item_id in identificadores:
+                return None, "Os identificadores das sub-atividades precisam ser únicos."
+            identificadores.add(item_id)
+        texto = str(item.get("texto") or "").strip()
+        if not texto or len(texto) > 300:
+            return None, "As sub-atividades precisam ter descrições de até 300 caracteres."
+        itens.append({
+            "id": item_id,
+            "texto": texto,
+            "feito": item.get("feito") is True,
+        })
+    return itens, None
+
+
+def _validar_objetivos_detalhados(data):
+    if not isinstance(data, dict):
+        return None, "Informe os dados dos objetivos."
+    objetivos_recebidos = data.get("objetivos")
+    if not isinstance(objetivos_recebidos, list) or len(objetivos_recebidos) > 100:
+        return None, "Informe uma lista válida de até 100 objetivos."
+    objetivos = []
+    ids_objetivos = set()
+    for item in objetivos_recebidos:
+        if not isinstance(item, dict):
+            return None, "Cada objetivo precisa ser um objeto válido."
+        item_id = item.get("id")
+        if item_id is not None:
+            if isinstance(item_id, bool) or not isinstance(item_id, (int, str)):
+                return None, "Identificador de objetivo inválido."
+            item_id = str(item_id).strip()
+            if not item_id or len(item_id) > 64 or item_id in ids_objetivos:
+                return None, "Os identificadores dos objetivos precisam ser únicos."
+            ids_objetivos.add(item_id)
+        nome = str(item.get("nome") or "").strip()
+        if not nome or len(nome) > 300:
+            return None, "Os objetivos precisam ter nomes de até 300 caracteres."
+        itens, erro = _validar_itens_objetivo(item.get("itens", []))
+        if erro:
+            return None, erro
+        origem_template_id = item.get("origem_template_id")
+        if origem_template_id is not None:
+            if isinstance(origem_template_id, bool):
+                return None, "Template de origem inválido."
+            try:
+                origem_template_id = int(origem_template_id)
+            except (TypeError, ValueError):
+                return None, "Template de origem inválido."
+            if origem_template_id < 1:
+                return None, "Template de origem inválido."
+        objetivos.append({
+            "id": item_id,
+            "nome": nome,
+            "feito": item.get("feito") is True,
+            "origem_template_id": origem_template_id,
+            "itens": itens,
+        })
+    return objetivos, None
+
+
+@app.route("/api/objetivos-templates", methods=["GET", "POST"])
+def api_objetivos_templates():
+    if request.method == "GET":
+        return jsonify(ok=True, templates=objetivos_sql.listar_templates())
+    if not _sou_admin():
+        return jsonify(ok=False, error="Apenas administradores podem gerenciar templates de objetivos."), 403
+    data = request.get_json(force=True) or {}
+    if not isinstance(data, dict):
+        return jsonify(ok=False, error="Informe os dados do template."), 400
+    nome = str(data.get("nome") or "").strip()
+    itens, erro = _validar_itens_objetivo(data.get("itens", []))
+    if not nome or len(nome) > 300 or erro:
+        return jsonify(ok=False, error=erro or "Informe um nome de até 300 caracteres."), 400
+    try:
+        template = objetivos_sql.salvar_template(nome, itens)
+    except objetivos_sql.IdentificadorInvalidoError:
+        return jsonify(ok=False, error="Sub-atividade inválida para um novo template."), 400
+    registrar_acao(
+        acao="criar",
+        entidade_tipo="objetivo_template",
+        entidade_id=template["id"],
+        entidade_nome=template["nome"],
+        titulo="Template de objetivo criado",
+    )
+    return jsonify(ok=True, template=template), 201
+
+
+@app.route("/api/objetivos-templates/<int:template_id>", methods=["PUT", "DELETE"])
+def api_objetivos_template(template_id):
+    if not _sou_admin():
+        return jsonify(ok=False, error="Apenas administradores podem gerenciar templates de objetivos."), 403
+    if request.method == "DELETE":
+        try:
+            objetivos_sql.excluir_template(template_id)
+        except objetivos_sql.RegistroNaoEncontradoError:
+            return jsonify(ok=False, error="Template não encontrado."), 404
+        registrar_acao(
+            acao="excluir",
+            entidade_tipo="objetivo_template",
+            entidade_id=template_id,
+            titulo="Template de objetivo excluído",
+        )
+        return jsonify(ok=True)
+
+    data = request.get_json(force=True) or {}
+    if not isinstance(data, dict):
+        return jsonify(ok=False, error="Informe os dados do template."), 400
+    nome = str(data.get("nome") or "").strip()
+    itens, erro = _validar_itens_objetivo(data.get("itens", []))
+    if not nome or len(nome) > 300 or erro:
+        return jsonify(ok=False, error=erro or "Informe um nome de até 300 caracteres."), 400
+    try:
+        template = objetivos_sql.salvar_template(nome, itens, template_id=template_id)
+    except objetivos_sql.RegistroNaoEncontradoError:
+        return jsonify(ok=False, error="Template não encontrado."), 404
+    except objetivos_sql.IdentificadorInvalidoError:
+        return jsonify(ok=False, error="Uma sub-atividade informada não pertence a este template."), 400
+    registrar_acao(
+        acao="editar",
+        entidade_tipo="objetivo_template",
+        entidade_id=template["id"],
+        entidade_nome=template["nome"],
+        titulo="Template de objetivo atualizado",
+    )
+    return jsonify(ok=True, template=template)
+
+
+@app.route(
+    "/api/clientes/<int:cliente_id>/objetivos-implantacao-detalhados",
+    methods=["GET", "PUT"],
+)
+def api_objetivos_implantacao_detalhados(cliente_id):
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not cliente:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    if not cliente.get("tem_implantacao", True):
+        return jsonify(ok=False, error="Esse cliente não possui Implantação."), 400
+    if request.method == "GET":
+        return jsonify(ok=True, objetivos=objetivos_sql.listar_objetivos(cliente_id))
+    if not _posso_operar():
+        return jsonify(ok=False, error="Perfil de visualização não pode alterar objetivos."), 403
+    data = request.get_json(force=True) or {}
+    objetivos, erro = _validar_objetivos_detalhados(data)
+    if erro:
+        return jsonify(ok=False, error=erro), 400
+    try:
+        salvos = objetivos_sql.salvar_objetivos(cliente_id, objetivos)
+    except objetivos_sql.IdentificadorInvalidoError:
+        return jsonify(ok=False, error="Um identificador informado não pertence a este objetivo."), 400
+    registrar_acao(
+        acao="editar",
+        entidade_tipo="cliente",
+        entidade_id=cliente_id,
+        entidade_nome=cliente.get("cliente", ""),
+        titulo="Objetivos de Implantação atualizados",
+        cliente_id=cliente_id,
+        idcentral=cliente.get("idcentral", ""),
+        cliente_nome=cliente.get("cliente", ""),
+    )
+    return jsonify(ok=True, objetivos=salvos)
 
 
 @app.route("/api/clientes/<int:cliente_id>/implantado", methods=["PUT"])
@@ -3594,6 +3771,7 @@ def obter_ficha_cliente(idcentral):
     implantacao = clientes_sql.buscar_cliente_por_idcentral(idcentral)
     if not implantacao:
         return jsonify(ok=False, error="Nenhum cliente encontrado com esse IdCentral."), 404
+    implantacao["objetivos_implantacao_detalhados"] = objetivos_sql.listar_objetivos(implantacao["id"])
 
     # WhatsApp do CS e do Comercial: usa a FK quando resolvida (sem precisar
     # casar por nome); cai pro casamento por nome só quando não tem FK (CS

@@ -142,9 +142,9 @@
         <span class="material-symbols-outlined sidebar-item-icone">cable</span>
         <span class="sidebar-item-texto">Integrações</span>
       </button>
-      <button type="button" class="sidebar-item" id="config-nav-templates" title="Templates">
+      <button type="button" class="sidebar-item" id="config-nav-templates" title="Templates de Objetivos">
         <span class="material-symbols-outlined sidebar-item-icone">description</span>
-        <span class="sidebar-item-texto">Templates</span>
+        <span class="sidebar-item-texto">Templates de Objetivos</span>
       </button>
     </div>
   </nav>
@@ -1961,7 +1961,22 @@
         </div>
 
         <div id="config-painel-templates" class="hidden">
-          <p class="placeholder">Templates — em breve.</p>
+          <div class="objetivos-templates-cabecalho">
+            <h3>Templates de Objetivos</h3>
+            <p class="placeholder">Gerencie modelos reutilizáveis de objetivos e suas sub-atividades.</p>
+          </div>
+          <p id="objetivos-templates-mensagem" class="placeholder hidden" role="status"></p>
+          <div id="objetivos-templates-lista" class="objetivos-templates-lista"></div>
+          <h4 id="objetivo-template-form-titulo" class="form-credencial-titulo">Criar template</h4>
+          <form id="form-objetivo-template" class="form-credencial objetivos-template-form">
+            <input id="objetivo-template-nome" type="text" maxlength="300" placeholder="Nome do objetivo" required>
+            <div id="objetivo-template-itens" class="objetivo-editor-itens"></div>
+            <button type="button" id="btn-objetivo-template-item" class="btn-secondary">+ Adicionar sub-atividade</button>
+            <div class="form-credencial-botoes">
+              <button type="submit" id="btn-salvar-objetivo-template" class="btn-primary">Salvar template</button>
+              <button type="button" id="btn-cancelar-objetivo-template" class="btn-secondary hidden">Cancelar edição</button>
+            </div>
+          </form>
         </div>
       </section>
     </main>

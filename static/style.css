@@ -3228,14 +3228,54 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-objetivos-painel { margin-top: 14px; }
 .ficha-objetivos-lista { border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 0 10px; }
 .ficha-objetivos-lista .placeholder { margin: 10px 0; }
+.ficha-objetivo { padding: 10px 2px; border-bottom: 1px solid var(--cinza-200); }
+.ficha-objetivo:last-child { border-bottom: 0; }
+.ficha-objetivo-cabecalho { display: flex; align-items: center; gap: 8px; }
+.ficha-objetivo-cabecalho input { flex: 1; min-width: 0; font-weight: 600; }
+.ficha-objetivo-cabecalho .btn-remover-item-marco { flex-shrink: 0; }
+.ficha-objetivo-progresso { margin: 5px 0; color: var(--cinza-500); font-size: 0.8rem; }
+.ficha-objetivo-subatividades { padding-left: 10px; }
+.ficha-objetivo-subatividade { display: flex; align-items: center; gap: 5px; padding: 4px 0; }
+.ficha-objetivo-subatividade input[type="checkbox"] { flex-shrink: 0; }
+.ficha-objetivo-subatividade input[type="text"] { flex: 1; min-width: 0; }
+.ficha-objetivo-subatividade.feito input[type="text"] { color: var(--cinza-500); text-decoration: line-through; }
+.ficha-objetivo-subatividade button { width: auto; margin: 0; padding: 3px 6px; flex-shrink: 0; }
+.ficha-objetivo-sem-subatividades { margin: 5px 0; }
+.ficha-objetivo-feito { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--cinza-500); }
+.ficha-objetivo-feito input { width: 14px; height: 14px; }
+.ficha-objetivo-subatividade-form { padding-left: 10px; }
+.ficha-objetivos-adicionar { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 10px 0; }
+.ficha-objetivos-adicionar select { flex: 1; min-width: 190px; }
+.ficha-objetivos-adicionar button { width: auto; margin: 0; }
 .ficha-objetivos-form { align-items: center; }
 .ficha-objetivos-form input { flex: 1; min-width: 180px; }
 .ficha-objetivos-form .btn-adicionar-inline { white-space: nowrap; }
 .ficha-objetivos-salvar { width: auto; margin-top: 10px; }
+.objetivos-templates-cabecalho h3 { margin-bottom: 4px; }
+.objetivos-templates-cabecalho .placeholder { margin-top: 0; }
+.objetivos-templates-lista { display: grid; gap: 8px; margin: 12px 0 18px; }
+.objetivo-template-card { padding: 10px 12px; border: 1px solid var(--cinza-200); border-radius: var(--radius); }
+.objetivo-template-card-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.objetivo-template-card-cabecalho > div { display: flex; gap: 6px; }
+.objetivo-template-card-cabecalho button { width: auto; margin: 0; }
+.objetivo-template-card ol { margin: 8px 0 0; padding-left: 24px; color: var(--cinza-700); }
+.objetivo-template-card li { padding: 2px 0; }
+.objetivo-template-form { margin-bottom: 16px; }
+.objetivo-template-form > input,
+.objetivo-editor-itens { flex-basis: 100%; }
+.objetivo-editor-itens { display: grid; gap: 6px; }
+.objetivo-editor-linha { display: flex; align-items: center; gap: 5px; }
+.objetivo-editor-linha input { flex: 1; min-width: 0; }
+.objetivo-editor-linha button { width: auto; margin: 0; flex-shrink: 0; }
+.objetivo-editor-linha .btn-remover-item-marco { font-size: 1.2rem; }
+#objetivos-templates-mensagem.erro { color: #b91c1c; }
 @media (max-width: 760px) {
   .ficha-marcos-layout { grid-template-columns: 1fr; }
   .ficha-objetivos-form { align-items: stretch; }
   .ficha-objetivos-form .btn-adicionar-inline { align-self: flex-start; }
+  .ficha-objetivo-subatividade { flex-wrap: wrap; }
+  .ficha-objetivo-subatividade input[type="text"] { flex-basis: calc(100% - 25px); }
+  .objetivo-template-card-cabecalho { align-items: flex-start; flex-direction: column; }
 }
 .btn-link-inline { width: auto; margin: 0 0 0 5px; padding: 0; background: none; border: none; color: var(--azul); font: inherit; cursor: pointer; }
 .btn-link-inline:hover { text-decoration: underline; }

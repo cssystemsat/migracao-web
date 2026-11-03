@@ -1913,11 +1913,26 @@ let objetivosImplantacaoCliente = null;
 let objetivosImplantacaoRascunho = [];
 let objetivosImplantacaoAlterado = false;
 let objetivosImplantacaoSalvando = false;
+let objetivosTemplatesCache = null;
+let objetivosTemplatesRequisicao = null;
 
 function iniciarRascunhoObjetivosImplantacao(cliente) {
   if (!cliente) return;
   objetivosImplantacaoCliente = cliente;
-  objetivosImplantacaoRascunho = (cliente.objetivos_implantacao || []).map((item) => ({ ...item }));
+  const detalhados = cliente.objetivos_implantacao_detalhados;
+  objetivosImplantacaoRascunho = Array.isArray(detalhados)
+    ? detalhados.map((item) => ({
+      ...item,
+      itens: (item.itens || []).map((subatividade) => ({ ...subatividade })),
+    }))
+    : (cliente.objetivos_implantacao || []).map((item, ordem) => ({
+      id: item.id || novoIdItemMarco(),
+      nome: item.texto || "",
+      ordem,
+      feito: item.feito === true,
+      origem_template_id: null,
+      itens: [],
+    }));
   objetivosImplantacaoAlterado = false;
 }
 
@@ -17101,8 +17116,205 @@ function mostrarConfigPainel(painel) {
 if (configNavAdmin) {
   configNavAdmin.addEventListener("click", () => mostrarConfigPainel("admin"));
   configNavIntegracoes.addEventListener("click", () => mostrarConfigPainel("integracoes"));
-  configNavTemplates.addEventListener("click", () => mostrarConfigPainel("templates"));
+  configNavTemplates.addEventListener("click", () => {
+    mostrarConfigPainel("templates");
+    carregarTemplatesObjetivosAdmin();
+  });
 }
+
+const formObjetivoTemplate = el("form-objetivo-template");
+const inputObjetivoTemplateNome = el("objetivo-template-nome");
+const listaObjetivoTemplateItens = el("objetivo-template-itens");
+const listaObjetivosTemplates = el("objetivos-templates-lista");
+const objetivoTemplateMensagem = el("objetivos-templates-mensagem");
+const objetivoTemplateFormTitulo = el("objetivo-template-form-titulo");
+let objetivoTemplateEditandoId = null;
+
+function mostrarMensagemTemplatesObjetivos(texto, erro = false) {
+  objetivoTemplateMensagem.textContent = texto;
+  objetivoTemplateMensagem.classList.toggle("hidden", !texto);
+  objetivoTemplateMensagem.classList.toggle("erro", erro);
+}
+
+function adicionarLinhaEditorObjetivo(container, item = {}) {
+  const linha = document.createElement("div");
+  linha.className = "objetivo-editor-linha";
+  if (item.id !== undefined && item.id !== null) linha.dataset.id = String(item.id);
+
+  const texto = document.createElement("input");
+  texto.type = "text";
+  texto.maxLength = 300;
+  texto.required = true;
+  texto.placeholder = "Descreva uma sub-atividade";
+  texto.value = item.texto || "";
+  texto.setAttribute("aria-label", "Descrição da sub-atividade");
+
+  const moverCima = document.createElement("button");
+  moverCima.type = "button";
+  moverCima.className = "btn-secondary";
+  moverCima.textContent = "↑";
+  moverCima.title = "Mover para cima";
+  moverCima.setAttribute("aria-label", "Mover sub-atividade para cima");
+  moverCima.addEventListener("click", () => {
+    const anterior = linha.previousElementSibling;
+    if (anterior) container.insertBefore(linha, anterior);
+  });
+
+  const moverBaixo = document.createElement("button");
+  moverBaixo.type = "button";
+  moverBaixo.className = "btn-secondary";
+  moverBaixo.textContent = "↓";
+  moverBaixo.title = "Mover para baixo";
+  moverBaixo.setAttribute("aria-label", "Mover sub-atividade para baixo");
+  moverBaixo.addEventListener("click", () => {
+    const proxima = linha.nextElementSibling;
+    if (proxima) container.insertBefore(proxima, linha);
+  });
+
+  const remover = document.createElement("button");
+  remover.type = "button";
+  remover.className = "btn-remover-item-marco";
+  remover.textContent = "×";
+  remover.title = "Excluir sub-atividade";
+  remover.setAttribute("aria-label", "Excluir sub-atividade");
+  remover.addEventListener("click", () => linha.remove());
+  linha.append(texto, moverCima, moverBaixo, remover);
+  container.appendChild(linha);
+}
+
+function coletarItensEditorObjetivo(container) {
+  return Array.from(container.children).map((linha) => ({
+    id: linha.dataset.id || null,
+    texto: linha.querySelector("input").value.trim(),
+  }));
+}
+
+function limparFormObjetivoTemplate() {
+  objetivoTemplateEditandoId = null;
+  formObjetivoTemplate.reset();
+  listaObjetivoTemplateItens.replaceChildren();
+  objetivoTemplateFormTitulo.textContent = "Criar template";
+  el("btn-salvar-objetivo-template").textContent = "Salvar template";
+  el("btn-cancelar-objetivo-template").classList.add("hidden");
+}
+
+function editarTemplateObjetivo(template) {
+  objetivoTemplateEditandoId = template.id;
+  inputObjetivoTemplateNome.value = template.nome;
+  listaObjetivoTemplateItens.replaceChildren();
+  template.itens.forEach((item) => adicionarLinhaEditorObjetivo(listaObjetivoTemplateItens, item));
+  objetivoTemplateFormTitulo.textContent = "Editar template";
+  el("btn-salvar-objetivo-template").textContent = "Salvar alterações";
+  el("btn-cancelar-objetivo-template").classList.remove("hidden");
+  formObjetivoTemplate.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderizarTemplatesObjetivosAdmin(templates) {
+  listaObjetivosTemplates.replaceChildren();
+  if (!templates.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhum template cadastrado.";
+    listaObjetivosTemplates.appendChild(vazio);
+    return;
+  }
+  templates.forEach((template) => {
+    const card = document.createElement("article");
+    card.className = "objetivo-template-card";
+    const cabecalho = document.createElement("div");
+    cabecalho.className = "objetivo-template-card-cabecalho";
+    const nome = document.createElement("strong");
+    nome.textContent = template.nome;
+    const acoes = document.createElement("div");
+    const editar = document.createElement("button");
+    editar.type = "button";
+    editar.className = "btn-secondary";
+    editar.textContent = "Editar";
+    editar.addEventListener("click", () => editarTemplateObjetivo(template));
+    const excluir = document.createElement("button");
+    excluir.type = "button";
+    excluir.className = "btn-secondary";
+    excluir.textContent = "Excluir";
+    excluir.addEventListener("click", async () => {
+      if (!confirm(`Excluir o template "${template.nome}"? Os objetivos já usados nas fichas dos clientes não serão alterados.`)) return;
+      try {
+        const response = await fetch(`/api/objetivos-templates/${template.id}`, { method: "DELETE" });
+        const data = await parseJsonResponse(response);
+        if (!data.ok) return mostrarMensagemTemplatesObjetivos(data.error || "Falha ao excluir template.", true);
+        objetivosTemplatesCache = null;
+        if (objetivoTemplateEditandoId === template.id) limparFormObjetivoTemplate();
+        await carregarTemplatesObjetivosAdmin();
+        mostrarMensagemTemplatesObjetivos("Template excluído.");
+      } catch (error) {
+        mostrarMensagemTemplatesObjetivos(String(error), true);
+      }
+    });
+    acoes.append(editar, excluir);
+    cabecalho.append(nome, acoes);
+    card.appendChild(cabecalho);
+    const lista = document.createElement("ol");
+    template.itens.forEach((item) => {
+      const linha = document.createElement("li");
+      linha.textContent = item.texto;
+      lista.appendChild(linha);
+    });
+    if (!template.itens.length) {
+      const vazio = document.createElement("p");
+      vazio.className = "placeholder";
+      vazio.textContent = "Sem sub-atividades.";
+      card.appendChild(vazio);
+    } else {
+      card.appendChild(lista);
+    }
+    listaObjetivosTemplates.appendChild(card);
+  });
+}
+
+async function carregarTemplatesObjetivosAdmin() {
+  mostrarMensagemTemplatesObjetivos("");
+  listaObjetivosTemplates.innerHTML = '<p class="placeholder">Carregando templates...</p>';
+  try {
+    const response = await fetch("/api/objetivos-templates");
+    const data = await parseJsonResponse(response);
+    if (!data.ok) throw new Error(data.error || "Falha ao carregar templates.");
+    objetivosTemplatesCache = data.templates || [];
+    renderizarTemplatesObjetivosAdmin(objetivosTemplatesCache);
+  } catch (error) {
+    mostrarMensagemTemplatesObjetivos(String(error), true);
+    listaObjetivosTemplates.replaceChildren();
+  }
+}
+
+el("btn-objetivo-template-item").addEventListener("click", () => {
+  adicionarLinhaEditorObjetivo(listaObjetivoTemplateItens);
+  listaObjetivoTemplateItens.lastElementChild.querySelector("input").focus();
+});
+el("btn-cancelar-objetivo-template").addEventListener("click", limparFormObjetivoTemplate);
+formObjetivoTemplate.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const itens = coletarItensEditorObjetivo(listaObjetivoTemplateItens);
+  if (itens.some((item) => !item.texto)) {
+    mostrarMensagemTemplatesObjetivos("Preencha ou remova as sub-atividades vazias.", true);
+    return;
+  }
+  const templateId = objetivoTemplateEditandoId;
+  const url = templateId ? `/api/objetivos-templates/${templateId}` : "/api/objetivos-templates";
+  try {
+    const response = await fetch(url, {
+      method: templateId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome: inputObjetivoTemplateNome.value.trim(), itens }),
+    });
+    const data = await parseJsonResponse(response);
+    if (!data.ok) return mostrarMensagemTemplatesObjetivos(data.error || "Falha ao salvar template.", true);
+    objetivosTemplatesCache = null;
+    limparFormObjetivoTemplate();
+    await carregarTemplatesObjetivosAdmin();
+    mostrarMensagemTemplatesObjetivos(templateId ? "Template atualizado." : "Template criado.");
+  } catch (error) {
+    mostrarMensagemTemplatesObjetivos(String(error), true);
+  }
+});
 
 // --- MINHA SENHA (troca a própria senha de acesso à ferramenta) ---
 const overlayMinhaSenha = el("overlay-minha-senha");
@@ -22316,13 +22528,14 @@ function construirPainelObjetivosImplantacao() {
   painel.appendChild(titulo);
 
   const resumo = document.createElement("p");
-  const feitos = objetivosImplantacaoRascunho.filter((item) => item.feito).length;
+  const feitos = objetivosImplantacaoRascunho.filter((item) => objetivoImplantacaoFeito(item)).length;
   resumo.className = `marco-resumo${objetivosImplantacaoRascunho.length > 0 && feitos === objetivosImplantacaoRascunho.length ? " concluido" : ""}`;
   resumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
   painel.appendChild(resumo);
 
   const lista = document.createElement("div");
   lista.className = "ficha-objetivos-lista";
+  const podeEditar = USUARIO_PERFIL_ATUAL !== "visualizacao";
   if (objetivosImplantacaoRascunho.length === 0) {
     const vazio = document.createElement("p");
     vazio.className = "placeholder";
@@ -22330,70 +22543,324 @@ function construirPainelObjetivosImplantacao() {
     lista.appendChild(vazio);
   }
   objetivosImplantacaoRascunho.forEach((item) => {
-    const linha = document.createElement("div");
-    linha.className = "marco-linha";
-    if (item.feito) linha.classList.add("feito");
-
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = item.feito === true;
-    checkbox.setAttribute("aria-label", `Marcar objetivo como ${checkbox.checked ? "pendente" : "concluído"}`);
-    checkbox.addEventListener("change", () => {
-      item.feito = checkbox.checked;
-      objetivosImplantacaoAlterado = true;
-      atualizarPainelObjetivosImplantacao();
+    const objetivo = document.createElement("article");
+    objetivo.className = `ficha-objetivo${objetivoImplantacaoFeito(item) ? " feito" : ""}`;
+    const cabecalho = document.createElement("div");
+    cabecalho.className = "ficha-objetivo-cabecalho";
+    const nome = document.createElement("input");
+    nome.type = "text";
+    nome.maxLength = 300;
+    nome.value = item.nome;
+    nome.setAttribute("aria-label", "Nome do objetivo");
+    nome.disabled = !podeEditar;
+    nome.addEventListener("change", () => {
+      const novoNome = nome.value.trim();
+      if (!novoNome) {
+        nome.value = item.nome;
+        return;
+      }
+      item.nome = novoNome;
+      marcarObjetivosImplantacaoAlterados();
     });
-
-    const texto = document.createElement("span");
-    texto.textContent = item.texto;
-    linha.append(checkbox, texto);
-
     const remover = document.createElement("button");
     remover.type = "button";
     remover.className = "btn-remover-item-marco";
     remover.textContent = "×";
     remover.title = "Remover objetivo";
-    remover.setAttribute("aria-label", `Remover objetivo: ${item.texto}`);
+    remover.setAttribute("aria-label", `Remover objetivo: ${item.nome}`);
+    remover.disabled = !podeEditar;
     remover.addEventListener("click", () => {
       objetivosImplantacaoRascunho = objetivosImplantacaoRascunho.filter((objetivo) => objetivo.id !== item.id);
       objetivosImplantacaoAlterado = true;
       atualizarPainelObjetivosImplantacao();
     });
-    linha.appendChild(remover);
-    lista.appendChild(linha);
+    cabecalho.append(nome, remover);
+    objetivo.appendChild(cabecalho);
+
+    const itens = item.itens || [];
+    if (itens.length) {
+      const concluidos = itens.filter((subatividade) => subatividade.feito).length;
+      const progresso = document.createElement("p");
+      progresso.className = "ficha-objetivo-progresso";
+      progresso.textContent = `${concluidos} de ${itens.length} sub-atividades concluídas (${Math.round(concluidos / itens.length * 100)}%)`;
+      objetivo.appendChild(progresso);
+      const subLista = document.createElement("div");
+      subLista.className = "ficha-objetivo-subatividades";
+      itens.forEach((subatividade, indice) => {
+        const linha = document.createElement("div");
+        linha.className = `ficha-objetivo-subatividade${subatividade.feito ? " feito" : ""}`;
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = subatividade.feito === true;
+        checkbox.disabled = !podeEditar;
+        checkbox.setAttribute("aria-label", `Marcar "${subatividade.texto}" como ${checkbox.checked ? "pendente" : "concluída"}`);
+        checkbox.addEventListener("change", () => {
+          subatividade.feito = checkbox.checked;
+          marcarObjetivosImplantacaoAlterados();
+          atualizarResumoVisualObjetivosImplantacao();
+        });
+        const texto = document.createElement("input");
+        texto.type = "text";
+        texto.maxLength = 300;
+        texto.value = subatividade.texto;
+        texto.disabled = !podeEditar;
+        texto.setAttribute("aria-label", "Descrição da sub-atividade");
+        texto.addEventListener("change", () => {
+          const novoTexto = texto.value.trim();
+          if (!novoTexto) {
+            texto.value = subatividade.texto;
+            return;
+          }
+          subatividade.texto = novoTexto;
+          marcarObjetivosImplantacaoAlterados();
+        });
+        const cima = document.createElement("button");
+        cima.type = "button";
+        cima.className = "btn-secondary";
+        cima.textContent = "↑";
+        cima.title = "Mover sub-atividade para cima";
+        cima.disabled = !podeEditar || indice === 0;
+        cima.addEventListener("click", () => {
+          [itens[indice - 1], itens[indice]] = [itens[indice], itens[indice - 1]];
+          objetivosImplantacaoAlterado = true;
+          atualizarPainelObjetivosImplantacao();
+        });
+        const baixo = document.createElement("button");
+        baixo.type = "button";
+        baixo.className = "btn-secondary";
+        baixo.textContent = "↓";
+        baixo.title = "Mover sub-atividade para baixo";
+        baixo.disabled = !podeEditar || indice === itens.length - 1;
+        baixo.addEventListener("click", () => {
+          [itens[indice], itens[indice + 1]] = [itens[indice + 1], itens[indice]];
+          objetivosImplantacaoAlterado = true;
+          atualizarPainelObjetivosImplantacao();
+        });
+        const removerItem = document.createElement("button");
+        removerItem.type = "button";
+        removerItem.className = "btn-remover-item-marco";
+        removerItem.textContent = "×";
+        removerItem.title = "Remover sub-atividade";
+        removerItem.disabled = !podeEditar;
+        removerItem.addEventListener("click", () => {
+          item.itens = item.itens.filter((entrada) => entrada.id !== subatividade.id);
+          objetivosImplantacaoAlterado = true;
+          atualizarPainelObjetivosImplantacao();
+        });
+        linha.append(checkbox, texto, cima, baixo, removerItem);
+        subLista.appendChild(linha);
+      });
+      objetivo.appendChild(subLista);
+    } else {
+      const vazio = document.createElement("p");
+      vazio.className = "placeholder ficha-objetivo-sem-subatividades";
+      vazio.textContent = "Sem sub-atividades. O objetivo pode ser concluído diretamente.";
+      objetivo.appendChild(vazio);
+      const checkbox = document.createElement("label");
+      checkbox.className = "ficha-objetivo-feito";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = item.feito === true;
+      input.disabled = !podeEditar;
+      input.addEventListener("change", () => {
+        item.feito = input.checked;
+        marcarObjetivosImplantacaoAlterados();
+        atualizarResumoVisualObjetivosImplantacao();
+      });
+      checkbox.append(input, document.createTextNode("Objetivo concluído"));
+      objetivo.appendChild(checkbox);
+    }
+
+    if (podeEditar) {
+      const formItem = document.createElement("form");
+      formItem.className = "marco-extra-form ficha-objetivo-subatividade-form";
+      const inputItem = document.createElement("input");
+      inputItem.type = "text";
+      inputItem.maxLength = 300;
+      inputItem.placeholder = "Nova sub-atividade...";
+      inputItem.setAttribute("aria-label", `Nova sub-atividade para ${item.nome}`);
+      const adicionarItem = document.createElement("button");
+      adicionarItem.type = "submit";
+      adicionarItem.className = "btn-adicionar-inline";
+      adicionarItem.textContent = "Adicionar etapa";
+      formItem.append(inputItem, adicionarItem);
+      formItem.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const textoNovo = inputItem.value.trim();
+        if (!textoNovo) return;
+        item.itens = item.itens || [];
+        item.itens.push({ id: novoIdItemMarco(), texto: textoNovo, feito: false });
+        objetivosImplantacaoAlterado = true;
+        atualizarPainelObjetivosImplantacao();
+      });
+      objetivo.appendChild(formItem);
+    }
+    lista.appendChild(objetivo);
   });
   painel.appendChild(lista);
 
-  const form = document.createElement("form");
-  form.className = "marco-extra-form ficha-objetivos-form";
-  const input = document.createElement("input");
-  input.type = "text";
-  input.maxLength = 300;
-  input.placeholder = "Descreva um objetivo...";
-  input.setAttribute("aria-label", "Novo objetivo de Implantação");
-  const adicionar = document.createElement("button");
-  adicionar.type = "submit";
-  adicionar.className = "btn-adicionar-inline";
-  adicionar.textContent = "Adicionar objetivo";
-  form.append(input, adicionar);
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const textoNovo = input.value.trim();
-    if (!textoNovo) return;
-    objetivosImplantacaoRascunho.push({ id: novoIdItemMarco(), texto: textoNovo, feito: false });
-    objetivosImplantacaoAlterado = true;
-    atualizarPainelObjetivosImplantacao();
-  });
-  painel.appendChild(form);
+  if (podeEditar) {
+    const areaAdicionar = document.createElement("div");
+    areaAdicionar.className = "ficha-objetivos-adicionar";
+    const seletorTemplate = document.createElement("select");
+    seletorTemplate.setAttribute("aria-label", "Selecionar template de objetivo");
+    const opcaoInicial = document.createElement("option");
+    opcaoInicial.value = "";
+    opcaoInicial.textContent = "Adicionar de um template...";
+    seletorTemplate.appendChild(opcaoInicial);
+    const adicionarTemplate = document.createElement("button");
+    adicionarTemplate.type = "button";
+    adicionarTemplate.className = "btn-secondary";
+    adicionarTemplate.textContent = "Usar template";
+    adicionarTemplate.addEventListener("click", () => {
+      const template = (objetivosTemplatesCache || []).find((entrada) => String(entrada.id) === seletorTemplate.value);
+      if (!template) return;
+      objetivosImplantacaoRascunho.push({
+        id: novoIdItemMarco(),
+        nome: template.nome,
+        ordem: objetivosImplantacaoRascunho.length,
+        feito: false,
+        origem_template_id: template.id,
+        itens: template.itens.map((subatividade) => ({
+          id: novoIdItemMarco(),
+          texto: subatividade.texto,
+          feito: false,
+        })),
+      });
+      objetivosImplantacaoAlterado = true;
+      atualizarPainelObjetivosImplantacao();
+    });
+    const estadoTemplates = document.createElement("span");
+    estadoTemplates.className = "placeholder";
+    areaAdicionar.append(seletorTemplate, adicionarTemplate, estadoTemplates);
+    painel.appendChild(areaAdicionar);
+    carregarTemplatesObjetivosParaFicha(seletorTemplate, adicionarTemplate, estadoTemplates);
+
+    const form = document.createElement("form");
+    form.className = "marco-extra-form ficha-objetivos-form";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 300;
+    input.placeholder = "Nome do objetivo personalizado...";
+    input.setAttribute("aria-label", "Novo objetivo personalizado de Implantação");
+    const adicionar = document.createElement("button");
+    adicionar.type = "submit";
+    adicionar.className = "btn-adicionar-inline";
+    adicionar.textContent = "Criar objetivo personalizado";
+    form.append(input, adicionar);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const nome = input.value.trim();
+      if (!nome) return;
+      objetivosImplantacaoRascunho.push({
+        id: novoIdItemMarco(),
+        nome,
+        ordem: objetivosImplantacaoRascunho.length,
+        feito: false,
+        origem_template_id: null,
+        itens: [],
+      });
+      objetivosImplantacaoAlterado = true;
+      atualizarPainelObjetivosImplantacao();
+    });
+    painel.appendChild(form);
+  }
 
   const salvar = document.createElement("button");
   salvar.type = "button";
   salvar.className = "btn-primary ficha-objetivos-salvar";
   salvar.textContent = "Salvar objetivos";
   salvar.disabled = !objetivosImplantacaoAlterado;
+  salvar.hidden = !podeEditar;
   salvar.addEventListener("click", salvarObjetivosImplantacao);
   painel.appendChild(salvar);
   return painel;
+}
+
+function objetivoImplantacaoFeito(item) {
+  return item.itens?.length
+    ? item.itens.every((subatividade) => subatividade.feito === true)
+    : item.feito === true;
+}
+
+function atualizarResumoVisualObjetivosImplantacao() {
+  const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
+  if (!painel) return;
+  const feitos = objetivosImplantacaoRascunho.filter((item) => objetivoImplantacaoFeito(item)).length;
+  const resumo = painel.querySelector(".marco-resumo");
+  resumo.classList.toggle(
+    "concluido",
+    objetivosImplantacaoRascunho.length > 0 && feitos === objetivosImplantacaoRascunho.length,
+  );
+  resumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
+
+  objetivosImplantacaoRascunho.forEach((item, indice) => {
+    const objetivo = painel.querySelectorAll(".ficha-objetivo")[indice];
+    if (!objetivo) return;
+    const concluido = objetivoImplantacaoFeito(item);
+    objetivo.classList.toggle("feito", concluido);
+    if (item.itens?.length) {
+      const concluidos = item.itens.filter((subatividade) => subatividade.feito).length;
+      const progresso = objetivo.querySelector(".ficha-objetivo-progresso");
+      if (progresso) {
+        progresso.textContent = `${concluidos} de ${item.itens.length} sub-atividades concluídas (${Math.round(concluidos / item.itens.length * 100)}%)`;
+      }
+      objetivo.querySelectorAll(".ficha-objetivo-subatividade").forEach((linha, itemIndice) => {
+        linha.classList.toggle("feito", item.itens[itemIndice]?.feito === true);
+      });
+    }
+  });
+}
+
+function marcarObjetivosImplantacaoAlterados() {
+  objetivosImplantacaoAlterado = true;
+  const salvar = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-salvar");
+  if (salvar) salvar.disabled = false;
+}
+
+async function carregarTemplatesObjetivosParaFicha(seletor, botao, estado) {
+  seletor.disabled = true;
+  botao.disabled = true;
+  estado.textContent = "Carregando templates...";
+  try {
+    if (!objetivosTemplatesCache) {
+      if (!objetivosTemplatesRequisicao) {
+        objetivosTemplatesRequisicao = fetch("/api/objetivos-templates")
+          .then(parseJsonResponse)
+          .then((data) => {
+            if (!data.ok) throw new Error(data.error || "Falha ao carregar templates.");
+            objetivosTemplatesCache = data.templates || [];
+            return objetivosTemplatesCache;
+          })
+          .finally(() => { objetivosTemplatesRequisicao = null; });
+      }
+      await objetivosTemplatesRequisicao;
+    }
+    if (!seletor.isConnected) return;
+    seletor.replaceChildren();
+    const opcaoInicial = document.createElement("option");
+    opcaoInicial.value = "";
+    opcaoInicial.textContent = objetivosTemplatesCache.length
+      ? "Adicionar de um template..."
+      : "Nenhum template disponível";
+    seletor.appendChild(opcaoInicial);
+    objetivosTemplatesCache.forEach((template) => {
+      const opcao = document.createElement("option");
+      opcao.value = String(template.id);
+      opcao.textContent = template.nome;
+      seletor.appendChild(opcao);
+    });
+    seletor.disabled = objetivosTemplatesCache.length === 0;
+    botao.disabled = objetivosTemplatesCache.length === 0;
+    estado.textContent = "";
+  } catch (error) {
+    if (!seletor.isConnected) return;
+    estado.textContent = `Não foi possível carregar templates: ${String(error)}`;
+    seletor.replaceChildren();
+    const falha = document.createElement("option");
+    falha.textContent = "Falha ao carregar templates";
+    seletor.appendChild(falha);
+  }
 }
 
 function atualizarPainelObjetivosImplantacao() {
@@ -22409,7 +22876,7 @@ async function salvarObjetivosImplantacao() {
   const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
   if (painel) painel.querySelectorAll("input, button").forEach((controle) => { controle.disabled = true; });
   try {
-    const response = await fetch(`/api/clientes/${cliente.id}/objetivos-implantacao`, {
+    const response = await fetch(`/api/clientes/${cliente.id}/objetivos-implantacao-detalhados`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ objetivos: objetivosImplantacaoRascunho }),
@@ -22419,8 +22886,11 @@ async function salvarObjetivosImplantacao() {
       alert(`Erro ao salvar objetivos: ${data.error || "falha desconhecida"}`);
       return;
     }
-    cliente.objetivos_implantacao = data.objetivos;
-    objetivosImplantacaoRascunho = data.objetivos.map((item) => ({ ...item }));
+    cliente.objetivos_implantacao_detalhados = data.objetivos;
+    objetivosImplantacaoRascunho = data.objetivos.map((item) => ({
+      ...item,
+      itens: (item.itens || []).map((subatividade) => ({ ...subatividade })),
+    }));
     objetivosImplantacaoAlterado = false;
   } catch (error) {
     alert(`Erro ao salvar objetivos: ${String(error)}`);

@@ -41,6 +41,12 @@ Implantação, Controle de Migração e Ferramentas Auxiliares.
 - Linha do tempo (histórico) do cliente, com modal em tela cheia: eventos
   manuais, ações de auditoria e tarefas aparecem numa mesma timeline.
 - Motivo de atraso: campo explícito quando a implantação não está andando.
+- Objetivos de Implantação com sub-atividades: administradores gerenciam
+  modelos em Configurações → Templates de Objetivos; analistas e
+  administradores podem copiar um modelo ou criar objetivos personalizados
+  na Ficha do cliente. Cada cópia é independente do modelo, e a conclusão
+  das etapas determina o progresso do objetivo. Objetivos legados sem etapas
+  continuam podendo ser concluídos diretamente.
 - Lista de clientes implantados (separada da lista "em andamento").
 - Importação de clientes em lote por planilha (preview antes de confirmar).
 - Credencial da SSX do cliente, para autenticar operações na plataforma em

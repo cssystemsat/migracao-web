@@ -28,6 +28,11 @@
   para:
   - `log_auditoria` + `log_auditoria_mudanca`: log de auditoria imutável.
   - `historico_cliente`: timeline curada do cliente.
+  - `objetivo_templates` / `objetivo_template_itens` e
+    `cliente_objetivos` / `cliente_objetivo_itens`: modelos globais e cópias
+    independentes por cliente. A revisão Alembic
+    `0a9ef9c2b741` cria as tabelas e migra os objetivos JSON antigos para
+    objetivos sem sub-atividades, mantendo a coluna legada intacta.
   - `usuarios`: modelo já pronto para os logins da ferramenta, mas **ainda
     não ativo** — `app.py` continua lendo/escrevendo login em
     `app_usuarios` no Firestore até o Postgres do servidor da empresa
@@ -44,6 +49,23 @@
   principal.
 - `DATABASE_URL` não definida → cai para SQLite local (`local_dev.db`), sem
   exigir infraestrutura para rodar/testar localmente.
+
+## Objetivos de Implantação
+
+- `objetivos_sql.py` consulta templates com seus itens ordenados e consulta
+  objetivos apenas para o cliente aberto na Ficha; a listagem geral de
+  clientes não carrega as tabelas de sub-atividades.
+- A criação a partir de template grava uma cópia dos textos e ordem no
+  objetivo do cliente. A FK de origem é apenas referência, com `ON DELETE
+  SET NULL`; remover ou editar o template não altera cópias já existentes.
+- `feito` do objetivo é derivado das sub-atividades quando há etapas. Para
+  objetivos sem etapas, `feito` permanece editável, compatível com os
+  objetivos antigos.
+- `GET /api/objetivos-templates` lista modelos para usuários autenticados;
+  criar, editar e excluir exige perfil `adm` também no backend. A edição de
+  objetivos da implantação exige perfil operacional (não `visualizacao`).
+- O downgrade da revisão `0a9ef9c2b741` é bloqueado intencionalmente: o JSON
+  legado não representa a hierarquia sem perda de dados.
 
 ## Autenticação (duas camadas, não confundir)
 
