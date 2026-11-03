@@ -12404,7 +12404,6 @@ function renderAtalhosExclusaoResultado() {
       checkbox.checked = atalhosExclusaoSelecionados.has(registro.codigo);
       atalhosExclusaoCheckboxesVisiveis.set(registro.codigo, checkbox);
       checkbox.addEventListener("click", (event) => {
-        event.preventDefault();
         const selecionado = !atalhosExclusaoSelecionados.has(registro.codigo);
         const indiceAncora = registrosFiltrados.indexOf(atalhosExclusaoAncoraSelecao);
         const indiceAtual = registrosFiltrados.indexOf(registro);
