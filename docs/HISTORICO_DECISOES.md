@@ -24,6 +24,24 @@ conferir a coleção nova funcionando antes de remover a antiga, e
 `limpar_migracao_orfa.py` para remover, só depois de confirmado, os
 registros de migração sem vínculo com nenhum cliente.
 
+## API do ssxdesk: domínio mudou para desk.systemsat.com.br
+
+Era `ssxdesk.ssatx.com.br`. A chave de API (`SSXDESK_API_KEY`) e os
+endpoints/escopo continuam os mesmos — só a base URL mudou, em
+`ssxdesk_api.py` (`_BASE_URL`).
+
+Isso foi descoberto investigando um 403 "sem permissão (escopo)" que só
+acontecia em produção (Render), nunca testando a mesma chave localmente: o
+corpo real da resposta era uma página de challenge do Cloudflare
+("Attention Required!"), não um erro do ssxdesk — o domínio antigo estava
+bloqueando o IP de datacenter do Render antes da requisição chegar na
+aplicação. A chave sempre teve escopo completo; não era bug de código nem
+de permissão. Trocar para o domínio novo resolveu.
+
+Se esse erro voltar a aparecer (mensagem de escopo só em produção, nunca
+localmente), suspeitar primeiro de bloqueio de rede/WAF, não de chave ou
+escopo — comparar o corpo da resposta, não só o status HTTP.
+
 ## Terminologia "tentativa" → "processo" de migração
 
 Decisão explícita: um processo de migração nunca deve ser chamado de
