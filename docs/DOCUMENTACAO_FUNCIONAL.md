@@ -133,7 +133,10 @@ Conversores disponíveis e status:
 
 Na operação de exclusão, a lista da SSX pode ser filtrada por texto em cada
 coluna. Para veículos, a tabela mostra identificação, nome do cliente, ID do
-rastreador (`IdTracker`) e código de integração.
+rastreador (`IdTracker`) e código de integração. A seleção em massa alcança
+somente os elegíveis que correspondem aos filtros; Shift+clique seleciona ou
+desmarca o intervalo visível entre duas linhas, preservando a seleção fora
+dos filtros.
 
 ### Validador de Planilha de Importação
 

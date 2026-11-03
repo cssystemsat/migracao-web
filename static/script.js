@@ -11981,6 +11981,7 @@ let atalhosExclusaoRegistros = [];
 let atalhosExclusaoSelecionados = new Set(); // códigos (únicos entre elegíveis)
 let atalhosExclusaoOrdenacao = null; // {chave, direcao} | null
 let atalhosExclusaoFiltros = {};
+let atalhosExclusaoAncoraSelecao = null;
 let atalhosExclusaoPollTimer = null;
 
 function atalhosAtualizarPillAuth() {
@@ -12013,6 +12014,7 @@ function limparAtalhos() {
   atalhosExclusaoSelecionados = new Set();
   atalhosExclusaoOrdenacao = null;
   atalhosExclusaoFiltros = {};
+  atalhosExclusaoAncoraSelecao = null;
   const radioCliente = document.querySelector('input[name="atalhos-exclusao-tipo"][value="cliente"]');
   if (radioCliente) radioCliente.checked = true;
   const resultadoEl = el("atalhos-exclusao-resultado");
@@ -12157,6 +12159,7 @@ async function carregarAtalhosExclusao(tipo) {
     atalhosExclusaoRegistros = [];
     atalhosExclusaoSelecionados = new Set();
     atalhosExclusaoFiltros = {};
+    atalhosExclusaoAncoraSelecao = null;
     return mostrarInfoAtalhosExclusao(
       "Não é possível listar Áreas — a SSX não tem endpoint de consulta (List) pra esse cadastro, só Insert/Update/Delete."
     );
@@ -12186,6 +12189,7 @@ async function carregarAtalhosExclusao(tipo) {
     atalhosExclusaoSelecionados = new Set();
     atalhosExclusaoOrdenacao = null;
     atalhosExclusaoFiltros = {};
+    atalhosExclusaoAncoraSelecao = null;
     renderAtalhosExclusaoResultado();
   } catch (err) {
     mostrarErroAtalhosExclusao(err.message || String(err));
@@ -12215,6 +12219,19 @@ function renderAtalhosExclusaoResultado() {
     valor: (r) => r.elegivel ? r.codigo : "Sem código de integração",
     largura: 200,
   });
+  const registrosOrdenados = atalhosExclusaoOrdenacao
+    ? ordenarLinhas(atalhosExclusaoRegistros, atalhosExclusaoOrdenacao.chave, atalhosExclusaoOrdenacao.direcao)
+    : atalhosExclusaoRegistros;
+  const normalizar = (valor) => String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR");
+  const obterRegistrosFiltrados = () => registrosOrdenados.filter((registro) =>
+    colunas.every((coluna) => {
+      const filtro = normalizar(atalhosExclusaoFiltros[coluna.chave] || "").trim();
+      return !filtro || normalizar(coluna.valor(registro)).includes(filtro);
+    })
+  );
 
   const toolbar = document.createElement("div");
   toolbar.className = "convcli-toolbar-validar";
@@ -12222,9 +12239,11 @@ function renderAtalhosExclusaoResultado() {
   const btnSelecionar = document.createElement("button");
   btnSelecionar.type = "button";
   btnSelecionar.className = "btn-secondary";
-  btnSelecionar.textContent = "Selecionar elegíveis";
+  btnSelecionar.textContent = "Selecionar elegíveis filtrados";
   btnSelecionar.addEventListener("click", () => {
-    atalhosExclusaoSelecionados = new Set(elegiveis.map((r) => r.codigo));
+    obterRegistrosFiltrados()
+      .filter((registro) => registro.elegivel)
+      .forEach((registro) => atalhosExclusaoSelecionados.add(registro.codigo));
     renderAtalhosExclusaoResultado();
   });
   toolbar.appendChild(btnSelecionar);
@@ -12310,23 +12329,10 @@ function renderAtalhosExclusaoResultado() {
   thead.appendChild(trFiltros);
   table.appendChild(thead);
 
-  const registrosOrdenados = atalhosExclusaoOrdenacao
-    ? ordenarLinhas(atalhosExclusaoRegistros, atalhosExclusaoOrdenacao.chave, atalhosExclusaoOrdenacao.direcao)
-    : atalhosExclusaoRegistros;
-
   const tbody = document.createElement("tbody");
   const atualizarLinhas = () => {
     tbody.replaceChildren();
-    const normalizar = (valor) => String(valor ?? "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLocaleLowerCase("pt-BR");
-    const registrosFiltrados = registrosOrdenados.filter((registro) =>
-      colunas.every((coluna) => {
-        const filtro = normalizar(atalhosExclusaoFiltros[coluna.chave] || "").trim();
-        return !filtro || normalizar(coluna.valor(registro)).includes(filtro);
-      })
-    );
+    const registrosFiltrados = obterRegistrosFiltrados();
     legenda.textContent = `${registrosFiltrados.length} de ${atalhosExclusaoRegistros.length} registro(s) exibido(s) — `
       + `${elegiveis.length} elegível(eis), ${atalhosExclusaoRegistros.length - elegiveis.length} sem código de integração.`;
     if (registrosFiltrados.length === 0) {
@@ -12347,9 +12353,25 @@ function renderAtalhosExclusaoResultado() {
       checkbox.type = "checkbox";
       checkbox.disabled = !registro.elegivel;
       checkbox.checked = atalhosExclusaoSelecionados.has(registro.codigo);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) atalhosExclusaoSelecionados.add(registro.codigo);
-        else atalhosExclusaoSelecionados.delete(registro.codigo);
+      checkbox.addEventListener("click", (event) => {
+        event.preventDefault();
+        const selecionado = !atalhosExclusaoSelecionados.has(registro.codigo);
+        const indiceAncora = registrosFiltrados.indexOf(atalhosExclusaoAncoraSelecao);
+        const indiceAtual = registrosFiltrados.indexOf(registro);
+        if (event.shiftKey && indiceAncora !== -1) {
+          const inicio = Math.min(indiceAncora, indiceAtual);
+          const fim = Math.max(indiceAncora, indiceAtual);
+          registrosFiltrados.slice(inicio, fim + 1)
+            .filter((item) => item.elegivel)
+            .forEach((item) => {
+              if (selecionado) atalhosExclusaoSelecionados.add(item.codigo);
+              else atalhosExclusaoSelecionados.delete(item.codigo);
+            });
+        } else {
+          if (selecionado) atalhosExclusaoSelecionados.add(registro.codigo);
+          else atalhosExclusaoSelecionados.delete(registro.codigo);
+          atalhosExclusaoAncoraSelecao = registro;
+        }
         renderAtalhosExclusaoResultado();
       });
       tdCheck.appendChild(checkbox);
