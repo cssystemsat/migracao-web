@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import importlib.util
 from pathlib import Path
 import unittest
@@ -9,9 +10,10 @@ from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import sessionmaker
 
 import app
+import cliente_eventos_sql
 import db_sql
 import objetivos_sql
-from models import Base, Cliente
+from models import Base, Cliente, ClienteEvento
 
 
 class ObjetivosHierarquicosPersistenciaTest(unittest.TestCase):
@@ -108,7 +110,8 @@ class ObjetivosHierarquicosPersistenciaTest(unittest.TestCase):
         self.assertTrue(objetivos[1]["feito"])
         objetivos[0]["itens"][1]["feito"] = True
         salvos = objetivos_sql.salvar_objetivos(self.cliente_a, objetivos)
-        self.assertTrue(salvos[0]["feito"])
+        self.assertTrue(all(item["feito"] for item in salvos[0]["itens"]))
+        self.assertFalse(salvos[0]["feito"])
 
     def test_exclusao_de_template_nao_remove_objetivos_do_cliente(self):
         template = objetivos_sql.salvar_template("Modelo", [])
@@ -159,6 +162,77 @@ class MigracaoObjetivosLegadosTest(unittest.TestCase):
         self.assertEqual(registros, [("Treinar equipe", 1)])
         self.assertIn("Treinar equipe", legado)
         engine.dispose()
+
+
+class EventosMarcosTimelineTest(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(self.engine, tables=[Cliente.__table__, ClienteEvento.__table__])
+        self.session_factory = sessionmaker(bind=self.engine, future=True)
+        with self.session_factory() as sessao:
+            cliente = Cliente(idcentral="timeline-test", cliente="Cliente de teste")
+            sessao.add(cliente)
+            sessao.flush()
+            self.cliente_id = cliente.id
+            sessao.add_all([
+                ClienteEvento(
+                    cliente_id=self.cliente_id, setor="Implantação",
+                    titulo="Marco 1 concluído", descricao="", data="2026-11-05",
+                    responsavel="", tag="", origem_tipo="marco", origem_id="marco-1",
+                ),
+                ClienteEvento(
+                    cliente_id=self.cliente_id, setor="Implantação",
+                    titulo="Marco 5 concluído", descricao="", data="2026-11-05",
+                    responsavel="", tag="", origem_tipo="marco", origem_id="marco-5",
+                ),
+                ClienteEvento(
+                    cliente_id=self.cliente_id, setor="Implantação",
+                    titulo="Implantação concluída (5 marcos)", descricao="",
+                    data="2026-11-05", responsavel="", tag="",
+                    origem_tipo="implantacao", origem_id="concluido",
+                ),
+                ClienteEvento(
+                    cliente_id=self.cliente_id, setor="Implantação",
+                    titulo="Marco 5 concluído", descricao="", data="2026-11-05",
+                    responsavel="", tag="",
+                ),
+                ClienteEvento(
+                    cliente_id=self.cliente_id, setor="Implantação",
+                    titulo="Marco 1 concluído", descricao="", data="2026-11-05",
+                    responsavel="", tag="",
+                ),
+            ])
+            sessao.commit()
+
+    def tearDown(self):
+        self.engine.dispose()
+
+    @contextmanager
+    def _sessao(self):
+        sessao = self.session_factory()
+        try:
+            yield sessao
+            sessao.commit()
+        except Exception:
+            sessao.rollback()
+            raise
+        finally:
+            sessao.close()
+
+    def test_reabrir_marco_remove_eventos_novos_e_legados(self):
+        with patch.object(cliente_eventos_sql, "obter_sessao", self._sessao):
+            removidos = cliente_eventos_sql.sincronizar_eventos_marcos(
+                self.cliente_id,
+                ["marco-1", "marco-2", "marco-3", "marco-4"],
+                False,
+            )
+
+        self.assertTrue(removidos)
+        with self.session_factory() as sessao:
+            eventos = sessao.query(ClienteEvento).all()
+        self.assertEqual(len(eventos), 2)
+        self.assertEqual({evento.origem_id for evento in eventos if evento.origem_tipo == "marco"}, {"marco-1"})
+        self.assertTrue(all(evento.titulo == "Marco 1 concluído" for evento in eventos))
 
 
 class ObjetivosTemplatesPermissoesTest(unittest.TestCase):
@@ -233,7 +307,98 @@ class ObjetivosTemplatesPermissoesTest(unittest.TestCase):
             )
 
         self.assertEqual(resposta.status_code, 200)
-        salvar_objetivos.assert_called_once_with(12, payload["objetivos"])
+        salvar_objetivos.assert_called_once_with(12, [{
+            **payload["objetivos"][0],
+            "prazo_dias": None,
+            "concluido_em": "",
+        }])
+
+    def test_reabrir_objetivo_remove_evento_automatico_da_timeline(self):
+        self._login_com_perfil("analista")
+        anteriores = [{
+            "id": 8,
+            "nome": "Vídeo Telemetria",
+            "feito": True,
+            "concluido_em": "2026-11-05",
+            "itens": [],
+        }]
+        salvos = [{**anteriores[0], "feito": False, "concluido_em": ""}]
+        with (
+            patch.object(objetivos_sql, "listar_objetivos", return_value=anteriores),
+            patch.object(objetivos_sql, "salvar_objetivos", return_value=salvos),
+            patch.object(app.cliente_eventos_sql, "sincronizar_eventos_objetivos_pendentes", return_value=True) as sincronizar_eventos,
+            patch.object(app.cliente_eventos_sql, "recalcular_ultima_acao") as recalcular_ultima_acao,
+        ):
+            resposta = self.client.put(
+                "/api/clientes/12/objetivos-implantacao-detalhados",
+                json={"objetivos": [{
+                    "id": 8,
+                    "nome": "Vídeo Telemetria",
+                    "feito": False,
+                    "itens": [],
+                }]},
+            )
+
+        self.assertEqual(resposta.status_code, 200)
+        sincronizar_eventos.assert_called_once_with(
+            12,
+            salvos,
+            titulos_legados=[],
+        )
+        recalcular_ultima_acao.assert_called_once_with(12)
+
+    def test_carregar_objetivos_limpa_evento_antigo_de_objetivo_pendente(self):
+        self._login_com_perfil("analista")
+        pendentes = [{
+            "id": 8,
+            "nome": "Vídeo Telemetria",
+            "feito": False,
+            "itens": [],
+        }]
+        with (
+            patch.object(objetivos_sql, "listar_objetivos", return_value=pendentes),
+            patch.object(app.cliente_eventos_sql, "sincronizar_eventos_objetivos_pendentes", return_value=True) as sincronizar_eventos,
+            patch.object(app.cliente_eventos_sql, "recalcular_ultima_acao") as recalcular_ultima_acao,
+        ):
+            resposta = self.client.get("/api/clientes/12/objetivos-implantacao-detalhados")
+
+        self.assertEqual(resposta.status_code, 200)
+        sincronizar_eventos.assert_called_once_with(
+            12,
+            pendentes,
+            titulos_legados=(),
+        )
+        recalcular_ultima_acao.assert_called_once_with(12)
+
+    def test_reabrir_marco_remove_evento_do_marco_e_da_implantacao_concluida(self):
+        self._login_com_perfil("analista")
+        self.cliente.update({
+            "marcos_concluidos": ["marco-1", "marco-2", "marco-3", "marco-4", "marco-5"],
+            "marcos_concluidos_em": {},
+            "etapa": "concluido",
+        })
+        marcos_ativos = ["marco-1", "marco-2", "marco-3", "marco-4"]
+        with (
+            patch.object(app, "_marcos_concluidos_derivados", return_value=marcos_ativos),
+            patch.object(app, "_etapa_a_partir_dos_marcos", return_value="marco-5"),
+            patch.object(app.clientes_sql, "atualizar_cliente", return_value=self.cliente),
+            patch.object(app.cliente_eventos_sql, "sincronizar_eventos_marcos", return_value=True) as sincronizar_eventos,
+            patch.object(app.cliente_eventos_sql, "recalcular_ultima_acao") as recalcular_ultima_acao,
+            patch.object(app, "registrar_acao"),
+        ):
+            resposta = self.client.put(
+                "/api/clientes/12/marcos",
+                json={
+                    "itens_feitos": [],
+                    "itens_extras": {},
+                    "prioridades": [],
+                    "concluidos_manual": marcos_ativos,
+                },
+            )
+
+        self.assertEqual(resposta.status_code, 200)
+        sincronizar_eventos.assert_called_once_with(12, marcos_ativos, False)
+        recalcular_ultima_acao.assert_called_once_with(12)
 
     def test_rejeita_subatividade_vazia_sem_persistir(self):
         self._login_com_perfil("analista")

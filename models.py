@@ -244,13 +244,19 @@ class ObjetivoTemplate(Base):
     """Modelo reutilizável de objetivo de implantação, com sub-atividades
     próprias — gerenciado só por admin em Configurações → Templates de
     Objetivos. Usar um template num cliente (ClienteObjetivo.origem_template_id)
-    COPIA os itens pra lá; depois disso os dois vivem independentes (editar ou
-    excluir o template não afeta cópias já criadas — ver docs/HISTORICO_DECISOES.md)."""
+    COPIA os itens (e o prazo_dias, como valor inicial) pra lá; depois disso os
+    dois vivem independentes (editar ou excluir o template não afeta cópias já
+    criadas — ver docs/HISTORICO_DECISOES.md)."""
 
     __tablename__ = "objetivo_templates"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column()
+    # Prazo padrão (dias) sugerido ao copiar o template pra um cliente — só
+    # preenche o valor inicial de ClienteObjetivo.prazo_dias; o cliente pode
+    # editar livremente depois, sem voltar pro template (nullable = sem prazo
+    # padrão definido).
+    prazo_dias: Mapped[int | None] = mapped_column(nullable=True)
     criado_em: Mapped[datetime] = mapped_column(default=_agora)
     atualizado_em: Mapped[datetime] = mapped_column(default=_agora, onupdate=_agora)
 
@@ -275,9 +281,15 @@ class ClienteObjetivo(Base):
     ObjetivoTemplate (cópia dos itens, ver docstring) ou do zero
     ("personalizado"). Substitui gradualmente Cliente.objetivos_implantacao
     (JSON antigo, mantido congelado pra rollback — ver HISTORICO_DECISOES.md).
-    `feito` só é usado quando o objetivo não tem sub-atividade nenhuma
-    (compatibilidade com os objetivos antigos migrados do JSON, que eram só um
-    checklist plano, sem sub-itens); havendo itens, o progresso vem deles."""
+
+    `feito`/`concluido_em` são SEMPRE manuais e independentes das sub-
+    atividades (ver docs/HISTORICO_DECISOES.md, decisão do Dashboard de
+    Implantação) — os itens continuam existindo só como checklist de apoio na
+    Ficha, sem determinar a conclusão do objetivo nem alimentar KPI nenhum.
+    `concluido_em` é carimbado com a data de hoje na primeira vez que `feito`
+    vira True (ver objetivos_sql.salvar_objetivos), mas pode ser editado
+    depois pra qualquer data — é esse valor editado que os indicadores de
+    duração/prazo do dashboard devem respeitar, nunca um valor cacheado."""
 
     __tablename__ = "cliente_objetivos"
 
@@ -286,6 +298,11 @@ class ClienteObjetivo(Base):
     nome: Mapped[str] = mapped_column()
     ordem: Mapped[int] = mapped_column(default=0)
     feito: Mapped[bool] = mapped_column(default=False)
+    concluido_em: Mapped[str] = mapped_column(default="")
+    # Prazo em dias a partir de `criado_em` — define a data prevista de
+    # conclusão (criado_em + prazo_dias, calculada na hora, nunca guardada).
+    # Nullable = sem prazo definido, fica fora dos KPIs de atraso/previsão.
+    prazo_dias: Mapped[int | None] = mapped_column(nullable=True)
 
     # Só referência ("criado a partir de") — SET NULL pra nunca travar a
     # exclusão do template nem apagar objetivos já em uso nos clientes.
@@ -334,9 +351,12 @@ class ClienteEvento(Base):
     # Texto livre de propósito (não é FK pra Usuario) — decisão deliberada mantida.
     responsavel: Mapped[str] = mapped_column(default="")
     tag: Mapped[str] = mapped_column(default="")
+    origem_tipo: Mapped[str | None] = mapped_column(nullable=True)
+    origem_id: Mapped[str | None] = mapped_column(nullable=True)
 
     __table_args__ = (
         Index("ix_cliente_eventos_timeline", "cliente_id", "data"),
+        Index("ix_cliente_eventos_origem", "cliente_id", "origem_tipo", "origem_id"),
     )
 
 

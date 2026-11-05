@@ -34,6 +34,69 @@
 Tela inicial com acesso rápido às três grandes áreas: Controle de
 Implantação, Controle de Migração e Ferramentas Auxiliares.
 
+## Dashboard de Implantação
+
+Sub-tela própria do grupo "Implantação" no sidebar (`/implantacao/dashboard`),
+separada do Dashboard geral (tela inicial). Central de gestão da responsável
+pelo Controle de Implantação: camada analítica sobre os processos que já
+existem (Ficha do cliente, Objetivos de Implantação, marcos), sem criar
+controle paralelo.
+
+**Filtro de período** (mês atual/trimestre atual/ano atual/personalizado/tudo)
+no topo da tela. Cada indicador usa a data que faz sentido pra ele —
+implantações iniciadas usa `data_entrada`, objetivos/implantações concluídas
+usam a data de conclusão correspondente; "objetivos atrasados" é sempre um
+corte do presente (hoje vs. data prevista), não é afetado pelo período.
+
+KPIs:
+
+- Carteira: clientes em implantação ativos, implantações iniciadas no
+  período, implantações concluídas (pelos marcos — ver regra de negócio
+  central), clientes com marco atrasado, clientes sem objetivo cadastrado.
+- Tempo e duração: tempo médio de implantação das concluídas (`data_entrada`
+  → `concluido_em` do cliente, só marcos), tempo médio/mediano de conclusão
+  de objetivo, objetivos atrasados (prazo individual vencido), ranking dos
+  objetivos com maior tempo médio de conclusão.
+- Objetivos de Implantação (ligado direto à aba Implantação da Ficha do
+  cliente): total concluído, progresso médio por cliente, ranking dos
+  objetivos mais recorrentes (usados/concluídos/pendentes/atrasados/% de
+  conclusão/tempo médio) — origem:
+  `objetivos_sql.estatisticas_dashboard_implantacao`. Objetivo concluído
+  antes da data de conclusão existir (legado) conta na quantidade mas fica
+  fora das médias de tempo — a tela avisa quantos são.
+- **"Implantação concluída (por objetivos)"**: métrica própria desta tela —
+  cliente com pelo menos 1 objetivo e todos concluídos. É DIFERENTE da
+  "Implantação concluída" pelos marcos (`Cliente.etapa`), que continua sendo
+  a regra oficial em todo o resto do sistema — ver
+  `docs/HISTORICO_DECISOES.md`.
+- Funil por etapa/marco (mesma lógica do Funil de Implantação do Dashboard
+  geral, mas só com clientes de Implantação).
+- Clientes com marco atrasado, implantações paradas (sem atividade recente) e
+  tempo nos marcos: reaproveita as mesmas funções/regras do Dashboard geral,
+  filtradas só pra Implantação.
+- Envelhecimento da carteira: clientes ativos agrupados por dias em
+  implantação (até 15 / 16–30 / 31–60 / 61–90 / mais de 90) — classificação
+  de tempo, não indica atraso por si só.
+
+Consulta sem período fica cacheada 5 min (mesmo racional do `/api/dashboard`,
+ver `docs/DOCUMENTACAO_TECNICA.md`), invalidada automaticamente por qualquer
+escrita em `/api/`; consulta com período não é cacheada.
+
+### Prazo e conclusão do objetivo (aba Implantação da Ficha do cliente)
+
+Cada objetivo tem um prazo individual opcional, em dias (ex.: Rastreamento
+básico 5 dias, Telemetria 10 dias) — a data prevista de conclusão é
+`criado_em + prazo_dias`, calculada na hora, nunca guardada. A conclusão do
+objetivo (checkbox "Concluído" + data de conclusão) é **sempre manual e
+independente das sub-atividades**, mesmo quando o objetivo tem sub-atividades
+cadastradas — elas continuam servindo de checklist de apoio na Ficha, mas não
+determinam mais a conclusão do objetivo nem entram em nenhum KPI do Dashboard
+de Implantação. A data de conclusão é preenchida automaticamente ao marcar
+"Concluído" (se ainda vazia) e pode ser editada livremente depois; os
+indicadores de duração/prazo do dashboard sempre recalculam a partir do valor
+atual desse campo. Ver `docs/HISTORICO_DECISOES.md` para o antes/depois dessa
+regra.
+
 ## Controle de Implantação
 
 - Cadastro de clientes em implantação: ID Central, dados do cliente,
@@ -201,3 +264,9 @@ específico.
 - O histórico do cliente (timeline) reúne três origens: eventos manuais
   (editáveis só pelo autor ou um admin), ações de auditoria e tarefas
   (ambas não editáveis diretamente — só mudam via o processo que as gerou).
+- Concluir um objetivo de Implantação e concluir um marco geram, além do
+  registro de auditoria de sempre, um evento automático na timeline (setor
+  "Implantação"). O evento do objetivo fica vinculado ao objetivo de origem e
+  é removido quando ele é reaberto. Os eventos de marcos também são removidos
+  quando o marco é reaberto; o evento geral de implantação concluída é
+  removido se algum marco deixar de estar concluído.

@@ -34,6 +34,68 @@ def criar_evento(cliente_id, dados):
         return _evento_para_dict(novo)
 
 
+def sincronizar_eventos_objetivos_pendentes(cliente_id, objetivos, titulos_legados=()):
+    pendentes = [objetivo for objetivo in objetivos if not objetivo.get("feito")]
+    ids_pendentes = {str(objetivo["id"]) for objetivo in pendentes}
+    titulos = {f"Objetivo concluído: {objetivo['nome']}" for objetivo in pendentes}
+    titulos.update(titulos_legados)
+    if not ids_pendentes and not titulos:
+        return False
+
+    with obter_sessao() as sessao:
+        eventos = sessao.query(ClienteEvento).filter(
+            ClienteEvento.cliente_id == cliente_id,
+            ClienteEvento.setor == "Implantação",
+        ).all()
+        para_excluir = [
+            evento for evento in eventos
+            if (
+                evento.origem_tipo == "objetivo"
+                and evento.origem_id in ids_pendentes
+            ) or (
+                evento.origem_tipo is None
+                and evento.titulo in titulos
+            )
+        ]
+        for evento in para_excluir:
+            sessao.delete(evento)
+        return bool(para_excluir)
+
+
+def sincronizar_eventos_marcos(cliente_id, marcos_concluidos, implantacao_concluida):
+    marcos_ativos = {str(marco) for marco in marcos_concluidos}
+    titulos_legados = {
+        f"{marco.replace('marco-', 'Marco ')} concluído"
+        for marco in ("marco-1", "marco-2", "marco-3", "marco-4", "marco-5")
+        if marco not in marcos_ativos
+    }
+    if not implantacao_concluida:
+        titulos_legados.add("Implantação concluída (5 marcos)")
+
+    with obter_sessao() as sessao:
+        eventos = sessao.query(ClienteEvento).filter(
+            ClienteEvento.cliente_id == cliente_id,
+            ClienteEvento.setor == "Implantação",
+        ).all()
+        para_excluir = [
+            evento for evento in eventos
+            if (
+                evento.origem_tipo == "marco"
+                and evento.origem_id not in marcos_ativos
+            ) or (
+                evento.origem_tipo == "implantacao"
+                and evento.origem_id == "concluido"
+                and not implantacao_concluida
+            ) or (
+                evento.origem_tipo is None
+                and evento.titulo in titulos_legados
+            )
+        ]
+        for evento in para_excluir:
+            sessao.delete(evento)
+        return bool(para_excluir)
+
+
 def editar_evento(cliente_id, evento_id, dados):
     with obter_sessao() as sessao:
         alvo = sessao.get(ClienteEvento, evento_id)

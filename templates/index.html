@@ -53,6 +53,10 @@
           <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
         </button>
         <div class="sidebar-subnav" id="sidebar-subnav-implantacao" role="group" aria-label="Páginas de Implantação">
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-dashboard-implantacao" title="Dashboard de Implantação">
+            <span class="material-symbols-outlined sidebar-item-icone">monitoring</span>
+            <span class="sidebar-item-texto">Dashboard de Implantação</span>
+          </button>
           <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-implantacao" title="Controle de Implantação">
             <span class="material-symbols-outlined sidebar-item-icone">checklist</span>
             <span class="sidebar-item-texto">Controle de Implantação</span>
@@ -251,6 +255,116 @@
             <p class="area-card-desc">Consultas, importação, comandos e utilitários de apoio.</p>
           </button>
         </div>
+      </section>
+
+      <section id="tela-dashboard-implantacao" class="panel hidden">
+        <div class="conteudo-header conteudo-header-com-acao">
+          <div>
+            <h2 class="conteudo-titulo">Dashboard de Implantação</h2>
+            <p class="conteudo-subtitulo">KPIs da operação de Implantação, ligados aos Objetivos de Implantação de cada cliente</p>
+          </div>
+          <button type="button" class="btn-secondary" id="btn-di-ir-controle">
+            <span class="material-symbols-outlined">checklist</span>
+            Controle de Implantação
+          </button>
+        </div>
+
+        <div class="di-periodo" id="di-periodo">
+          <span class="di-periodo-label">Período</span>
+          <div class="di-periodo-botoes" role="group" aria-label="Selecionar período">
+            <button type="button" class="di-periodo-btn ativo" data-periodo="tudo">Tudo</button>
+            <button type="button" class="di-periodo-btn" data-periodo="mes">Mês atual</button>
+            <button type="button" class="di-periodo-btn" data-periodo="trimestre">Trimestre atual</button>
+            <button type="button" class="di-periodo-btn" data-periodo="ano">Ano atual</button>
+            <button type="button" class="di-periodo-btn" data-periodo="custom">Personalizado</button>
+          </div>
+          <div class="di-periodo-custom hidden" id="di-periodo-custom">
+            <input type="date" id="di-periodo-de" aria-label="Data inicial do período">
+            <span>até</span>
+            <input type="date" id="di-periodo-ate" aria-label="Data final do período">
+            <button type="button" class="btn-secondary" id="di-periodo-aplicar">Aplicar</button>
+          </div>
+          <span class="di-periodo-aviso placeholder hidden" id="di-periodo-aviso">
+            "Implantações concluídas" aqui é calculada pelos Objetivos (todos concluídos), não pelos marcos — ver card abaixo.
+          </span>
+        </div>
+
+        <div class="dashboard-tiles">
+          <div class="stat-tile" style="--tile-accent: var(--amarelo-escuro);">
+            <div class="stat-tile-label">Clientes em implantação (ativos)</div>
+            <div class="stat-tile-valor" id="tile-di-ativos">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--violeta);">
+            <div class="stat-tile-label">Implantações iniciadas no período</div>
+            <div class="stat-tile-valor" id="tile-di-iniciadas">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--verde);">
+            <div class="stat-tile-label">Implantações concluídas (marcos)</div>
+            <div class="stat-tile-valor" id="tile-di-concluidos">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--vermelho);">
+            <div class="stat-tile-label">Clientes com marco atrasado</div>
+            <div class="stat-tile-valor" id="tile-di-atrasados">–</div>
+          </div>
+        </div>
+        <div class="dashboard-tiles">
+          <div class="stat-tile" style="--tile-accent: var(--azul);">
+            <div class="stat-tile-label">Tempo médio de implantação (concluídas)</div>
+            <div class="stat-tile-valor" id="tile-di-tempo-medio-implantacao">–</div>
+            <div class="stat-tile-sub" id="tile-di-tempo-medio-implantacao-amostra"></div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--violeta);">
+            <div class="stat-tile-label">Clientes sem objetivo cadastrado</div>
+            <div class="stat-tile-valor" id="tile-di-sem-objetivo">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--amarelo-escuro);">
+            <div class="stat-tile-label">Objetivos atrasados (do prazo individual)</div>
+            <div class="stat-tile-valor" id="tile-di-objetivos-atrasados">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--verde);">
+            <div class="stat-tile-label">Implantações concluídas (por objetivos)</div>
+            <div class="stat-tile-valor" id="tile-di-concluidas-objetivos">–</div>
+          </div>
+        </div>
+
+        <div class="dashboard-insights">
+          <div class="insight-card">
+            <h3>Objetivos de Implantação — tempo e duração</h3>
+            <div class="di-objetivos-resumo">
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Objetivos concluídos</span>
+                <span class="di-objetivos-resumo-valor" id="di-objetivos-concluidos">–</span>
+              </div>
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Tempo médio de conclusão</span>
+                <span class="di-objetivos-resumo-valor" id="di-objetivos-tempo-medio">–</span>
+              </div>
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Tempo mediano de conclusão</span>
+                <span class="di-objetivos-resumo-valor" id="di-objetivos-tempo-mediano">–</span>
+              </div>
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Progresso médio por cliente</span>
+                <span class="di-objetivos-resumo-valor" id="di-objetivos-progresso-medio">–</span>
+              </div>
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Clientes com objetivo cadastrado</span>
+                <span class="di-objetivos-resumo-valor" id="di-objetivos-clientes-com-objetivo">–</span>
+              </div>
+            </div>
+            <p class="placeholder di-objetivos-aviso-legado hidden" id="di-objetivos-aviso-legado"></p>
+            <h4 class="di-ranking-titulo">Ranking dos objetivos mais recorrentes</h4>
+            <div id="di-ranking-objetivos" class="di-ranking"></div>
+            <h4 class="di-ranking-titulo">Objetivos com maior tempo médio de conclusão</h4>
+            <div id="di-ranking-maior-tempo" class="di-ranking"></div>
+          </div>
+          <div class="insight-card">
+            <h3>Funil de Implantação</h3>
+            <div id="di-funil-etapas"></div>
+          </div>
+        </div>
+
+        <div class="dashboard-insights" id="di-insights-clientes"></div>
       </section>
 
       <section id="tela-ferramentas" class="panel hidden">
@@ -1962,24 +2076,43 @@
 
         <div id="config-painel-templates" class="hidden">
           <div class="objetivos-templates-cabecalho">
-            <h3>Templates de Objetivos</h3>
-            <p class="placeholder">Gerencie modelos reutilizáveis de objetivos e suas sub-atividades.</p>
+            <div>
+              <h3>Templates de Objetivos</h3>
+              <p class="placeholder">Gerencie modelos reutilizáveis de objetivos e suas sub-atividades.</p>
+            </div>
+            <button type="button" id="btn-criar-objetivo-template" class="btn-primary">Criar template</button>
           </div>
           <p id="objetivos-templates-mensagem" class="placeholder hidden" role="status"></p>
           <div id="objetivos-templates-lista" class="objetivos-templates-lista"></div>
-          <h4 id="objetivo-template-form-titulo" class="form-credencial-titulo">Criar template</h4>
-          <form id="form-objetivo-template" class="form-credencial objetivos-template-form">
-            <input id="objetivo-template-nome" type="text" maxlength="300" placeholder="Nome do objetivo" required>
-            <div id="objetivo-template-itens" class="objetivo-editor-itens"></div>
-            <button type="button" id="btn-objetivo-template-item" class="btn-secondary">+ Adicionar sub-atividade</button>
-            <div class="form-credencial-botoes">
-              <button type="submit" id="btn-salvar-objetivo-template" class="btn-primary">Salvar template</button>
-              <button type="button" id="btn-cancelar-objetivo-template" class="btn-secondary hidden">Cancelar edição</button>
-            </div>
-          </form>
         </div>
       </section>
     </main>
+  </div>
+
+  <div id="overlay-objetivo-template" class="overlay hidden">
+    <div class="modal objetivo-template-modal" role="dialog" aria-modal="true" aria-labelledby="objetivo-template-form-titulo">
+      <div class="modal-header">
+        <h3 id="objetivo-template-form-titulo">Criar template</h3>
+        <button type="button" id="btn-fechar-objetivo-template" class="btn-secondary">Fechar</button>
+      </div>
+      <form id="form-objetivo-template" class="modal-body form-credencial objetivos-template-form">
+        <p id="objetivo-template-form-mensagem" class="placeholder hidden" role="alert"></p>
+        <label class="objetivo-template-nome-label">
+          <span>Nome do objetivo</span>
+          <input id="objetivo-template-nome" type="text" maxlength="300" placeholder="Ex.: Vídeo Telemetria" required>
+        </label>
+        <label class="objetivo-template-prazo-label">
+          <span>Prazo padrão (dias)</span>
+          <input id="objetivo-template-prazo" type="number" min="1" max="3650" placeholder="Sem prazo padrão">
+        </label>
+        <div id="objetivo-template-itens" class="objetivo-editor-itens"></div>
+        <button type="button" id="btn-objetivo-template-item" class="btn-secondary">+ Adicionar sub-atividade</button>
+        <div class="form-credencial-botoes">
+          <button type="submit" id="btn-salvar-objetivo-template" class="btn-primary">Salvar template</button>
+          <button type="button" id="btn-cancelar-objetivo-template" class="btn-secondary">Cancelar</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <div id="overlay" class="overlay hidden">
@@ -2534,6 +2667,62 @@
             <textarea id="ficha-chat-evento-descricao" rows="3"></textarea>
           </label>
           <button type="submit" id="btn-salvar-ficha-chat-evento" class="btn-primary">Adicionar acontecimento</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal "Adicionar Novo Objetivo" (aba Implantação da Ficha do cliente) —
+       usar template(s) (multi-seleção) ou criar do zero. -->
+  <div id="overlay-objetivo-adicionar" class="overlay hidden">
+    <div class="modal objetivo-adicionar-modal" role="dialog" aria-modal="true" aria-labelledby="objetivo-adicionar-titulo">
+      <div class="modal-header objetivo-adicionar-header">
+        <div>
+          <h3 id="objetivo-adicionar-titulo"><span class="objetivo-adicionar-dot" aria-hidden="true"></span>Adicionar Novo Objetivo</h3>
+          <p class="placeholder">Selecione um roteiro pré-configurado ou defina um objetivo sob medida.</p>
+        </div>
+        <button id="objetivo-adicionar-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="objetivo-adicionar-tabs" role="tablist">
+          <button type="button" id="objetivo-adicionar-tab-template" class="objetivo-adicionar-tab ativo" data-tab="template" role="tab" aria-selected="true" aria-controls="objetivo-adicionar-painel-template">
+            <span class="material-symbols-outlined" aria-hidden="true">bookmark</span>
+            Usar Template
+          </button>
+          <button type="button" id="objetivo-adicionar-tab-zero" class="objetivo-adicionar-tab" data-tab="zero" role="tab" aria-selected="false" aria-controls="objetivo-adicionar-painel-zero">
+            <span class="material-symbols-outlined" aria-hidden="true">edit</span>
+            Criar do Zero
+          </button>
+        </div>
+
+        <div id="objetivo-adicionar-painel-template" class="objetivo-adicionar-painel" role="tabpanel" aria-labelledby="objetivo-adicionar-tab-template">
+          <h4 class="objetivo-adicionar-secao-titulo">Selecionar modelo(s) pronto(s)</h4>
+          <div id="objetivo-adicionar-grid-templates" class="objetivo-adicionar-grid"></div>
+          <p id="objetivo-adicionar-templates-estado" class="placeholder objetivo-adicionar-templates-estado hidden" role="status"></p>
+          <div class="objetivo-adicionar-rodape">
+            <button type="button" id="objetivo-adicionar-aplicar-templates" class="btn-primary" disabled>
+              <span class="material-symbols-outlined" aria-hidden="true">add</span>
+              <span class="objetivo-adicionar-aplicar-texto">Aplicar template selecionado</span>
+            </button>
+          </div>
+        </div>
+
+        <form id="objetivo-adicionar-painel-zero" class="objetivo-adicionar-painel form-migracao hidden" role="tabpanel" aria-labelledby="objetivo-adicionar-tab-zero">
+          <label class="campo-migracao">
+            <span>Título do objetivo</span>
+            <input type="text" id="objetivo-adicionar-zero-titulo" maxlength="300" placeholder="Ex: Validar instalação dos primeiros 10 veículos..." required>
+          </label>
+          <label class="campo-migracao">
+            <span>Prazo estimado (dias)</span>
+            <input type="number" id="objetivo-adicionar-zero-prazo" min="1" max="3650" placeholder="Ex: 15">
+          </label>
+          <p id="objetivo-adicionar-zero-previsao" class="placeholder hidden"></p>
+          <div class="objetivo-adicionar-rodape">
+            <button type="submit" class="btn-primary">
+              <span class="material-symbols-outlined" aria-hidden="true">add</span>
+              Adicionar objetivo
+            </button>
+          </div>
         </form>
       </div>
     </div>

@@ -208,6 +208,87 @@ def contar_por_estagio(valores, padrao):
     return contagem, total
 
 
+def contar_por_etapa_implantacao(valores, padrao):
+    """Igual a `contar_por_estagio`, mas agrupando por `etapa` (marco do
+    Playbook) e só entre clientes com Implantação (`tem_implantacao`) — usado
+    pelo Dashboard de Implantação."""
+    with obter_sessao_leitura() as sessao:
+        linhas = dict(
+            sessao.query(Cliente.etapa, func.count(Cliente.id))
+            .filter(Cliente.tem_implantacao.is_(True))
+            .group_by(Cliente.etapa)
+            .all()
+        )
+    total = sum(linhas.values())
+    contagem = {v: linhas.get(v, 0) for v in valores}
+    contagem[padrao] = contagem.get(padrao, 0) + sum(c for v, c in linhas.items() if v not in valores)
+    return contagem, total
+
+
+def contar_clientes_implantacao_iniciados(data_de=None, data_ate=None):
+    """Clientes com Implantação cuja `data_entrada` cai dentro do período —
+    "Implantações iniciadas" do Dashboard de Implantação. Sem período, conta
+    todos (mesmo total de contar_clientes_implantacao)."""
+    with obter_sessao_leitura() as sessao:
+        consulta = sessao.query(func.count(Cliente.id)).filter(
+            Cliente.tem_implantacao.is_(True), Cliente.data_entrada != "",
+        )
+        if data_de:
+            consulta = consulta.filter(Cliente.data_entrada >= data_de.isoformat())
+        if data_ate:
+            consulta = consulta.filter(Cliente.data_entrada <= data_ate.isoformat())
+        return consulta.scalar() or 0
+
+
+def tempo_medio_implantacao():
+    """Dias corridos entre `data_entrada` e `concluido_em`, só dos clientes já
+    implantados (os dois campos são "AAAA-MM-DD" — ver Cliente). Clientes sem
+    uma das duas datas (implantados antes de `concluido_em` existir, ver
+    salvar_marcos_cliente em app.py) ficam fora da média, não zerados."""
+    from datetime import date
+
+    with obter_sessao_leitura() as sessao:
+        linhas = (
+            sessao.query(Cliente.data_entrada, Cliente.concluido_em)
+            .filter(Cliente.tem_implantacao.is_(True), Cliente.etapa == "concluido")
+            .all()
+        )
+    dias = []
+    for data_entrada, concluido_em in linhas:
+        if not data_entrada or not concluido_em:
+            continue
+        try:
+            d1 = date.fromisoformat(data_entrada)
+            d2 = date.fromisoformat(concluido_em)
+        except ValueError:
+            continue
+        diferenca = (d2 - d1).days
+        if diferenca >= 0:
+            dias.append(diferenca)
+    if not dias:
+        return None, 0
+    return round(sum(dias) / len(dias)), len(dias)
+
+
+def listar_clientes_implantacao_atrasados():
+    """Clientes ativos (não concluídos) com `motivo_atraso` registrado —
+    usado pelo Dashboard de Implantação. `motivo_atraso` só vale enquanto
+    preso ao marco em que foi registrado (ver salvar_motivo_atraso_cliente em
+    app.py); aqui só contamos quantos têm o campo preenchido, sem comparar
+    marco (a comparação fina já existe no front, em motivoAtrasoAtual)."""
+    with obter_sessao_leitura() as sessao:
+        total = (
+            sessao.query(func.count(Cliente.id))
+            .filter(
+                Cliente.tem_implantacao.is_(True),
+                Cliente.etapa != "concluido",
+                Cliente.motivo_atraso.isnot(None),
+            )
+            .scalar() or 0
+        )
+    return total
+
+
 def excluir_cliente(cliente_id):
     """ON DELETE CASCADE cuida de cliente_eventos/migracoes(+veiculos/modelos)/
     credenciais_cliente/tarefas sozinho; feed_posts.cliente_id é SET NULL (o

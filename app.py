@@ -1168,6 +1168,11 @@ def tela_implantacao():
     return _renderizar_shell()
 
 
+@app.route("/implantacao/dashboard")
+def tela_dashboard_implantacao():
+    return _renderizar_shell()
+
+
 @app.route("/migracao")
 def tela_migracao():
     return _renderizar_shell()
@@ -1184,10 +1189,13 @@ def tela_minha_conta():
 
 
 @app.route("/configuracoes")
-def tela_configuracoes():
+@app.route("/configuracoes/<sub>")
+def tela_configuracoes(sub=None):
     # Página só pra admin — quem não é cai de volta no Dashboard (o próprio
     # menu do avatar já esconde o link pra quem não é admin, isso aqui é só
-    # pra barrar acesso direto pela URL).
+    # pra barrar acesso direto pela URL). <sub> (admin/integracoes/templates)
+    # nem precisa ser validado aqui — mesmo racional de /ferramentas/<sub>,
+    # quem decide o conteúdo é o JS lendo o path (ver CONFIG_PAINEIS_VALIDOS).
     if not _sou_admin():
         return redirect(url_for("index"))
     return _renderizar_shell()
@@ -1840,6 +1848,41 @@ def _dados_implantacao_evento(data):
     }
 
 
+def _registrar_evento_automatico_cliente(cliente_id, titulo, origem_tipo=None, origem_id=None):
+    """Cria um acontecimento na Timeline do cliente (aba Histórico) quando algo
+    relevante é concluído automaticamente (objetivo de Implantação, marco).
+    Diferente de registrar_acao (auditoria imutável), o acontecimento fica na
+    Timeline. Eventos de objetivos guardam a origem para serem removidos ao
+    reabrir o objetivo; eventos de marcos permanecem como histórico."""
+    cliente_eventos_sql.criar_evento(cliente_id, {
+        "setor": "Implantação",
+        "titulo": titulo,
+        "descricao": "",
+        "data": time.strftime("%Y-%m-%d"),
+        "responsavel": session.get("app_usuario_responsavel") or session.get("app_usuario_nome", ""),
+        "tag": "",
+        "origem_tipo": origem_tipo,
+        "origem_id": str(origem_id) if origem_id is not None else None,
+    })
+    cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
+
+
+def _sincronizar_eventos_objetivos_pendentes(cliente_id, objetivos, titulos_legados=()):
+    return cliente_eventos_sql.sincronizar_eventos_objetivos_pendentes(
+        cliente_id,
+        objetivos,
+        titulos_legados=titulos_legados,
+    )
+
+
+def _sincronizar_eventos_marcos(cliente_id, marcos_concluidos, implantacao_concluida):
+    return cliente_eventos_sql.sincronizar_eventos_marcos(
+        cliente_id,
+        marcos_concluidos,
+        implantacao_concluida,
+    )
+
+
 def _recalcular_ultima_acao_implantacao(cliente_id):
     """Denormaliza o acontecimento mais recente (entre os 4 setores) direto no
     doc do cliente, pra a listagem não precisar de uma consulta extra à
@@ -2287,10 +2330,32 @@ def salvar_marcos_cliente(cliente_id):
 
     antes = set(doc_atual_dict.get("marcos_concluidos") or [])
     depois = set(marcos_concluidos)
-    partes = [f"{m.replace('marco-', 'Marco ')} concluído" for m in IMPLANTACAO_MARCOS if m in depois - antes]
+    marcos_recem_concluidos = [m for m in IMPLANTACAO_MARCOS if m in depois - antes]
+    partes = [f"{m.replace('marco-', 'Marco ')} concluído" for m in marcos_recem_concluidos]
     partes += [f"{m.replace('marco-', 'Marco ')} reaberto" for m in IMPLANTACAO_MARCOS if m in antes - depois]
     if etapa == "concluido" and etapa_antes != "concluido":
         partes.append("Implantação concluída (5 marcos)")
+    eventos_removidos = _sincronizar_eventos_marcos(
+        cliente_id,
+        marcos_concluidos,
+        etapa == "concluido",
+    )
+    if eventos_removidos:
+        cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
+    for m in marcos_recem_concluidos:
+        _registrar_evento_automatico_cliente(
+            cliente_id,
+            f"{m.replace('marco-', 'Marco ')} concluído",
+            origem_tipo="marco",
+            origem_id=m,
+        )
+    if etapa == "concluido" and etapa_antes != "concluido":
+        _registrar_evento_automatico_cliente(
+            cliente_id,
+            "Implantação concluída (5 marcos)",
+            origem_tipo="implantacao",
+            origem_id="concluido",
+        )
     registrar_acao(
         acao="marco_concluido", entidade_tipo="cliente", entidade_id=cliente_id,
         entidade_nome=doc_atual_dict.get("cliente", ""),
@@ -2383,6 +2448,26 @@ def salvar_objetivos_implantacao_cliente(cliente_id):
     return jsonify(ok=True, objetivos=objetivos)
 
 
+class _PrazoInvalidoError(Exception):
+    pass
+
+
+def _validar_prazo_dias(valor):
+    """Prazo em dias (objetivo ou template) — None = sem prazo definido.
+    Levanta _PrazoInvalidoError com a mensagem pronta pra resposta 400."""
+    if valor is None:
+        return None
+    if isinstance(valor, bool):
+        raise _PrazoInvalidoError("Prazo inválido.")
+    try:
+        prazo = int(valor)
+    except (TypeError, ValueError):
+        raise _PrazoInvalidoError("Prazo inválido.")
+    if prazo < 1 or prazo > 3650:
+        raise _PrazoInvalidoError("O prazo precisa ser entre 1 e 3650 dias.")
+    return prazo
+
+
 def _validar_itens_objetivo(data):
     if not isinstance(data, list) or len(data) > 100:
         return None, "Informe uma lista válida de até 100 sub-atividades."
@@ -2445,12 +2530,24 @@ def _validar_objetivos_detalhados(data):
                 return None, "Template de origem inválido."
             if origem_template_id < 1:
                 return None, "Template de origem inválido."
+        try:
+            prazo_dias = _validar_prazo_dias(item.get("prazo_dias"))
+        except _PrazoInvalidoError as e:
+            return None, str(e)
+        concluido_em = str(item.get("concluido_em") or "").strip()
+        if concluido_em:
+            try:
+                datetime.strptime(concluido_em, "%Y-%m-%d")
+            except ValueError:
+                return None, "Data de conclusão do objetivo inválida."
         objetivos.append({
             "id": item_id,
             "nome": nome,
             "feito": item.get("feito") is True,
             "origem_template_id": origem_template_id,
             "itens": itens,
+            "prazo_dias": prazo_dias,
+            "concluido_em": concluido_em,
         })
     return objetivos, None
 
@@ -2469,7 +2566,13 @@ def api_objetivos_templates():
     if not nome or len(nome) > 300 or erro:
         return jsonify(ok=False, error=erro or "Informe um nome de até 300 caracteres."), 400
     try:
-        template = objetivos_sql.salvar_template(nome, itens)
+        prazo_dias = _validar_prazo_dias(data.get("prazo_dias"))
+    except _PrazoInvalidoError as e:
+        return jsonify(ok=False, error=str(e)), 400
+    try:
+        template = objetivos_sql.salvar_template(nome, itens, prazo_dias=prazo_dias)
+    except objetivos_sql.NomeDuplicadoError:
+        return jsonify(ok=False, error="Já existe um template com esse nome."), 409
     except objetivos_sql.IdentificadorInvalidoError:
         return jsonify(ok=False, error="Sub-atividade inválida para um novo template."), 400
     registrar_acao(
@@ -2507,9 +2610,15 @@ def api_objetivos_template(template_id):
     if not nome or len(nome) > 300 or erro:
         return jsonify(ok=False, error=erro or "Informe um nome de até 300 caracteres."), 400
     try:
-        template = objetivos_sql.salvar_template(nome, itens, template_id=template_id)
+        prazo_dias = _validar_prazo_dias(data.get("prazo_dias"))
+    except _PrazoInvalidoError as e:
+        return jsonify(ok=False, error=str(e)), 400
+    try:
+        template = objetivos_sql.salvar_template(nome, itens, template_id=template_id, prazo_dias=prazo_dias)
     except objetivos_sql.RegistroNaoEncontradoError:
         return jsonify(ok=False, error="Template não encontrado."), 404
+    except objetivos_sql.NomeDuplicadoError:
+        return jsonify(ok=False, error="Já existe um template com esse nome."), 409
     except objetivos_sql.IdentificadorInvalidoError:
         return jsonify(ok=False, error="Uma sub-atividade informada não pertence a este template."), 400
     registrar_acao(
@@ -2533,17 +2642,45 @@ def api_objetivos_implantacao_detalhados(cliente_id):
     if not cliente.get("tem_implantacao", True):
         return jsonify(ok=False, error="Esse cliente não possui Implantação."), 400
     if request.method == "GET":
-        return jsonify(ok=True, objetivos=objetivos_sql.listar_objetivos(cliente_id))
+        objetivos = objetivos_sql.listar_objetivos(cliente_id)
+        if _sincronizar_eventos_objetivos_pendentes(cliente_id, objetivos):
+            cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
+        return jsonify(ok=True, objetivos=objetivos)
     if not _posso_operar():
         return jsonify(ok=False, error="Perfil de visualização não pode alterar objetivos."), 403
     data = request.get_json(force=True) or {}
     objetivos, erro = _validar_objetivos_detalhados(data)
     if erro:
         return jsonify(ok=False, error=erro), 400
+    objetivos_antes = {str(o["id"]): o for o in objetivos_sql.listar_objetivos(cliente_id)}
     try:
         salvos = objetivos_sql.salvar_objetivos(cliente_id, objetivos)
     except objetivos_sql.IdentificadorInvalidoError:
         return jsonify(ok=False, error="Um identificador informado não pertence a este objetivo."), 400
+    objetivos_depois = {str(o["id"]): o for o in salvos}
+    titulos_legados = [
+        f"Objetivo concluído: {anterior['nome']}"
+        for objetivo_id, anterior in objetivos_antes.items()
+        if anterior["feito"]
+        and (atual := objetivos_depois.get(objetivo_id)) is not None
+        and not atual["feito"]
+        and anterior["nome"] != atual["nome"]
+    ]
+    timeline_alterada = _sincronizar_eventos_objetivos_pendentes(
+        cliente_id,
+        salvos,
+        titulos_legados=titulos_legados,
+    )
+    for objetivo in salvos:
+        if objetivo["feito"] and not objetivos_antes.get(str(objetivo["id"]), {}).get("feito"):
+            _registrar_evento_automatico_cliente(
+                cliente_id,
+                f"Objetivo concluído: {objetivo['nome']}",
+                origem_tipo="objetivo",
+                origem_id=objetivo["id"],
+            )
+    if timeline_alterada:
+        cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
     registrar_acao(
         acao="editar",
         entidade_tipo="cliente",
@@ -3771,7 +3908,16 @@ def obter_ficha_cliente(idcentral):
     implantacao = clientes_sql.buscar_cliente_por_idcentral(idcentral)
     if not implantacao:
         return jsonify(ok=False, error="Nenhum cliente encontrado com esse IdCentral."), 404
-    implantacao["objetivos_implantacao_detalhados"] = objetivos_sql.listar_objetivos(implantacao["id"])
+    objetivos = objetivos_sql.listar_objetivos(implantacao["id"])
+    eventos_objetivos_removidos = _sincronizar_eventos_objetivos_pendentes(implantacao["id"], objetivos)
+    eventos_marcos_removidos = _sincronizar_eventos_marcos(
+        implantacao["id"],
+        implantacao.get("marcos_concluidos") or [],
+        implantacao.get("etapa") == "concluido",
+    )
+    if eventos_objetivos_removidos or eventos_marcos_removidos:
+        cliente_eventos_sql.recalcular_ultima_acao(implantacao["id"])
+    implantacao["objetivos_implantacao_detalhados"] = objetivos
 
     # WhatsApp do CS e do Comercial: usa a FK quando resolvida (sem precisar
     # casar por nome); cai pro casamento por nome só quando não tem FK (CS
@@ -4300,6 +4446,61 @@ def _carregar_dashboard():
         migracao_ativos=migracao_ativos,
         por_estagio=por_estagio,
         migracoes_em_andamento=migracoes_em_andamento,
+    )
+
+
+def _periodo_dashboard_implantacao():
+    """Lê ?de=AAAA-MM-DD&ate=AAAA-MM-DD da querystring — o front monta esse
+    par a partir do seletor de período (mês/trimestre/ano/custom); aqui só
+    valida o formato. Sem os dois, o dashboard mostra tudo (sem filtro)."""
+    def _parse(valor):
+        valor = (valor or "").strip()
+        if not valor:
+            return None
+        try:
+            return datetime.strptime(valor, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    return _parse(request.args.get("de")), _parse(request.args.get("ate"))
+
+
+@app.route("/api/dashboard-implantacao")
+def dashboard_implantacao_indicadores():
+    data_de, data_ate = _periodo_dashboard_implantacao()
+    # Cache só pra consulta sem período (a mais comum, abertura da tela) —
+    # igual racional do /api/dashboard, mas period-aware não vale a pena
+    # cachear (chave explodiria em combinações). Qualquer escrita em /api/ já
+    # invalida o cache de qualquer forma (ver _cache_api_invalidar).
+    if data_de is None and data_ate is None:
+        return jsonify(**_cache_api_obter("dashboard_implantacao", _carregar_dashboard_implantacao, ttl=300))
+    return jsonify(**_carregar_dashboard_implantacao(data_de, data_ate))
+
+
+def _carregar_dashboard_implantacao(data_de=None, data_ate=None):
+    total_implantacao, implantacao_ativos = clientes_sql.contar_clientes_implantacao()
+    por_etapa, _ = clientes_sql.contar_por_etapa_implantacao(IMPLANTACAO_ETAPAS, IMPLANTACAO_ETAPA_PADRAO)
+    clientes_atrasados = clientes_sql.listar_clientes_implantacao_atrasados()
+    implantacoes_iniciadas_periodo = clientes_sql.contar_clientes_implantacao_iniciados(data_de, data_ate)
+    tempo_medio_dias, tempo_medio_amostra = clientes_sql.tempo_medio_implantacao()
+    objetivos = objetivos_sql.estatisticas_dashboard_implantacao(data_de, data_ate)
+
+    return dict(
+        ok=True,
+        periodo_de=data_de.isoformat() if data_de else None,
+        periodo_ate=data_ate.isoformat() if data_ate else None,
+        total_implantacao=total_implantacao,
+        implantacao_ativos=implantacao_ativos,
+        # "Implantações concluídas" pelos MARCOS (regra oficial de todo o
+        # sistema, ver Cliente.etapa) — não confundir com
+        # implantacoes_concluidas_por_objetivos (métrica nova, só deste
+        # dashboard, calculada em objetivos_sql.estatisticas_dashboard_implantacao).
+        implantacao_concluidos=total_implantacao - implantacao_ativos,
+        implantacoes_iniciadas_periodo=implantacoes_iniciadas_periodo,
+        tempo_medio_implantacao_dias=tempo_medio_dias,
+        tempo_medio_implantacao_amostra=tempo_medio_amostra,
+        por_etapa=por_etapa,
+        clientes_atrasados=clientes_atrasados,
+        **objetivos,
     )
 
 

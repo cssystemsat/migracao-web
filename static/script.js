@@ -1913,8 +1913,19 @@ let objetivosImplantacaoCliente = null;
 let objetivosImplantacaoRascunho = [];
 let objetivosImplantacaoAlterado = false;
 let objetivosImplantacaoSalvando = false;
+const objetivosImplantacaoEmEdicao = new Set();
 let objetivosTemplatesCache = null;
 let objetivosTemplatesRequisicao = null;
+const overlayAdicionarObjetivo = el("overlay-objetivo-adicionar");
+const gridTemplatesAdicionarObjetivo = el("objetivo-adicionar-grid-templates");
+const estadoTemplatesAdicionarObjetivo = el("objetivo-adicionar-templates-estado");
+const botaoAplicarTemplatesAdicionarObjetivo = el("objetivo-adicionar-aplicar-templates");
+const formularioObjetivoPersonalizado = el("objetivo-adicionar-painel-zero");
+const inputNomeObjetivoPersonalizado = el("objetivo-adicionar-zero-titulo");
+const inputPrazoObjetivoPersonalizado = el("objetivo-adicionar-zero-prazo");
+const previsaoObjetivoPersonalizado = el("objetivo-adicionar-zero-previsao");
+let objetivosAdicionarTemplatesSelecionados = new Set();
+let objetivoAdicionarElementoOrigem = null;
 
 function iniciarRascunhoObjetivosImplantacao(cliente) {
   if (!cliente) return;
@@ -1933,6 +1944,7 @@ function iniciarRascunhoObjetivosImplantacao(cliente) {
       origem_template_id: null,
       itens: [],
     }));
+  objetivosImplantacaoEmEdicao.clear();
   objetivosImplantacaoAlterado = false;
 }
 
@@ -2450,6 +2462,7 @@ btnSalvarImplantacaoMarcos.addEventListener("click", async () => {
     const data = await parseJsonResponse(r);
     if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
 
+    invalidarCacheFichaTimeline(cliente.id);
     // Rascunho salvo — sem isso o recarregar da Ficha abaixo pediria pra
     // "descartar alterações".
     marcosRascunhoAlterado = false;
@@ -17145,6 +17158,11 @@ const configPainelAdmin = el("config-painel-admin");
 const configPainelIntegracoes = el("config-painel-integracoes");
 const configPainelTemplates = el("config-painel-templates");
 
+// Painéis de Configurações navegáveis por URL (/configuracoes/<sub>) — mesmo
+// padrão de prefixo usado por Ferramentas Auxiliares (ver FERRAMENTAS_SUBTELAS
+// e resolverCaminho). "admin" é o padrão, sem sufixo na URL.
+const CONFIG_PAINEIS_VALIDOS = ["admin", "integracoes", "templates"];
+
 function mostrarConfigPainel(painel) {
   configNavAdmin.classList.toggle("ativo", painel === "admin");
   configNavIntegracoes.classList.toggle("ativo", painel === "integracoes");
@@ -17153,28 +17171,49 @@ function mostrarConfigPainel(painel) {
   configPainelIntegracoes.classList.toggle("hidden", painel !== "integracoes");
   configPainelTemplates.classList.toggle("hidden", painel !== "templates");
   if (painel === "admin") { resetFormUsuario(); mostrarErroUsuarios(""); carregarAppUsuarios(); }
+  if (painel === "templates") carregarTemplatesObjetivosAdmin();
 }
 if (configNavAdmin) {
-  configNavAdmin.addEventListener("click", () => mostrarConfigPainel("admin"));
-  configNavIntegracoes.addEventListener("click", () => mostrarConfigPainel("integracoes"));
-  configNavTemplates.addEventListener("click", () => {
-    mostrarConfigPainel("templates");
-    carregarTemplatesObjetivosAdmin();
-  });
+  configNavAdmin.addEventListener("click", () => irParaTela("configuracoes", { sub: "admin" }));
+  configNavIntegracoes.addEventListener("click", () => irParaTela("configuracoes", { sub: "integracoes" }));
+  configNavTemplates.addEventListener("click", () => irParaTela("configuracoes", { sub: "templates" }));
 }
 
 const formObjetivoTemplate = el("form-objetivo-template");
 const inputObjetivoTemplateNome = el("objetivo-template-nome");
+const inputObjetivoTemplatePrazo = el("objetivo-template-prazo");
 const listaObjetivoTemplateItens = el("objetivo-template-itens");
 const listaObjetivosTemplates = el("objetivos-templates-lista");
 const objetivoTemplateMensagem = el("objetivos-templates-mensagem");
 const objetivoTemplateFormTitulo = el("objetivo-template-form-titulo");
+const overlayObjetivoTemplate = el("overlay-objetivo-template");
+const objetivoTemplateFormMensagem = el("objetivo-template-form-mensagem");
+const botaoCriarObjetivoTemplate = el("btn-criar-objetivo-template");
 let objetivoTemplateEditandoId = null;
+let elementoFocoAntesModalTemplate = null;
 
 function mostrarMensagemTemplatesObjetivos(texto, erro = false) {
   objetivoTemplateMensagem.textContent = texto;
   objetivoTemplateMensagem.classList.toggle("hidden", !texto);
   objetivoTemplateMensagem.classList.toggle("erro", erro);
+}
+
+function mostrarErroFormObjetivoTemplate(texto) {
+  objetivoTemplateFormMensagem.textContent = texto;
+  objetivoTemplateFormMensagem.classList.toggle("hidden", !texto);
+}
+
+function abrirModalObjetivoTemplate(elementoOrigem = document.activeElement) {
+  elementoFocoAntesModalTemplate = elementoOrigem;
+  overlayObjetivoTemplate.classList.remove("hidden");
+  inputObjetivoTemplateNome.focus();
+}
+
+function fecharModalObjetivoTemplate() {
+  overlayObjetivoTemplate.classList.add("hidden");
+  if (elementoFocoAntesModalTemplate?.isConnected) elementoFocoAntesModalTemplate.focus();
+  else botaoCriarObjetivoTemplate.focus();
+  elementoFocoAntesModalTemplate = null;
 }
 
 function adicionarLinhaEditorObjetivo(container, item = {}) {
@@ -17236,18 +17275,20 @@ function limparFormObjetivoTemplate() {
   listaObjetivoTemplateItens.replaceChildren();
   objetivoTemplateFormTitulo.textContent = "Criar template";
   el("btn-salvar-objetivo-template").textContent = "Salvar template";
-  el("btn-cancelar-objetivo-template").classList.add("hidden");
+  mostrarErroFormObjetivoTemplate("");
+  fecharModalObjetivoTemplate();
 }
 
-function editarTemplateObjetivo(template) {
+function editarTemplateObjetivo(template, elementoOrigem) {
   objetivoTemplateEditandoId = template.id;
   inputObjetivoTemplateNome.value = template.nome;
+  inputObjetivoTemplatePrazo.value = template.prazo_dias ?? "";
   listaObjetivoTemplateItens.replaceChildren();
   template.itens.forEach((item) => adicionarLinhaEditorObjetivo(listaObjetivoTemplateItens, item));
   objetivoTemplateFormTitulo.textContent = "Editar template";
   el("btn-salvar-objetivo-template").textContent = "Salvar alterações";
-  el("btn-cancelar-objetivo-template").classList.remove("hidden");
-  formObjetivoTemplate.scrollIntoView({ behavior: "smooth", block: "start" });
+  mostrarErroFormObjetivoTemplate("");
+  abrirModalObjetivoTemplate(elementoOrigem);
 }
 
 function renderizarTemplatesObjetivosAdmin(templates) {
@@ -17266,12 +17307,18 @@ function renderizarTemplatesObjetivosAdmin(templates) {
     cabecalho.className = "objetivo-template-card-cabecalho";
     const nome = document.createElement("strong");
     nome.textContent = template.nome;
+    if (template.prazo_dias) {
+      const prazoChip = document.createElement("span");
+      prazoChip.className = "objetivo-template-prazo-chip";
+      prazoChip.textContent = `Prazo padrão: ${template.prazo_dias} dia${template.prazo_dias === 1 ? "" : "s"}`;
+      nome.appendChild(prazoChip);
+    }
     const acoes = document.createElement("div");
     const editar = document.createElement("button");
     editar.type = "button";
     editar.className = "btn-secondary";
     editar.textContent = "Editar";
-    editar.addEventListener("click", () => editarTemplateObjetivo(template));
+    editar.addEventListener("click", (event) => editarTemplateObjetivo(template, event.currentTarget));
     const excluir = document.createElement("button");
     excluir.type = "button";
     excluir.className = "btn-secondary";
@@ -17282,9 +17329,11 @@ function renderizarTemplatesObjetivosAdmin(templates) {
         const response = await fetch(`/api/objetivos-templates/${template.id}`, { method: "DELETE" });
         const data = await parseJsonResponse(response);
         if (!data.ok) return mostrarMensagemTemplatesObjetivos(data.error || "Falha ao excluir template.", true);
-        objetivosTemplatesCache = null;
+        // Atualiza a lista local em vez de buscar tudo de novo no servidor —
+        // evita o "Carregando templates..." e o round-trip extra a cada ação.
+        objetivosTemplatesCache = (objetivosTemplatesCache || []).filter((t) => t.id !== template.id);
         if (objetivoTemplateEditandoId === template.id) limparFormObjetivoTemplate();
-        await carregarTemplatesObjetivosAdmin();
+        renderizarTemplatesObjetivosAdmin(objetivosTemplatesCache);
         mostrarMensagemTemplatesObjetivos("Template excluído.");
       } catch (error) {
         mostrarMensagemTemplatesObjetivos(String(error), true);
@@ -17330,30 +17379,60 @@ el("btn-objetivo-template-item").addEventListener("click", () => {
   adicionarLinhaEditorObjetivo(listaObjetivoTemplateItens);
   listaObjetivoTemplateItens.lastElementChild.querySelector("input").focus();
 });
+botaoCriarObjetivoTemplate.addEventListener("click", () => {
+  limparFormObjetivoTemplate();
+  mostrarMensagemTemplatesObjetivos("");
+  abrirModalObjetivoTemplate(botaoCriarObjetivoTemplate);
+});
+el("btn-fechar-objetivo-template").addEventListener("click", limparFormObjetivoTemplate);
 el("btn-cancelar-objetivo-template").addEventListener("click", limparFormObjetivoTemplate);
+overlayObjetivoTemplate.addEventListener("click", (event) => {
+  if (event.target === overlayObjetivoTemplate) limparFormObjetivoTemplate();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !overlayObjetivoTemplate.classList.contains("hidden")) {
+    limparFormObjetivoTemplate();
+  }
+});
 formObjetivoTemplate.addEventListener("submit", async (event) => {
   event.preventDefault();
+  mostrarErroFormObjetivoTemplate("");
   const itens = coletarItensEditorObjetivo(listaObjetivoTemplateItens);
   if (itens.some((item) => !item.texto)) {
-    mostrarMensagemTemplatesObjetivos("Preencha ou remova as sub-atividades vazias.", true);
+    mostrarErroFormObjetivoTemplate("Preencha ou remova as sub-atividades vazias.");
     return;
   }
   const templateId = objetivoTemplateEditandoId;
+  const nomeDigitado = inputObjetivoTemplateNome.value.trim();
+  const duplicado = (objetivosTemplatesCache || []).some(
+    (t) => t.id !== templateId && t.nome.trim().toLowerCase() === nomeDigitado.toLowerCase(),
+  );
+  if (duplicado) {
+    mostrarErroFormObjetivoTemplate("Já existe um template com esse nome.");
+    return;
+  }
+  const prazoDigitado = inputObjetivoTemplatePrazo.value ? parseInt(inputObjetivoTemplatePrazo.value, 10) : null;
   const url = templateId ? `/api/objetivos-templates/${templateId}` : "/api/objetivos-templates";
   try {
     const response = await fetch(url, {
       method: templateId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nome: inputObjetivoTemplateNome.value.trim(), itens }),
+      body: JSON.stringify({ nome: nomeDigitado, itens, prazo_dias: prazoDigitado }),
     });
     const data = await parseJsonResponse(response);
-    if (!data.ok) return mostrarMensagemTemplatesObjetivos(data.error || "Falha ao salvar template.", true);
-    objetivosTemplatesCache = null;
+    if (!data.ok) return mostrarErroFormObjetivoTemplate(data.error || "Falha ao salvar template.");
+    // Atualiza a lista local com o template que voltou do servidor, em vez
+    // de buscar tudo de novo — era o que deixava a tela lenta/travada a cada
+    // salvamento (fetch completo + "Carregando templates..." + rebuild).
+    objetivosTemplatesCache = templateId
+      ? (objetivosTemplatesCache || []).map((t) => (t.id === data.template.id ? data.template : t))
+      : [...(objetivosTemplatesCache || []), data.template];
     limparFormObjetivoTemplate();
-    await carregarTemplatesObjetivosAdmin();
+    renderizarTemplatesObjetivosAdmin(objetivosTemplatesCache);
     mostrarMensagemTemplatesObjetivos(templateId ? "Template atualizado." : "Template criado.");
+    botaoCriarObjetivoTemplate.focus();
   } catch (error) {
-    mostrarMensagemTemplatesObjetivos(String(error), true);
+    mostrarErroFormObjetivoTemplate(String(error));
   }
 });
 
@@ -17894,6 +17973,7 @@ Object.entries(SIDEBAR_GRUPOS).forEach(([nome, grupo]) => {
 // dados — nenhuma lógica de carregamento foi duplicada ou reescrita aqui.
 const TELAS_NAV = {
   dashboard: el("tela-dashboard"),
+  "dashboard-implantacao": el("tela-dashboard-implantacao"),
   implantacao: el("tela-saida-wrapper"),
   migracao: el("tela-saida-wrapper"),
   ferramentas: el("tela-ferramentas"),
@@ -17905,8 +17985,18 @@ const TELAS_NAV = {
 const NAV_BOTOES = {
   dashboard: el("nav-dashboard"),
   feed: el("nav-feed"),
+  "dashboard-implantacao": el("nav-sub-dashboard-implantacao"),
   implantacao: el("nav-sub-implantacao"),
   migracao: el("nav-sub-migracao"),
+};
+// Telas que pertencem ao mesmo grupo do sidebar, mas não têm o mesmo nome do
+// grupo (ex.: "dashboard-implantacao" mora dentro do grupo "implantacao") —
+// usado só pra manter o submenu certo expandido/ativo (ver SIDEBAR_GRUPOS).
+const TELA_PARA_GRUPO_SIDEBAR = {
+  "dashboard-implantacao": "implantacao",
+  implantacao: "implantacao",
+  migracao: "migracao",
+  ferramentas: "ferramentas",
 };
 const NAV_BOTOES_FERRAMENTAS = {
   overview: el("nav-tool-ferramentas"),
@@ -17925,6 +18015,7 @@ const sidebarCliente = el("sidebar-cliente");
 const CAMINHO_POR_TELA = {
   dashboard: "/",
   feed: "/feed",
+  "dashboard-implantacao": "/implantacao/dashboard",
   implantacao: "/implantacao",
   migracao: "/migracao",
   ferramentas: "/ferramentas",
@@ -17934,6 +18025,7 @@ const CAMINHO_POR_TELA = {
 const TELA_POR_CAMINHO_RAIZ = {
   "/": "dashboard",
   "/feed": "feed",
+  "/implantacao/dashboard": "dashboard-implantacao",
   "/implantacao": "implantacao",
   "/migracao": "migracao",
   "/ferramentas": "ferramentas",
@@ -18011,6 +18103,8 @@ function resolverCaminho(caminho) {
   }
   const mFerramentas = caminho.match(/^\/ferramentas\/([^/]+)$/);
   if (mFerramentas && FERRAMENTAS_SUBTELAS[mFerramentas[1]]) return { tela: "ferramentas", sub: mFerramentas[1] };
+  const mConfig = caminho.match(/^\/configuracoes\/([^/]+)$/);
+  if (mConfig && CONFIG_PAINEIS_VALIDOS.includes(mConfig[1])) return { tela: "configuracoes", sub: mConfig[1] };
   return { tela: TELA_POR_CAMINHO_RAIZ[caminho] || "dashboard" };
 }
 
@@ -18259,6 +18353,7 @@ function irParaTela(tela, opcoes) {
   if (tela === "configuracoes" && USUARIO_PERFIL_ATUAL !== "adm") tela = "dashboard";
 
   const novoSub = tela === "ferramentas" && FERRAMENTAS_SUBTELAS[opcoes.sub] ? opcoes.sub : null;
+  const novoSubConfig = tela === "configuracoes" && CONFIG_PAINEIS_VALIDOS.includes(opcoes.sub) ? opcoes.sub : "admin";
   const abaFichaSolicitada = tela === "ficha"
     ? (FICHA_SEGMENTO_POR_ABA[opcoes.sub] ? opcoes.sub : (fichaAbaAtual || "geral"))
     : null;
@@ -18311,7 +18406,7 @@ function irParaTela(tela, opcoes) {
     if (ativo) botao.setAttribute("aria-current", "page"); else botao.removeAttribute("aria-current");
   });
   Object.entries(SIDEBAR_GRUPOS).forEach(([nome, grupo]) => {
-    const ativo = nome === tela;
+    const ativo = nome === (TELA_PARA_GRUPO_SIDEBAR[tela] || tela);
     grupo.botao.classList.toggle("ativo", ativo);
     if (ativo) definirGrupoSidebar(nome, true, true);
   });
@@ -18326,12 +18421,14 @@ function irParaTela(tela, opcoes) {
   if (!opcoes.semHistorico) {
     const caminho = naFicha
       ? caminhoFichaCliente(opcoes.idcentral, abaFichaSolicitada)
-      : (novoSub ? `/ferramentas/${novoSub}` : (CAMINHO_POR_TELA[tela] || "/"));
+      : novoSub ? `/ferramentas/${novoSub}`
+      : tela === "configuracoes" && novoSubConfig !== "admin" ? `/configuracoes/${novoSubConfig}`
+      : (CAMINHO_POR_TELA[tela] || "/");
     if (window.location.pathname !== caminho) {
       history.pushState({
         tela,
         idcentral: opcoes.idcentral,
-        sub: naFicha ? abaFichaSolicitada : novoSub,
+        sub: naFicha ? abaFichaSolicitada : (tela === "configuracoes" ? novoSubConfig : novoSub),
         origem: naFicha ? fichaOrigem : undefined,
         indiceHistoricoApp: indiceHistoricoApp + 1,
       }, "", caminho);
@@ -18355,10 +18452,11 @@ function irParaTela(tela, opcoes) {
   if (tela === "implantacao") { atualizarSaidaHeader("Controle de Implantação", false); carregarImplantacaoClientes(); }
   if (tela === "migracao") { atualizarSaidaHeader("Controle de Migração", false); carregarClientesMigracao(); }
   if (tela === "dashboard") carregarDashboardNovo();
+  if (tela === "dashboard-implantacao") carregarDashboardImplantacao();
   if (tela === "feed") carregarFeed();
   if (tela === "ficha") carregarFichaCliente(opcoes.idcentral, abaFichaSolicitada);
   if (tela === "minha-conta") { carregarMinhaConta(); carregarMinhasTarefas(); }
-  if (tela === "configuracoes") mostrarConfigPainel("admin");
+  if (tela === "configuracoes") mostrarConfigPainel(novoSubConfig);
   if (entrandoNaImportacaoConsulta) { atualizarSaidaHeader("Saída", true); mostrarPlaceholder("Autentique-se e escolha uma consulta ou importação."); }
 }
 
@@ -18713,6 +18811,7 @@ el("topbar-central-crc").addEventListener("click", () => {
   irParaTela("dashboard");
 });
 NAV_BOTOES.dashboard.addEventListener("click", () => irParaTela("dashboard"));
+NAV_BOTOES["dashboard-implantacao"].addEventListener("click", () => irParaTela("dashboard-implantacao"));
 NAV_BOTOES.implantacao.addEventListener("click", () => irParaTela("implantacao"));
 NAV_BOTOES.migracao.addEventListener("click", () => irParaTela("migracao"));
 
@@ -19019,6 +19118,7 @@ function podeSairDaAbaFicha() {
 });
 
 el("card-ir-implantacao").addEventListener("click", () => irParaTela("implantacao"));
+el("btn-di-ir-controle").addEventListener("click", () => irParaTela("implantacao"));
 el("card-ir-migracao").addEventListener("click", () => irParaTela("migracao"));
 el("card-ir-ferramentas").addEventListener("click", () => irParaTela("ferramentas"));
 
@@ -19049,6 +19149,239 @@ async function carregarDashboardNovo() {
     // Silencioso — os tiles ficam com "–" e o resto do app continua normal.
   }
 }
+
+// --- Dashboard de Implantação (sub-tela do grupo Implantação) --- KPIs só de
+// Implantação, incluindo os Objetivos de Implantação (prazo/conclusão
+// independentes das sub-atividades — ver objetivos_sql.estatisticas_dashboard_implantacao
+// em app.py). "Implantações concluídas (por objetivos)" é uma métrica NOVA,
+// só deste dashboard — Cliente.etapa/concluido_em (marcos) continuam sendo a
+// fonte oficial em todo o resto do sistema (decisão explícita, ver
+// docs/HISTORICO_DECISOES.md).
+let diPeriodoSelecionado = { de: null, ate: null };
+
+function diCalcularPeriodo(tipo) {
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const hoje = new Date();
+  const y = hoje.getFullYear();
+  const m = hoje.getMonth();
+  if (tipo === "mes") return { de: fmt(new Date(y, m, 1)), ate: fmt(new Date(y, m + 1, 0)) };
+  if (tipo === "trimestre") {
+    const inicioTrimestre = Math.floor(m / 3) * 3;
+    return { de: fmt(new Date(y, inicioTrimestre, 1)), ate: fmt(new Date(y, inicioTrimestre + 3, 0)) };
+  }
+  if (tipo === "ano") return { de: fmt(new Date(y, 0, 1)), ate: fmt(new Date(y, 11, 31)) };
+  return { de: null, ate: null };
+}
+
+function diRenderRanking(container, lista, vazioTexto, mostrarTempo) {
+  container.innerHTML = "";
+  if (!lista || !lista.length) {
+    const vazio = document.createElement("div");
+    vazio.className = "di-ranking-vazio";
+    const icone = document.createElement("span");
+    icone.className = "material-symbols-outlined";
+    icone.textContent = mostrarTempo ? "schedule" : "checklist";
+    icone.setAttribute("aria-hidden", "true");
+    const texto = document.createElement("span");
+    texto.textContent = vazioTexto;
+    vazio.append(icone, texto);
+    container.appendChild(vazio);
+    return;
+  }
+  const maiorTempo = mostrarTempo ? Math.max(...lista.map((item) => item.tempo_medio_dias || 0), 1) : 0;
+  lista.forEach((item, indice) => {
+    const linha = document.createElement("div");
+    linha.className = "di-ranking-linha";
+
+    const posicao = document.createElement("span");
+    posicao.className = "di-ranking-posicao";
+    posicao.textContent = `#${indice + 1}`;
+
+    const corpo = document.createElement("span");
+    corpo.className = "di-ranking-corpo";
+    const nome = document.createElement("span");
+    nome.className = "di-ranking-nome";
+    nome.textContent = item.nome;
+    const barraWrap = document.createElement("span");
+    barraWrap.className = "di-ranking-barra";
+    const barraFill = document.createElement("span");
+    barraFill.className = "di-ranking-barra-fill";
+    const pct = item.pct_conclusao ?? 0;
+    if (mostrarTempo) {
+      barraFill.style.width = `${Math.round((item.tempo_medio_dias || 0) / maiorTempo * 100)}%`;
+      barraFill.classList.add("tempo");
+    } else {
+      barraFill.style.width = `${pct}%`;
+      barraFill.classList.toggle("completa", pct >= 100);
+    }
+    barraWrap.appendChild(barraFill);
+    const meta = document.createElement("span");
+    meta.className = "di-ranking-meta";
+    const usoSpan = document.createElement("span");
+    usoSpan.textContent = `Usado ${item.usados}x`;
+    meta.appendChild(usoSpan);
+    if (item.atrasados) {
+      const chipAtraso = document.createElement("span");
+      chipAtraso.className = "di-ranking-chip atraso";
+      chipAtraso.textContent = `${item.atrasados} atrasado${item.atrasados === 1 ? "" : "s"}`;
+      meta.appendChild(chipAtraso);
+    }
+    corpo.append(nome, barraWrap, meta);
+
+    const valor = document.createElement("span");
+    valor.className = "di-ranking-valor";
+    valor.textContent = mostrarTempo
+      ? `${item.tempo_medio_dias} dias`
+      : `${pct}%`;
+    const valorSub = document.createElement("span");
+    valorSub.className = "di-ranking-valor-sub";
+    valorSub.textContent = `${item.concluidos}/${item.usados} concluídos`;
+    const valorWrap = document.createElement("span");
+    valorWrap.className = "di-ranking-valor-wrap";
+    valorWrap.append(valor, valorSub);
+
+    linha.append(posicao, corpo, valorWrap);
+    container.appendChild(linha);
+  });
+}
+
+const DI_FAIXAS_ENVELHECIMENTO = [
+  { label: "Até 15 dias", min: 0, max: 15 },
+  { label: "16 a 30 dias", min: 16, max: 30 },
+  { label: "31 a 60 dias", min: 31, max: 60 },
+  { label: "61 a 90 dias", min: 61, max: 90 },
+  { label: "Mais de 90 dias", min: 91, max: Infinity },
+];
+
+// Faixas de tempo em implantação dos clientes ATIVOS — são só classificação
+// por tempo, não indicam atraso por si (ver docs/DOCUMENTACAO_FUNCIONAL.md).
+function renderDiEnvelhecimentoCarteira(clientes) {
+  const ativos = clientes.filter((c) => c.etapa !== "concluido" && c.data_entrada);
+  const card = document.createElement("div");
+  card.className = "insight-card";
+  const h = document.createElement("h3");
+  h.textContent = "Envelhecimento da carteira (clientes ativos)";
+  card.appendChild(h);
+  if (!ativos.length) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhum cliente ativo com data de início registrada.";
+    card.appendChild(p);
+    return card;
+  }
+  const linhas = document.createElement("div");
+  linhas.className = "di-ranking";
+  DI_FAIXAS_ENVELHECIMENTO.forEach((faixa) => {
+    const doFaixa = ativos.filter((c) => {
+      const dias = diasDesdeEntrada(c.data_entrada) || 0;
+      return dias >= faixa.min && dias <= faixa.max;
+    });
+    const linha = document.createElement("div");
+    linha.className = "di-ranking-linha";
+    const label = document.createElement("span");
+    label.className = "di-ranking-nome";
+    label.textContent = faixa.label;
+    const barraWrap = document.createElement("span");
+    barraWrap.className = "di-ranking-barra";
+    const barraFill = document.createElement("span");
+    barraFill.className = "di-ranking-barra-fill";
+    barraFill.style.width = `${ativos.length ? (doFaixa.length / ativos.length) * 100 : 0}%`;
+    barraWrap.appendChild(barraFill);
+    const valor = document.createElement("span");
+    valor.className = "di-ranking-valor";
+    valor.textContent = `${doFaixa.length} cliente${doFaixa.length === 1 ? "" : "s"}`;
+    linha.append(label, barraWrap, valor);
+    linhas.appendChild(linha);
+  });
+  card.appendChild(linhas);
+  return card;
+}
+
+async function carregarDashboardImplantacao() {
+  try {
+    const params = new URLSearchParams();
+    if (diPeriodoSelecionado.de) params.set("de", diPeriodoSelecionado.de);
+    if (diPeriodoSelecionado.ate) params.set("ate", diPeriodoSelecionado.ate);
+    const qs = params.toString();
+    const r = await fetch(`/api/dashboard-implantacao${qs ? `?${qs}` : ""}`);
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return;
+
+    el("tile-di-ativos").textContent = data.implantacao_ativos ?? "–";
+    el("tile-di-iniciadas").textContent = data.implantacoes_iniciadas_periodo ?? "–";
+    el("tile-di-concluidos").textContent = data.implantacao_concluidos ?? "–";
+    el("tile-di-sem-objetivo").textContent = data.clientes_sem_objetivo ?? "–";
+    el("tile-di-objetivos-atrasados").textContent = data.total_objetivos_atrasados ?? "–";
+    el("tile-di-concluidas-objetivos").textContent = data.implantacoes_concluidas_por_objetivos ?? "–";
+
+    el("tile-di-tempo-medio-implantacao").textContent = data.tempo_medio_implantacao_dias != null
+      ? `${data.tempo_medio_implantacao_dias} dias` : "–";
+    el("tile-di-tempo-medio-implantacao-amostra").textContent = data.tempo_medio_implantacao_amostra
+      ? `${data.tempo_medio_implantacao_amostra} cliente${data.tempo_medio_implantacao_amostra === 1 ? "" : "s"}` : "";
+
+    el("di-objetivos-concluidos").textContent = `${data.total_objetivos_concluidos} de ${data.total_objetivos}`;
+    el("di-objetivos-tempo-medio").textContent = data.tempo_medio_conclusao_objetivo_dias != null
+      ? `${data.tempo_medio_conclusao_objetivo_dias} dias` : "–";
+    el("di-objetivos-tempo-mediano").textContent = data.tempo_mediano_conclusao_objetivo_dias != null
+      ? `${data.tempo_mediano_conclusao_objetivo_dias} dias` : "–";
+    el("di-objetivos-progresso-medio").textContent = `${data.progresso_medio_por_cliente}%`;
+    el("di-objetivos-clientes-com-objetivo").textContent = `${data.clientes_com_objetivo} de ${data.total_implantacao}`;
+
+    const avisoLegado = el("di-objetivos-aviso-legado");
+    if (data.total_objetivos_sem_data_retroativa > 0) {
+      avisoLegado.textContent = `${data.total_objetivos_sem_data_retroativa} objetivo(s) concluído(s) antes do controle de data — fora das médias de tempo.`;
+      avisoLegado.classList.remove("hidden");
+    } else {
+      avisoLegado.classList.add("hidden");
+    }
+
+    const funil = el("di-funil-etapas");
+    funil.innerHTML = "";
+    funil.appendChild(construirBarraDistribuicao(
+      IMPLANTACAO_ETAPAS_ORDEM, MARCO_COR, data.por_etapa, data.total_implantacao, IMPLANTACAO_ETAPA_LABELS,
+    ));
+
+    diRenderRanking(el("di-ranking-objetivos"), data.ranking_objetivos, "Nenhum objetivo cadastrado nos clientes de Implantação ainda.");
+    diRenderRanking(el("di-ranking-maior-tempo"), data.objetivos_maior_tempo, "Ainda não há objetivos com tempo de conclusão suficiente pra calcular.", true);
+
+    // Bloco de clientes — reaproveita as funções já usadas no Dashboard
+    // geral (clientesComMarcoAtrasado/renderDashboardParados/
+    // renderDashboardTempoMarcos), só que filtrado pra Implantação e com o
+    // tile de atraso específico desta tela.
+    const rClientes = await fetch("/api/clientes");
+    const dataClientes = await parseJsonResponse(rClientes);
+    const clientesImplantacao = dataClientes.ok
+      ? (dataClientes.clientes || []).filter((c) => c.tem_implantacao !== false)
+      : [];
+    const insightsClientes = el("di-insights-clientes");
+    insightsClientes.innerHTML = "";
+    insightsClientes.appendChild(renderDashboardAtrasados(clientesImplantacao, "tile-di-atrasados"));
+    insightsClientes.appendChild(renderDashboardParados(clientesImplantacao));
+    insightsClientes.appendChild(renderDashboardTempoMarcos(clientesImplantacao));
+    insightsClientes.appendChild(renderDiEnvelhecimentoCarteira(clientesImplantacao));
+  } catch (err) {
+    // Silencioso — os tiles ficam com "–" e o resto do app continua normal.
+  }
+}
+
+document.querySelectorAll("#di-periodo .di-periodo-btn").forEach((botao) => {
+  botao.addEventListener("click", () => {
+    document.querySelectorAll("#di-periodo .di-periodo-btn").forEach((b) => b.classList.remove("ativo"));
+    botao.classList.add("ativo");
+    const tipo = botao.dataset.periodo;
+    el("di-periodo-custom").classList.toggle("hidden", tipo !== "custom");
+    if (tipo === "custom") return;
+    diPeriodoSelecionado = diCalcularPeriodo(tipo);
+    carregarDashboardImplantacao();
+  });
+});
+el("di-periodo-aplicar").addEventListener("click", () => {
+  const de = el("di-periodo-de").value || null;
+  const ate = el("di-periodo-ate").value || null;
+  if (!de && !ate) return;
+  diPeriodoSelecionado = { de, ate };
+  carregarDashboardImplantacao();
+});
 
 // Mesma regra de atraso usada no card do Kanban e na tag da Ficha (ver
 // marcoAtrasado) — só que aqui varrendo a carteira toda, pra alimentar o
@@ -19175,12 +19508,14 @@ function renderDashboardTempoMarcos(clientes) {
   return card;
 }
 
-function renderDashboardAtrasados(clientes) {
+function renderDashboardAtrasados(clientes, tileId) {
   const atrasados = clientesComMarcoAtrasado(clientes);
 
-  const tileValor = el("tile-clientes-atrasados");
-  tileValor.textContent = atrasados.length;
-  tileValor.classList.toggle("stat-tile-valor-alerta", atrasados.length > 0);
+  const tileValor = el(tileId || "tile-clientes-atrasados");
+  if (tileValor) {
+    tileValor.textContent = atrasados.length;
+    tileValor.classList.toggle("stat-tile-valor-alerta", atrasados.length > 0);
+  }
 
   const card = document.createElement("div");
   card.className = "insight-card";
@@ -21289,6 +21624,12 @@ document.addEventListener("click", (e) => {
 let fichaTimelineClienteIdCache = null;
 let fichaTimelineEventosCache = [];
 
+function invalidarCacheFichaTimeline(clienteId) {
+  if (fichaTimelineClienteIdCache !== null && fichaTimelineClienteIdCache !== clienteId) return;
+  fichaTimelineClienteIdCache = null;
+  fichaTimelineEventosCache = [];
+}
+
 async function obterFichaTimelineEventos(clienteId, forcarRecarga) {
   if (!forcarRecarga && fichaTimelineClienteIdCache === clienteId) return fichaTimelineEventosCache;
   const r = await fetch(`/api/clientes/${encodeURIComponent(clienteId)}/eventos`);
@@ -22144,7 +22485,7 @@ formFichaChatEvento.addEventListener("submit", async (e) => {
     if (!data.ok) return alert(`Erro ao registrar: ${data.error || "falha desconhecida"}`);
     // Cache da Timeline fica desatualizada com o evento novo — força
     // recarregar na próxima vez que qualquer uma das duas abas for aberta.
-    fichaTimelineClienteIdCache = null;
+    invalidarCacheFichaTimeline(fichaChatEventoImplantacaoAtual.id);
     overlayFichaChatEvento.classList.add("hidden");
     if (fichaAbaAtual === "historico") mostrarFichaAba("historico");
   } catch (err) {
@@ -22565,7 +22906,7 @@ function construirPainelObjetivosImplantacao() {
   const painel = document.createElement("section");
   painel.className = "ficha-painel ficha-objetivos-painel";
   const podeEditar = USUARIO_PERFIL_ATUAL !== "visualizacao";
-  const feitos = objetivosImplantacaoRascunho.filter((item) => objetivoImplantacaoFeito(item)).length;
+  const resumoProgresso = calcularResumoProgressoObjetivosImplantacao();
   const cabecalho = document.createElement("div");
   cabecalho.className = "ficha-objetivos-cabecalho";
   const tituloGrupo = document.createElement("div");
@@ -22583,22 +22924,48 @@ function construirPainelObjetivosImplantacao() {
   descricao.className = "ficha-objetivos-descricao";
   descricao.textContent = "Defina as metas essenciais e acompanhe a evolução desta conta";
   tituloGrupo.append(tituloLinha, descricao);
+  cabecalho.appendChild(tituloGrupo);
+  painel.appendChild(cabecalho);
 
-  const resumo = document.createElement("span");
-  resumo.className = "ficha-objetivos-contador";
-  const pontoResumo = document.createElement("span");
-  pontoResumo.className = "ficha-objetivos-contador-ponto";
-  pontoResumo.setAttribute("aria-hidden", "true");
+  const percentualGeral = resumoProgresso.percentual;
+  const progressoGeral = document.createElement("div");
+  progressoGeral.className = "ficha-objetivos-progresso-geral";
+  const progressoGeralResumo = document.createElement("div");
+  progressoGeralResumo.className = "ficha-objetivos-progresso-geral-resumo";
+  const progressoGeralRotulo = document.createElement("span");
+  progressoGeralRotulo.className = "ficha-objetivos-progresso-geral-rotulo";
+  progressoGeralRotulo.textContent = "Progresso geral";
+  const progressoGeralValores = document.createElement("div");
+  progressoGeralValores.className = "ficha-objetivos-progresso-geral-valores";
   const textoResumo = document.createElement("span");
   textoResumo.className = "ficha-objetivos-contador-texto";
-  textoResumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
-  resumo.append(pontoResumo, textoResumo);
-  resumo.classList.toggle(
-    "concluido",
-    objetivosImplantacaoRascunho.length > 0 && feitos === objetivosImplantacaoRascunho.length,
+  textoResumo.textContent = `${resumoProgresso.objetivosConcluidos} de ${resumoProgresso.totalObjetivos} objetivos concluídos · ${resumoProgresso.subatividadesConcluidas} de ${resumoProgresso.totalSubatividades} sub-atividades`;
+  const percentualResumo = document.createElement("strong");
+  percentualResumo.className = "ficha-objetivos-progresso-geral-percentual";
+  percentualResumo.textContent = `${percentualGeral}%`;
+  progressoGeralValores.append(textoResumo, percentualResumo);
+  progressoGeralResumo.append(progressoGeralRotulo, progressoGeralValores);
+  const trilhoProgresso = document.createElement("div");
+  trilhoProgresso.className = "ficha-objetivos-progresso-geral-trilho";
+  trilhoProgresso.setAttribute("role", "progressbar");
+  trilhoProgresso.setAttribute("aria-label", "Progresso geral dos objetivos de implantação");
+  trilhoProgresso.setAttribute("aria-valuemin", "0");
+  trilhoProgresso.setAttribute("aria-valuemax", "100");
+  trilhoProgresso.setAttribute("aria-valuenow", String(percentualGeral));
+  trilhoProgresso.setAttribute(
+    "aria-valuetext",
+    `${percentualGeral}% de progresso geral; ${resumoProgresso.objetivosConcluidos} de ${resumoProgresso.totalObjetivos} objetivos e ${resumoProgresso.subatividadesConcluidas} de ${resumoProgresso.totalSubatividades} sub-atividades concluídas`,
   );
-  cabecalho.append(tituloGrupo, resumo);
-  painel.appendChild(cabecalho);
+  const preenchimentoProgresso = document.createElement("span");
+  preenchimentoProgresso.className = "ficha-objetivos-progresso-geral-preenchimento";
+  preenchimentoProgresso.style.width = `${percentualGeral}%`;
+  trilhoProgresso.appendChild(preenchimentoProgresso);
+  progressoGeral.append(progressoGeralResumo, trilhoProgresso);
+  progressoGeral.classList.toggle(
+    "concluido",
+    resumoProgresso.totalObjetivos > 0 && percentualGeral === 100,
+  );
+  painel.appendChild(progressoGeral);
 
   const lista = document.createElement("div");
   lista.className = `ficha-objetivos-lista${objetivosImplantacaoRascunho.length ? "" : " vazia"}`;
@@ -22625,47 +22992,226 @@ function construirPainelObjetivosImplantacao() {
     lista.appendChild(vazio);
   }
   objetivosImplantacaoRascunho.forEach((item) => {
+    lista.appendChild(construirCartaoObjetivo(item, podeEditar));
+  });
+  painel.appendChild(lista);
+
+  if (podeEditar) {
+    const acoes = document.createElement("div");
+    acoes.className = "ficha-objetivos-acoes";
+    const btnAdicionarObjetivo = document.createElement("button");
+    btnAdicionarObjetivo.type = "button";
+    btnAdicionarObjetivo.className = "btn-secondary ficha-objetivos-abrir-adicionar";
+    const iconeAdicionarObjetivo = document.createElement("span");
+    iconeAdicionarObjetivo.className = "material-symbols-outlined";
+    iconeAdicionarObjetivo.textContent = "add_circle";
+    iconeAdicionarObjetivo.setAttribute("aria-hidden", "true");
+    btnAdicionarObjetivo.append(iconeAdicionarObjetivo, document.createTextNode("Adicionar objetivo"));
+    btnAdicionarObjetivo.addEventListener("click", () => abrirModalAdicionarObjetivo());
+    acoes.appendChild(btnAdicionarObjetivo);
+    painel.appendChild(acoes);
+  }
+
+  if (podeEditar) {
+    const rodape = document.createElement("div");
+    rodape.className = "ficha-objetivos-rodape";
+    rodape.classList.toggle(
+      "hidden",
+      !objetivosImplantacaoAlterado || objetivosImplantacaoEmEdicao.size > 0,
+    );
+    const salvar = document.createElement("button");
+    salvar.type = "button";
+    salvar.className = "btn-primary ficha-objetivos-salvar";
+    const iconeSalvar = document.createElement("span");
+    iconeSalvar.className = "material-symbols-outlined";
+    iconeSalvar.textContent = "save";
+    iconeSalvar.setAttribute("aria-hidden", "true");
+    salvar.append(iconeSalvar, document.createTextNode("Salvar objetivos"));
+    salvar.disabled = !objetivosImplantacaoAlterado;
+    salvar.addEventListener("click", () => salvarObjetivosImplantacao());
+    const estadoSalvamento = document.createElement("span");
+    estadoSalvamento.className = "ficha-objetivos-estado-salvamento";
+    estadoSalvamento.textContent = objetivosImplantacaoAlterado ? "Alterações não salvas" : "Tudo salvo";
+    estadoSalvamento.classList.toggle("pendente", objetivosImplantacaoAlterado);
+    rodape.append(salvar, estadoSalvamento);
+    painel.appendChild(rodape);
+  }
+  return painel;
+}
+
+// Chamado ao usar um template ou criar um objetivo personalizado — insere só
+// o cartão novo no DOM em vez de reconstruir o painel inteiro (ver
+// construirCartaoObjetivo). Se a lista estava vazia (saindo do estado
+// "nenhum objetivo cadastrado"), cai pro rebuild completo — é uma transição
+// rara e a estrutura do painel muda (placeholder vazio some).
+function adicionarObjetivosImplantacaoNaTela(novosObjetivos) {
+  const adicionados = novosObjetivos.filter((objetivo) => objetivo && objetivo.nome);
+  if (!adicionados.length) return;
+  const eraVazia = objetivosImplantacaoRascunho.length === 0;
+  objetivosImplantacaoRascunho.push(...adicionados);
+  marcarObjetivosImplantacaoAlterados();
+  const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
+  if (!painel) return;
+  const lista = painel.querySelector(".ficha-objetivos-lista");
+  if (!lista) return;
+  if (eraVazia) {
+    lista.classList.remove("vazia");
+    lista.replaceChildren();
+  }
+  adicionados.forEach((objetivo) => {
+    lista.appendChild(construirCartaoObjetivo(objetivo, USUARIO_PERFIL_ATUAL !== "visualizacao"));
+  });
+  atualizarResumoVisualObjetivosImplantacao();
+}
+
+// Troca só o cartão de UM objetivo no DOM — usado por ações que mudam as
+// sub-atividades dele (mover/adicionar/remover), que não afetam mais nenhum
+// outro objetivo nem o contador do cabeçalho (conclusão é independente das
+// sub-atividades, ver objetivoImplantacaoFeito).
+function substituirCartaoObjetivoImplantacao(item) {
+  const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
+  const atual = painel && painel.querySelector(`.ficha-objetivo[data-objetivo-id="${CSS.escape(String(item.id))}"]`);
+  if (!atual) { atualizarPainelObjetivosImplantacao(); return; }
+  atual.replaceWith(construirCartaoObjetivo(item, USUARIO_PERFIL_ATUAL !== "visualizacao"));
+}
+
+// Um cartão de objetivo é independente dos outros — ações que só afetam ESTE
+// objetivo (mover/adicionar/remover sub-atividade) reconstroem só este
+// elemento (ver substituirCartaoObjetivoImplantacao), em vez do
+// construirPainelObjetivosImplantacao inteiro. Antes disso, qualquer clique
+// num objetivo recriava TODOS os cartões + todos os listeners da tela — é o
+// que deixava a Ficha lenta em clientes com vários objetivos/sub-atividades.
+function construirCartaoObjetivo(item, podeEditar) {
     const objetivo = document.createElement("article");
-    objetivo.className = `ficha-objetivo${objetivoImplantacaoFeito(item) ? " feito" : ""}`;
+    const objetivoId = String(item.id);
+    const editando = objetivosImplantacaoEmEdicao.has(objetivoId);
+    objetivo.className = `ficha-objetivo${objetivoImplantacaoFeito(item) ? " feito" : ""}${editando ? " editando" : ""}`;
+    objetivo.dataset.objetivoId = String(item.id);
     const cabecalho = document.createElement("div");
     cabecalho.className = "ficha-objetivo-cabecalho";
-    const nome = document.createElement("input");
-    nome.type = "text";
-    nome.maxLength = 300;
-    nome.value = item.nome;
-    nome.setAttribute("aria-label", "Nome do objetivo");
-    nome.disabled = !podeEditar;
-    nome.addEventListener("change", () => {
-      const novoNome = nome.value.trim();
-      if (!novoNome) {
-        nome.value = item.nome;
-        return;
-      }
-      item.nome = novoNome;
-      marcarObjetivosImplantacaoAlterados();
-    });
-    const remover = document.createElement("button");
-    remover.type = "button";
-    remover.className = "btn-remover-item-marco";
-    remover.textContent = "×";
-    remover.title = "Remover objetivo";
-    remover.setAttribute("aria-label", `Remover objetivo: ${item.nome}`);
-    remover.disabled = !podeEditar;
-    remover.addEventListener("click", () => {
-      objetivosImplantacaoRascunho = objetivosImplantacaoRascunho.filter((objetivo) => objetivo.id !== item.id);
-      objetivosImplantacaoAlterado = true;
-      atualizarPainelObjetivosImplantacao();
-    });
-    cabecalho.append(nome, remover);
+    const nome = document.createElement(editando ? "input" : "span");
+    if (editando) {
+      nome.type = "text";
+      nome.maxLength = 300;
+      nome.value = item.nome;
+      nome.setAttribute("aria-label", "Nome do objetivo");
+      nome.addEventListener("change", () => {
+        const novoNome = nome.value.trim();
+        if (!novoNome) {
+          nome.value = item.nome;
+          return;
+        }
+        item.nome = novoNome;
+        marcarObjetivosImplantacaoAlterados();
+      });
+    } else {
+      nome.className = "ficha-objetivo-nome";
+      nome.textContent = item.nome;
+    }
+    cabecalho.appendChild(nome);
+    if (podeEditar && !editando) {
+      const botaoEditar = document.createElement("button");
+      botaoEditar.type = "button";
+      botaoEditar.className = "btn-secondary ficha-objetivo-editar";
+      botaoEditar.textContent = "Editar";
+      botaoEditar.setAttribute("aria-expanded", "false");
+      botaoEditar.setAttribute("aria-label", `Editar objetivo ${item.nome}`);
+      botaoEditar.addEventListener("click", () => {
+        objetivosImplantacaoEmEdicao.add(objetivoId);
+        substituirCartaoObjetivoImplantacao(item);
+      });
+      cabecalho.appendChild(botaoEditar);
+    }
     objetivo.appendChild(cabecalho);
 
+    // Conclusão/prazo do objetivo — sempre manuais e independentes das
+    // sub-atividades abaixo (ver objetivoImplantacaoFeito). `concluido_em` é
+    // carimbado com a data de hoje ao marcar concluído (se ainda vazio); a
+    // edição manual fica disponível no modo de edição do objetivo.
+    const controle = document.createElement("div");
+    controle.className = "ficha-objetivo-controle";
+    const concluidoLabel = document.createElement("label");
+    concluidoLabel.className = `ficha-objetivo-feito${item.feito ? " marcado" : ""}`;
+    const concluidoCheckbox = document.createElement("input");
+    concluidoCheckbox.type = "checkbox";
+    concluidoCheckbox.checked = item.feito === true;
+    concluidoCheckbox.disabled = !podeEditar;
+    concluidoCheckbox.setAttribute("aria-label", `Marcar objetivo "${item.nome}" como concluído`);
+    const dataConcluido = document.createElement("input");
+    dataConcluido.type = "date";
+    dataConcluido.className = "ficha-objetivo-data-conclusao";
+    dataConcluido.value = item.concluido_em || "";
+    dataConcluido.disabled = !podeEditar;
+    dataConcluido.setAttribute("aria-label", `Data de conclusão de "${item.nome}"`);
+    concluidoCheckbox.addEventListener("change", () => {
+      item.feito = concluidoCheckbox.checked;
+      if (concluidoCheckbox.checked && !item.concluido_em) {
+        item.concluido_em = new Date().toISOString().slice(0, 10);
+        dataConcluido.value = item.concluido_em;
+      } else if (!concluidoCheckbox.checked) {
+        item.concluido_em = "";
+        dataConcluido.value = "";
+      }
+      concluidoLabel.classList.toggle("marcado", concluidoCheckbox.checked);
+      dataResumo.textContent = item.concluido_em
+        ? `Concluído em ${formatarDataBRSimples(item.concluido_em) || item.concluido_em}`
+        : "Sem data de conclusão";
+      marcarObjetivosImplantacaoAlterados();
+      atualizarResumoVisualObjetivosImplantacao();
+    });
+    dataConcluido.addEventListener("change", () => {
+      item.concluido_em = dataConcluido.value || "";
+      dataResumo.textContent = item.concluido_em
+        ? `Concluído em ${formatarDataBRSimples(item.concluido_em) || item.concluido_em}`
+        : "Sem data de conclusão";
+      marcarObjetivosImplantacaoAlterados();
+    });
+    const dataResumo = document.createElement("span");
+    dataResumo.className = "ficha-objetivo-data-resumo";
+    dataResumo.textContent = item.concluido_em
+      ? `Concluído em ${formatarDataBRSimples(item.concluido_em) || item.concluido_em}`
+      : "Sem data de conclusão";
+    concluidoLabel.append(concluidoCheckbox, document.createTextNode("Objetivo concluído"), dataResumo, dataConcluido);
+
+    const prazoLabel = document.createElement("label");
+    prazoLabel.className = "ficha-objetivo-prazo ficha-objetivo-edicao";
+    const prazoInput = document.createElement("input");
+    prazoInput.type = "number";
+    prazoInput.min = "1";
+    prazoInput.max = "3650";
+    prazoInput.placeholder = "—";
+    prazoInput.value = item.prazo_dias ?? "";
+    prazoInput.disabled = !podeEditar;
+    prazoInput.setAttribute("aria-label", `Prazo em dias de "${item.nome}"`);
+    prazoInput.addEventListener("change", () => {
+      const valor = parseInt(prazoInput.value, 10);
+      item.prazo_dias = Number.isFinite(valor) && valor > 0 ? valor : null;
+      prazoInput.value = item.prazo_dias ?? "";
+      marcarObjetivosImplantacaoAlterados();
+    });
+    prazoLabel.append(document.createTextNode("Prazo (dias)"), prazoInput);
+
+    controle.append(concluidoLabel, prazoLabel);
+
     const itens = item.itens || [];
+    const concluidos = itens.filter((subatividade) => subatividade.feito).length;
+    const percentual = itens.length ? Math.round(concluidos / itens.length * 100) : 0;
+    const progresso = document.createElement("p");
+    progresso.className = "ficha-objetivo-progresso";
+    const progressoTexto = document.createElement("span");
+    progressoTexto.className = "ficha-objetivo-progresso-texto";
+    progressoTexto.textContent = `${concluidos} de ${itens.length} sub-atividades concluídas (${percentual}%)`;
+    const progressoBarra = document.createElement("span");
+    progressoBarra.className = "ficha-objetivo-progresso-barra";
+    const progressoBarraFill = document.createElement("span");
+    progressoBarraFill.className = "ficha-objetivo-progresso-barra-fill";
+    progressoBarraFill.style.width = `${percentual}%`;
+    objetivo.classList.toggle("subatividades-concluidas", itens.length > 0 && concluidos === itens.length);
+    progressoBarra.appendChild(progressoBarraFill);
+    progresso.append(progressoTexto, progressoBarra);
+    objetivo.appendChild(progresso);
+    objetivo.appendChild(controle);
     if (itens.length) {
-      const concluidos = itens.filter((subatividade) => subatividade.feito).length;
-      const progresso = document.createElement("p");
-      progresso.className = "ficha-objetivo-progresso";
-      progresso.textContent = `${concluidos} de ${itens.length} sub-atividades concluídas (${Math.round(concluidos / itens.length * 100)}%)`;
-      objetivo.appendChild(progresso);
       const subLista = document.createElement("div");
       subLista.className = "ficha-objetivo-subatividades";
       itens.forEach((subatividade, indice) => {
@@ -22678,56 +23224,61 @@ function construirPainelObjetivosImplantacao() {
         checkbox.setAttribute("aria-label", `Marcar "${subatividade.texto}" como ${checkbox.checked ? "pendente" : "concluída"}`);
         checkbox.addEventListener("change", () => {
           subatividade.feito = checkbox.checked;
+          atualizarProgressoVisualCartaoObjetivo(item, objetivo);
           marcarObjetivosImplantacaoAlterados();
           atualizarResumoVisualObjetivosImplantacao();
         });
-        const texto = document.createElement("input");
-        texto.type = "text";
-        texto.maxLength = 300;
-        texto.value = subatividade.texto;
-        texto.disabled = !podeEditar;
-        texto.setAttribute("aria-label", "Descrição da sub-atividade");
-        texto.addEventListener("change", () => {
-          const novoTexto = texto.value.trim();
-          if (!novoTexto) {
-            texto.value = subatividade.texto;
-            return;
-          }
-          subatividade.texto = novoTexto;
-          marcarObjetivosImplantacaoAlterados();
-        });
+        const texto = document.createElement(editando ? "input" : "span");
+        if (editando) {
+          texto.type = "text";
+          texto.maxLength = 300;
+          texto.value = subatividade.texto;
+          texto.setAttribute("aria-label", "Descrição da sub-atividade");
+          texto.addEventListener("change", () => {
+            const novoTexto = texto.value.trim();
+            if (!novoTexto) {
+              texto.value = subatividade.texto;
+              return;
+            }
+            subatividade.texto = novoTexto;
+            marcarObjetivosImplantacaoAlterados();
+          });
+        } else {
+          texto.className = "ficha-objetivo-subatividade-texto";
+          texto.textContent = subatividade.texto;
+        }
         const cima = document.createElement("button");
         cima.type = "button";
-        cima.className = "btn-secondary";
+        cima.className = "btn-secondary ficha-objetivo-edicao";
         cima.textContent = "↑";
         cima.title = "Mover sub-atividade para cima";
         cima.disabled = !podeEditar || indice === 0;
         cima.addEventListener("click", () => {
           [itens[indice - 1], itens[indice]] = [itens[indice], itens[indice - 1]];
-          objetivosImplantacaoAlterado = true;
-          atualizarPainelObjetivosImplantacao();
+          marcarObjetivosImplantacaoAlterados();
+          substituirCartaoObjetivoImplantacao(item);
         });
         const baixo = document.createElement("button");
         baixo.type = "button";
-        baixo.className = "btn-secondary";
+        baixo.className = "btn-secondary ficha-objetivo-edicao";
         baixo.textContent = "↓";
         baixo.title = "Mover sub-atividade para baixo";
         baixo.disabled = !podeEditar || indice === itens.length - 1;
         baixo.addEventListener("click", () => {
           [itens[indice], itens[indice + 1]] = [itens[indice + 1], itens[indice]];
-          objetivosImplantacaoAlterado = true;
-          atualizarPainelObjetivosImplantacao();
+          marcarObjetivosImplantacaoAlterados();
+          substituirCartaoObjetivoImplantacao(item);
         });
         const removerItem = document.createElement("button");
         removerItem.type = "button";
-        removerItem.className = "btn-remover-item-marco";
+        removerItem.className = "btn-remover-item-marco ficha-objetivo-edicao";
         removerItem.textContent = "×";
         removerItem.title = "Remover sub-atividade";
         removerItem.disabled = !podeEditar;
         removerItem.addEventListener("click", () => {
           item.itens = item.itens.filter((entrada) => entrada.id !== subatividade.id);
-          objetivosImplantacaoAlterado = true;
-          atualizarPainelObjetivosImplantacao();
+          marcarObjetivosImplantacaoAlterados();
+          substituirCartaoObjetivoImplantacao(item);
         });
         linha.append(checkbox, texto, cima, baixo, removerItem);
         subLista.appendChild(linha);
@@ -22735,27 +23286,14 @@ function construirPainelObjetivosImplantacao() {
       objetivo.appendChild(subLista);
     } else {
       const vazio = document.createElement("p");
-      vazio.className = "placeholder ficha-objetivo-sem-subatividades";
-      vazio.textContent = "Sem sub-atividades. O objetivo pode ser concluído diretamente.";
+      vazio.className = "placeholder ficha-objetivo-sem-subatividades ficha-objetivo-edicao";
+      vazio.textContent = "Sem sub-atividades cadastradas.";
       objetivo.appendChild(vazio);
-      const checkbox = document.createElement("label");
-      checkbox.className = "ficha-objetivo-feito";
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = item.feito === true;
-      input.disabled = !podeEditar;
-      input.addEventListener("change", () => {
-        item.feito = input.checked;
-        marcarObjetivosImplantacaoAlterados();
-        atualizarResumoVisualObjetivosImplantacao();
-      });
-      checkbox.append(input, document.createTextNode("Objetivo concluído"));
-      objetivo.appendChild(checkbox);
     }
 
-    if (podeEditar) {
+    if (podeEditar && editando) {
       const formItem = document.createElement("form");
-      formItem.className = "marco-extra-form ficha-objetivo-subatividade-form";
+      formItem.className = "marco-extra-form ficha-objetivo-subatividade-form ficha-objetivo-edicao";
       const inputItem = document.createElement("input");
       inputItem.type = "text";
       inputItem.maxLength = 300;
@@ -22772,161 +23310,130 @@ function construirPainelObjetivosImplantacao() {
         if (!textoNovo) return;
         item.itens = item.itens || [];
         item.itens.push({ id: novoIdItemMarco(), texto: textoNovo, feito: false });
-        objetivosImplantacaoAlterado = true;
-        atualizarPainelObjetivosImplantacao();
+        marcarObjetivosImplantacaoAlterados();
+        substituirCartaoObjetivoImplantacao(item);
       });
       objetivo.appendChild(formItem);
+
+      const acoesEdicao = document.createElement("div");
+      acoesEdicao.className = "ficha-objetivo-acoes-edicao";
+      const excluirObjetivo = document.createElement("button");
+      excluirObjetivo.type = "button";
+      excluirObjetivo.className = "btn-secondary ficha-objetivo-excluir";
+      excluirObjetivo.textContent = "Excluir objetivo";
+      excluirObjetivo.addEventListener("click", () => {
+        if (!confirm(`Excluir o objetivo "${item.nome}" e todas as suas sub-atividades?`)) return;
+        objetivosImplantacaoEmEdicao.delete(objetivoId);
+        const eraUltimo = objetivosImplantacaoRascunho.length === 1;
+        objetivosImplantacaoRascunho = objetivosImplantacaoRascunho.filter((outro) => outro.id !== item.id);
+        marcarObjetivosImplantacaoAlterados();
+        if (eraUltimo) { atualizarPainelObjetivosImplantacao(); return; }
+        objetivo.remove();
+        atualizarResumoVisualObjetivosImplantacao();
+      });
+      const salvarEdicao = document.createElement("button");
+      salvarEdicao.type = "button";
+      salvarEdicao.className = "btn-primary ficha-objetivo-salvar-edicao";
+      salvarEdicao.textContent = "Salvar";
+      salvarEdicao.addEventListener("click", () => salvarObjetivosImplantacao(objetivoId));
+      acoesEdicao.append(excluirObjetivo, salvarEdicao);
+      objetivo.appendChild(acoesEdicao);
     }
-    lista.appendChild(objetivo);
-  });
-  painel.appendChild(lista);
-
-  if (podeEditar) {
-    const acoes = document.createElement("div");
-    acoes.className = "ficha-objetivos-acoes";
-    const areaAdicionar = document.createElement("section");
-    areaAdicionar.className = "ficha-objetivos-adicionar";
-    const labelTemplate = document.createElement("h4");
-    labelTemplate.textContent = "Templates recomendados";
-    const linhaTemplate = document.createElement("div");
-    linhaTemplate.className = "ficha-objetivos-template-linha";
-    const seletorTemplate = document.createElement("select");
-    seletorTemplate.setAttribute("aria-label", "Selecionar template de objetivo");
-    const opcaoInicial = document.createElement("option");
-    opcaoInicial.value = "";
-    opcaoInicial.textContent = "Adicionar de um template...";
-    seletorTemplate.appendChild(opcaoInicial);
-    const adicionarTemplate = document.createElement("button");
-    adicionarTemplate.type = "button";
-    adicionarTemplate.className = "btn-secondary ficha-objetivos-usar-template";
-    const iconeTemplate = document.createElement("span");
-    iconeTemplate.className = "material-symbols-outlined";
-    iconeTemplate.textContent = "library_add";
-    iconeTemplate.setAttribute("aria-hidden", "true");
-    adicionarTemplate.append(iconeTemplate, document.createTextNode("Usar template"));
-    adicionarTemplate.addEventListener("click", () => {
-      const template = (objetivosTemplatesCache || []).find((entrada) => String(entrada.id) === seletorTemplate.value);
-      if (!template) return;
-      objetivosImplantacaoRascunho.push({
-        id: novoIdItemMarco(),
-        nome: template.nome,
-        ordem: objetivosImplantacaoRascunho.length,
-        feito: false,
-        origem_template_id: template.id,
-        itens: template.itens.map((subatividade) => ({
-          id: novoIdItemMarco(),
-          texto: subatividade.texto,
-          feito: false,
-        })),
-      });
-      objetivosImplantacaoAlterado = true;
-      atualizarPainelObjetivosImplantacao();
-    });
-    const estadoTemplates = document.createElement("span");
-    estadoTemplates.className = "ficha-objetivos-template-estado";
-    estadoTemplates.setAttribute("role", "status");
-    linhaTemplate.append(seletorTemplate, adicionarTemplate);
-    areaAdicionar.append(labelTemplate, linhaTemplate, estadoTemplates);
-    carregarTemplatesObjetivosParaFicha(seletorTemplate, adicionarTemplate, estadoTemplates);
-
-    const form = document.createElement("form");
-    form.className = "ficha-objetivos-personalizado";
-    const labelPersonalizado = document.createElement("label");
-    labelPersonalizado.textContent = "Objetivo personalizado";
-    labelPersonalizado.htmlFor = "ficha-objetivo-personalizado-nome";
-    const linhaPersonalizada = document.createElement("div");
-    linhaPersonalizada.className = "ficha-objetivos-personalizado-linha";
-    const input = document.createElement("input");
-    input.id = "ficha-objetivo-personalizado-nome";
-    input.type = "text";
-    input.maxLength = 300;
-    input.placeholder = "Ex: Validar instalação dos primeiros 10 veículos...";
-    input.setAttribute("aria-label", "Novo objetivo personalizado de Implantação");
-    const adicionar = document.createElement("button");
-    adicionar.type = "submit";
-    adicionar.className = "ficha-objetivos-criar";
-    const iconeAdicionar = document.createElement("span");
-    iconeAdicionar.className = "material-symbols-outlined";
-    iconeAdicionar.textContent = "add";
-    iconeAdicionar.setAttribute("aria-hidden", "true");
-    adicionar.append(iconeAdicionar, document.createTextNode("Criar objetivo personalizado"));
-    linhaPersonalizada.append(input, adicionar);
-    form.append(labelPersonalizado, linhaPersonalizada);
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const nome = input.value.trim();
-      if (!nome) return;
-      objetivosImplantacaoRascunho.push({
-        id: novoIdItemMarco(),
-        nome,
-        ordem: objetivosImplantacaoRascunho.length,
-        feito: false,
-        origem_template_id: null,
-        itens: [],
-      });
-      objetivosImplantacaoAlterado = true;
-      atualizarPainelObjetivosImplantacao();
-    });
-    acoes.append(areaAdicionar, form);
-    painel.appendChild(acoes);
-  }
-
-  if (podeEditar) {
-    const rodape = document.createElement("div");
-    rodape.className = "ficha-objetivos-rodape";
-    const salvar = document.createElement("button");
-    salvar.type = "button";
-    salvar.className = "btn-primary ficha-objetivos-salvar";
-    const iconeSalvar = document.createElement("span");
-    iconeSalvar.className = "material-symbols-outlined";
-    iconeSalvar.textContent = "save";
-    iconeSalvar.setAttribute("aria-hidden", "true");
-    salvar.append(iconeSalvar, document.createTextNode("Salvar objetivos"));
-    salvar.disabled = !objetivosImplantacaoAlterado;
-    salvar.addEventListener("click", salvarObjetivosImplantacao);
-    const estadoSalvamento = document.createElement("span");
-    estadoSalvamento.className = "ficha-objetivos-estado-salvamento";
-    estadoSalvamento.textContent = objetivosImplantacaoAlterado ? "Alterações não salvas" : "Tudo salvo";
-    estadoSalvamento.classList.toggle("pendente", objetivosImplantacaoAlterado);
-    rodape.append(salvar, estadoSalvamento);
-    painel.appendChild(rodape);
-  }
-  return painel;
+    return objetivo;
 }
 
+// Conclusão do objetivo é sempre manual e independente das sub-atividades
+// (decisão do Dashboard de Implantação, ver docs/HISTORICO_DECISOES.md) — os
+// itens abaixo são só um checklist de apoio, nunca determinam `feito`.
 function objetivoImplantacaoFeito(item) {
-  return item.itens?.length
-    ? item.itens.every((subatividade) => subatividade.feito === true)
-    : item.feito === true;
+  return item.feito === true;
+}
+
+function calcularResumoProgressoObjetivosImplantacao() {
+  const totalObjetivos = objetivosImplantacaoRascunho.length;
+  let objetivosConcluidos = 0;
+  let totalSubatividades = 0;
+  let subatividadesConcluidas = 0;
+  let progressoAcumulado = 0;
+
+  objetivosImplantacaoRascunho.forEach((item) => {
+    const subatividades = item.itens || [];
+    const concluidas = subatividades.filter((subatividade) => subatividade.feito).length;
+    totalSubatividades += subatividades.length;
+    subatividadesConcluidas += concluidas;
+    if (objetivoImplantacaoFeito(item)) objetivosConcluidos += 1;
+    progressoAcumulado += objetivoImplantacaoFeito(item)
+      ? 1
+      : subatividades.length
+        ? concluidas / subatividades.length
+        : 0;
+  });
+
+  return {
+    objetivosConcluidos,
+    totalObjetivos,
+    subatividadesConcluidas,
+    totalSubatividades,
+    percentual: totalObjetivos ? Math.round(progressoAcumulado / totalObjetivos * 100) : 0,
+  };
+}
+
+function atualizarProgressoVisualCartaoObjetivo(item, objetivo) {
+  const subatividades = item.itens || [];
+  const concluidos = subatividades.filter((subatividade) => subatividade.feito).length;
+  const percentual = subatividades.length ? Math.round(concluidos / subatividades.length * 100) : 0;
+  const progressoTexto = objetivo.querySelector(".ficha-objetivo-progresso-texto");
+  if (progressoTexto) {
+    progressoTexto.textContent = `${concluidos} de ${subatividades.length} sub-atividades concluídas (${percentual}%)`;
+  }
+  const progressoBarraFill = objetivo.querySelector(".ficha-objetivo-progresso-barra-fill");
+  if (progressoBarraFill) progressoBarraFill.style.width = `${percentual}%`;
+  objetivo.classList.toggle("subatividades-concluidas", subatividades.length > 0 && concluidos === subatividades.length);
+  objetivo.querySelectorAll(".ficha-objetivo-subatividade").forEach((linha, indice) => {
+    linha.classList.toggle("feito", subatividades[indice]?.feito === true);
+  });
 }
 
 function atualizarResumoVisualObjetivosImplantacao() {
   const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
   if (!painel) return;
-  const feitos = objetivosImplantacaoRascunho.filter((item) => objetivoImplantacaoFeito(item)).length;
-  const resumo = painel.querySelector(".ficha-objetivos-contador");
+  const resumoProgresso = calcularResumoProgressoObjetivosImplantacao();
   const textoResumo = painel.querySelector(".ficha-objetivos-contador-texto");
-  if (!resumo || !textoResumo) return;
-  resumo.classList.toggle(
-    "concluido",
-    objetivosImplantacaoRascunho.length > 0 && feitos === objetivosImplantacaoRascunho.length,
-  );
-  textoResumo.textContent = `${feitos} de ${objetivosImplantacaoRascunho.length} objetivos concluídos`;
+  const progressoGeral = painel.querySelector(".ficha-objetivos-progresso-geral");
+  const percentualGeral = resumoProgresso.percentual;
+  if (progressoGeral) {
+    progressoGeral.classList.toggle(
+      "concluido",
+      resumoProgresso.totalObjetivos > 0 && percentualGeral === 100,
+    );
+    if (textoResumo) {
+      textoResumo.textContent = `${resumoProgresso.objetivosConcluidos} de ${resumoProgresso.totalObjetivos} objetivos concluídos · ${resumoProgresso.subatividadesConcluidas} de ${resumoProgresso.totalSubatividades} sub-atividades`;
+    }
+    const percentualResumo = progressoGeral.querySelector(".ficha-objetivos-progresso-geral-percentual");
+    if (percentualResumo) percentualResumo.textContent = `${percentualGeral}%`;
+    const trilhoProgresso = progressoGeral.querySelector(".ficha-objetivos-progresso-geral-trilho");
+    if (trilhoProgresso) {
+      trilhoProgresso.setAttribute("aria-valuenow", String(percentualGeral));
+      trilhoProgresso.setAttribute(
+        "aria-valuetext",
+        `${percentualGeral}% de progresso geral; ${resumoProgresso.objetivosConcluidos} de ${resumoProgresso.totalObjetivos} objetivos e ${resumoProgresso.subatividadesConcluidas} de ${resumoProgresso.totalSubatividades} sub-atividades concluídas`,
+      );
+    }
+    const preenchimentoProgresso = progressoGeral.querySelector(".ficha-objetivos-progresso-geral-preenchimento");
+    if (preenchimentoProgresso) preenchimentoProgresso.style.width = `${percentualGeral}%`;
+  }
 
-  objetivosImplantacaoRascunho.forEach((item, indice) => {
-    const objetivo = painel.querySelectorAll(".ficha-objetivo")[indice];
+  objetivosImplantacaoRascunho.forEach((item) => {
+    const objetivo = painel.querySelector(`.ficha-objetivo[data-objetivo-id="${CSS.escape(String(item.id))}"]`);
     if (!objetivo) return;
     const concluido = objetivoImplantacaoFeito(item);
     objetivo.classList.toggle("feito", concluido);
-    if (item.itens?.length) {
-      const concluidos = item.itens.filter((subatividade) => subatividade.feito).length;
-      const progresso = objetivo.querySelector(".ficha-objetivo-progresso");
-      if (progresso) {
-        progresso.textContent = `${concluidos} de ${item.itens.length} sub-atividades concluídas (${Math.round(concluidos / item.itens.length * 100)}%)`;
-      }
-      objetivo.querySelectorAll(".ficha-objetivo-subatividade").forEach((linha, itemIndice) => {
-        linha.classList.toggle("feito", item.itens[itemIndice]?.feito === true);
-      });
+    atualizarProgressoVisualCartaoObjetivo(item, objetivo);
+    const dataResumo = objetivo.querySelector(".ficha-objetivo-data-resumo");
+    if (dataResumo) {
+      dataResumo.textContent = item.concluido_em
+        ? `Concluído em ${formatarDataBRSimples(item.concluido_em) || item.concluido_em}`
+        : "Sem data de conclusão";
     }
   });
 }
@@ -22936,6 +23443,9 @@ function marcarObjetivosImplantacaoAlterados() {
   const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
   const salvar = painel?.querySelector(".ficha-objetivos-salvar");
   if (salvar) salvar.disabled = false;
+  if (objetivosImplantacaoEmEdicao.size === 0) {
+    painel?.querySelector(".ficha-objetivos-rodape")?.classList.remove("hidden");
+  }
   const estadoSalvamento = painel?.querySelector(".ficha-objetivos-estado-salvamento");
   if (estadoSalvamento) {
     estadoSalvamento.textContent = "Alterações não salvas";
@@ -22943,10 +23453,81 @@ function marcarObjetivosImplantacaoAlterados() {
   }
 }
 
-async function carregarTemplatesObjetivosParaFicha(seletor, botao, estado) {
-  seletor.disabled = true;
-  botao.disabled = true;
-  estado.textContent = "Carregando templates...";
+function selecionarAbaAdicionarObjetivo(aba) {
+  const usarTemplates = aba === "template";
+  document.querySelectorAll(".objetivo-adicionar-tab").forEach((botao) => {
+    const ativo = botao.dataset.tab === aba;
+    botao.classList.toggle("ativo", ativo);
+    botao.setAttribute("aria-selected", String(ativo));
+  });
+  el("objetivo-adicionar-painel-template").classList.toggle("hidden", !usarTemplates);
+  formularioObjetivoPersonalizado.classList.toggle("hidden", usarTemplates);
+}
+
+function atualizarBotaoAplicarTemplatesObjetivo() {
+  botaoAplicarTemplatesAdicionarObjetivo.disabled = objetivosAdicionarTemplatesSelecionados.size === 0;
+  const quantidade = objetivosAdicionarTemplatesSelecionados.size;
+  botaoAplicarTemplatesAdicionarObjetivo.querySelector(".objetivo-adicionar-aplicar-texto").textContent =
+    quantidade > 1 ? `Aplicar ${quantidade} templates selecionados` : "Aplicar template selecionado";
+}
+
+function renderizarTemplatesModalAdicionarObjetivo() {
+  gridTemplatesAdicionarObjetivo.replaceChildren();
+  const templates = objetivosTemplatesCache || [];
+  if (!templates.length) {
+    estadoTemplatesAdicionarObjetivo.textContent = "Nenhum template disponível. Você pode criar um objetivo personalizado na outra opção.";
+    estadoTemplatesAdicionarObjetivo.classList.remove("hidden");
+    atualizarBotaoAplicarTemplatesObjetivo();
+    return;
+  }
+
+  estadoTemplatesAdicionarObjetivo.textContent = "";
+  estadoTemplatesAdicionarObjetivo.classList.add("hidden");
+  templates.forEach((template) => {
+    const opcao = document.createElement("label");
+    opcao.className = "objetivo-adicionar-template";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = String(template.id);
+    checkbox.checked = objetivosAdicionarTemplatesSelecionados.has(checkbox.value);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) objetivosAdicionarTemplatesSelecionados.add(checkbox.value);
+      else objetivosAdicionarTemplatesSelecionados.delete(checkbox.value);
+      opcao.classList.toggle("selecionado", checkbox.checked);
+      atualizarBotaoAplicarTemplatesObjetivo();
+    });
+
+    const conteudo = document.createElement("span");
+    conteudo.className = "objetivo-adicionar-template-conteudo";
+    const topo = document.createElement("span");
+    topo.className = "objetivo-adicionar-template-topo";
+    const nome = document.createElement("strong");
+    nome.textContent = template.nome;
+    topo.appendChild(nome);
+    if (template.prazo_dias) {
+      const prazo = document.createElement("span");
+      prazo.className = "objetivo-adicionar-template-prazo";
+      prazo.textContent = `${template.prazo_dias} dias`;
+      topo.appendChild(prazo);
+    }
+    const resumo = document.createElement("span");
+    resumo.className = "objetivo-adicionar-template-resumo";
+    const itens = template.itens || [];
+    resumo.textContent = itens.length
+      ? `${itens.length} sub-atividade${itens.length === 1 ? "" : "s"}`
+      : "Sem sub-atividades";
+    conteudo.append(topo, resumo);
+    opcao.append(checkbox, conteudo);
+    opcao.classList.toggle("selecionado", checkbox.checked);
+    gridTemplatesAdicionarObjetivo.appendChild(opcao);
+  });
+  atualizarBotaoAplicarTemplatesObjetivo();
+}
+
+async function carregarTemplatesModalAdicionarObjetivo() {
+  estadoTemplatesAdicionarObjetivo.textContent = "Carregando templates...";
+  estadoTemplatesAdicionarObjetivo.classList.remove("hidden");
+  botaoAplicarTemplatesAdicionarObjetivo.disabled = true;
   try {
     if (!objetivosTemplatesCache) {
       if (!objetivosTemplatesRequisicao) {
@@ -22961,32 +23542,123 @@ async function carregarTemplatesObjetivosParaFicha(seletor, botao, estado) {
       }
       await objetivosTemplatesRequisicao;
     }
-    if (!seletor.isConnected) return;
-    seletor.replaceChildren();
-    const opcaoInicial = document.createElement("option");
-    opcaoInicial.value = "";
-    opcaoInicial.textContent = objetivosTemplatesCache.length
-      ? "Adicionar de um template..."
-      : "Nenhum template disponível";
-    seletor.appendChild(opcaoInicial);
-    objetivosTemplatesCache.forEach((template) => {
-      const opcao = document.createElement("option");
-      opcao.value = String(template.id);
-      opcao.textContent = template.nome;
-      seletor.appendChild(opcao);
-    });
-    seletor.disabled = objetivosTemplatesCache.length === 0;
-    botao.disabled = objetivosTemplatesCache.length === 0;
-    estado.textContent = "";
+    if (!overlayAdicionarObjetivo.isConnected || overlayAdicionarObjetivo.classList.contains("hidden")) return;
+    renderizarTemplatesModalAdicionarObjetivo();
   } catch (error) {
-    if (!seletor.isConnected) return;
-    estado.textContent = `Não foi possível carregar templates: ${String(error)}`;
-    seletor.replaceChildren();
-    const falha = document.createElement("option");
-    falha.textContent = "Falha ao carregar templates";
-    seletor.appendChild(falha);
+    if (overlayAdicionarObjetivo.classList.contains("hidden")) return;
+    gridTemplatesAdicionarObjetivo.replaceChildren();
+    estadoTemplatesAdicionarObjetivo.textContent = `Não foi possível carregar templates: ${String(error)}`;
+    estadoTemplatesAdicionarObjetivo.classList.remove("hidden");
+    atualizarBotaoAplicarTemplatesObjetivo();
   }
 }
+
+function abrirModalAdicionarObjetivo() {
+  objetivosAdicionarTemplatesSelecionados.clear();
+  objetivoAdicionarElementoOrigem = document.activeElement;
+  selecionarAbaAdicionarObjetivo("template");
+  gridTemplatesAdicionarObjetivo.replaceChildren();
+  estadoTemplatesAdicionarObjetivo.textContent = "Carregando templates...";
+  estadoTemplatesAdicionarObjetivo.classList.remove("hidden");
+  atualizarBotaoAplicarTemplatesObjetivo();
+  overlayAdicionarObjetivo.classList.remove("hidden");
+  carregarTemplatesModalAdicionarObjetivo();
+  el("objetivo-adicionar-fechar").focus();
+}
+
+function fecharModalAdicionarObjetivo() {
+  if (overlayAdicionarObjetivo.classList.contains("hidden")) return;
+  overlayAdicionarObjetivo.classList.add("hidden");
+  const origem = objetivoAdicionarElementoOrigem;
+  objetivoAdicionarElementoOrigem = null;
+  if (origem?.isConnected) origem.focus();
+  else el("ficha-cliente-corpo").querySelector(".ficha-objetivos-abrir-adicionar")?.focus();
+}
+
+el("objetivo-adicionar-fechar").addEventListener("click", fecharModalAdicionarObjetivo);
+overlayAdicionarObjetivo.addEventListener("click", (event) => {
+  if (event.target === overlayAdicionarObjetivo) fecharModalAdicionarObjetivo();
+});
+document.querySelectorAll(".objetivo-adicionar-tab").forEach((botao) => {
+  botao.addEventListener("click", () => selecionarAbaAdicionarObjetivo(botao.dataset.tab));
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !overlayAdicionarObjetivo.classList.contains("hidden")) {
+    fecharModalAdicionarObjetivo();
+  }
+});
+
+botaoAplicarTemplatesAdicionarObjetivo.addEventListener("click", () => {
+  const selecionados = (objetivosTemplatesCache || []).filter((template) =>
+    objetivosAdicionarTemplatesSelecionados.has(String(template.id))
+  );
+  if (!selecionados.length) return;
+  const ordemInicial = objetivosImplantacaoRascunho.length;
+  adicionarObjetivosImplantacaoNaTela(selecionados.map((template, indice) => ({
+    id: novoIdItemMarco(),
+    nome: template.nome,
+    ordem: ordemInicial + indice,
+    feito: false,
+    concluido_em: "",
+    prazo_dias: template.prazo_dias ?? null,
+    origem_template_id: template.id,
+    itens: (template.itens || []).map((subatividade) => ({
+      id: novoIdItemMarco(),
+      texto: subatividade.texto,
+      feito: false,
+      concluido_em: "",
+    })),
+  })));
+  fecharModalAdicionarObjetivo();
+});
+
+function atualizarPrevisaoObjetivoPersonalizado() {
+  const prazoDias = Number(inputPrazoObjetivoPersonalizado.value);
+  const prazoValido = Number.isInteger(prazoDias) && prazoDias > 0 && prazoDias <= 3650;
+  if (!prazoValido) {
+    previsaoObjetivoPersonalizado.textContent = "";
+    previsaoObjetivoPersonalizado.classList.add("hidden");
+    return;
+  }
+  const data = new Date();
+  data.setHours(0, 0, 0, 0);
+  data.setDate(data.getDate() + prazoDias);
+  previsaoObjetivoPersonalizado.textContent =
+    `Previsão de conclusão: ${data.toLocaleDateString("pt-BR")} (${prazoDias} dias a partir de hoje).`;
+  previsaoObjetivoPersonalizado.classList.remove("hidden");
+}
+
+inputPrazoObjetivoPersonalizado.addEventListener("input", atualizarPrevisaoObjetivoPersonalizado);
+formularioObjetivoPersonalizado.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!formularioObjetivoPersonalizado.reportValidity()) return;
+  const nome = inputNomeObjetivoPersonalizado.value.trim();
+  if (!nome) {
+    inputNomeObjetivoPersonalizado.focus();
+    return;
+  }
+  const prazoValor = inputPrazoObjetivoPersonalizado.value.trim();
+  const prazoDias = prazoValor ? Number(prazoValor) : null;
+  if (prazoDias !== null && (!Number.isInteger(prazoDias) || prazoDias < 1 || prazoDias > 3650)) {
+    inputPrazoObjetivoPersonalizado.setCustomValidity("Informe um prazo entre 1 e 3650 dias.");
+    formularioObjetivoPersonalizado.reportValidity();
+    inputPrazoObjetivoPersonalizado.addEventListener("input", () => inputPrazoObjetivoPersonalizado.setCustomValidity(""), { once: true });
+    return;
+  }
+  adicionarObjetivosImplantacaoNaTela([{
+    id: novoIdItemMarco(),
+    nome,
+    ordem: objetivosImplantacaoRascunho.length,
+    feito: false,
+    concluido_em: "",
+    prazo_dias: prazoDias,
+    origem_template_id: null,
+    itens: [],
+  }]);
+  formularioObjetivoPersonalizado.reset();
+  atualizarPrevisaoObjetivoPersonalizado();
+  fecharModalAdicionarObjetivo();
+});
 
 function atualizarPainelObjetivosImplantacao() {
   const atual = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
@@ -22994,9 +23666,17 @@ function atualizarPainelObjetivosImplantacao() {
   atual.replaceWith(construirPainelObjetivosImplantacao());
 }
 
-async function salvarObjetivosImplantacao() {
+async function salvarObjetivosImplantacao(objetivoIdFecharEdicao = null) {
   const cliente = objetivosImplantacaoCliente;
-  if (!cliente || !objetivosImplantacaoAlterado || objetivosImplantacaoSalvando) return;
+  if (!cliente || objetivosImplantacaoSalvando) return;
+  if (!objetivosImplantacaoAlterado) {
+    if (objetivoIdFecharEdicao !== null) {
+      objetivosImplantacaoEmEdicao.delete(String(objetivoIdFecharEdicao));
+      const objetivo = objetivosImplantacaoRascunho.find((item) => String(item.id) === String(objetivoIdFecharEdicao));
+      if (objetivo) substituirCartaoObjetivoImplantacao(objetivo);
+    }
+    return;
+  }
   objetivosImplantacaoSalvando = true;
   const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
   if (painel) painel.querySelectorAll("input, button").forEach((controle) => { controle.disabled = true; });
@@ -23011,11 +23691,15 @@ async function salvarObjetivosImplantacao() {
       alert(`Erro ao salvar objetivos: ${data.error || "falha desconhecida"}`);
       return;
     }
+    invalidarCacheFichaTimeline(cliente.id);
     cliente.objetivos_implantacao_detalhados = data.objetivos;
     objetivosImplantacaoRascunho = data.objetivos.map((item) => ({
       ...item,
       itens: (item.itens || []).map((subatividade) => ({ ...subatividade })),
     }));
+    if (objetivoIdFecharEdicao !== null) {
+      objetivosImplantacaoEmEdicao.delete(String(objetivoIdFecharEdicao));
+    }
     objetivosImplantacaoAlterado = false;
   } catch (error) {
     alert(`Erro ao salvar objetivos: ${String(error)}`);
@@ -23534,6 +24218,7 @@ async function carregarFichaCliente(idcentral, aba = fichaAbaAtual || "geral") {
       mostrarErroEmNode(corpo, data.error || "Cliente não encontrado.");
       return;
     }
+    if (data.implantacao) invalidarCacheFichaTimeline(data.implantacao.id);
     fichaClienteAtual = data;
     fichaClienteCache.set(idcentral, data);
     const nome = (data.implantacao && data.implantacao.cliente) || (data.migracao && data.migracao.nome) || idcentral;

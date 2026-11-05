@@ -24,6 +24,44 @@ conferir a coleção nova funcionando antes de remover a antiga, e
 `limpar_migracao_orfa.py` para remover, só depois de confirmado, os
 registros de migração sem vínculo com nenhum cliente.
 
+## Conclusão do Objetivo de Implantação virou independente das sub-atividades
+
+Antes: um objetivo com sub-atividades era considerado concluído automaticamente
+quando todas as sub-atividades estavam marcadas (`ClienteObjetivo.feito` era
+derivado de `all(item.feito for item in itens)`); objetivo sem sub-atividades
+usava um campo `feito` manual. Não existia data de conclusão nem prazo no
+nível do objetivo — só cada sub-atividade tinha `concluido_em`.
+
+Decisão (pedido explícito da responsável pelo Controle de Implantação, ao
+planejar o Dashboard de Implantação): `ClienteObjetivo.feito` e o novo
+`ClienteObjetivo.concluido_em` passam a ser **sempre manuais e independentes**
+das sub-atividades, em todo objetivo (com ou sem itens). As sub-atividades
+continuam existindo na Ficha como checklist de apoio, mas não determinam mais
+a conclusão do objetivo nem alimentam nenhum KPI do Dashboard de Implantação.
+`concluido_em` é carimbado com a data de hoje na primeira vez que o usuário
+marca o objetivo como concluído, mas fica sempre editável — e os indicadores
+de tempo/prazo do dashboard são sempre recalculados a partir do valor atual
+desse campo, nunca de um valor cacheado.
+
+Também foi adicionado `ClienteObjetivo.prazo_dias` (nullable, em dias a partir
+de `criado_em`) — prazo individual por objetivo, usado para calcular a data
+prevista de conclusão e identificar atraso. Objetivo sem prazo definido fica
+fora dos KPIs de atraso/previsão. Objetivo concluído antes dessa mudança
+(`feito=True` e `concluido_em=""`) é tratado como legado: conta nos KPIs de
+quantidade, mas fica fora de qualquer média/mediana de tempo (sem dado
+retroativo pra calcular).
+
+**"Implantação concluída (por objetivos)"** (cliente com pelo menos 1
+objetivo e todos concluídos) é uma métrica NOVA, só do Dashboard de
+Implantação — decisão explícita de manter `Cliente.etapa`/`concluido_em`
+(baseado nos 5 marcos do Playbook) como a fonte oficial de "cliente
+implantado" em todo o resto do sistema (Dashboard geral, lista de clientes
+implantados, switch manual "Implantado"). As duas métricas convivem sem se
+sobrepor.
+
+Migração: `9ba7a2a2212e_adiciona_prazo_e_conclusao_independente_.py` (adiciona
+`cliente_objetivos.concluido_em` e `cliente_objetivos.prazo_dias`).
+
 ## API do ssxdesk: domínio mudou para desk.systemsat.com.br
 
 Era `ssxdesk.ssatx.com.br`. A chave de API (`SSXDESK_API_KEY`) e os
