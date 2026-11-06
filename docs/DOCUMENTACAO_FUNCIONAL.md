@@ -230,6 +230,12 @@ diferenças) e aplica as mudanças aceitas.
 
 Interpreta pacotes brutos enviados pelo rastreador (parser por protocolo,
 ex.: GT06) para apoiar diagnóstico/configuração.
+Inclui relatórios ST300 do Suntech ST310U e ST340UR em texto e Zip. Além de
+status, emergência, evento, alerta e keep-alive, o parser interpreta os campos
+opcionais de RPM/iButton e localização celular, detalhes de excesso de
+velocidade e DPA, e as métricas econômicas do relatório de viagem (HTE). O
+ST340UR também inclui dados de dispositivo RS232 (UEX) e seu mapeamento de
+entradas/saídas. Os protocolos já suportados permanecem disponíveis.
 
 ### Área de Importação e Consulta
 

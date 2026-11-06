@@ -14373,6 +14373,7 @@ const QUEBRA_STRING_CAMPOS = [
   { chave: "motorista", label: "Motorista" },
   { chave: "entrada1", label: "Entrada Digital 1 (Input 1)" },
   { chave: "entrada2", label: "Entrada Digital 2 (Input 2)" },
+  { chave: "entrada3", label: "Entrada Digital 3 (Input 3)" },
   { chave: "saida1", label: "Saída 1 (Output 1)" },
   { chave: "saida2", label: "Saída 2 (Output 2)" },
   { chave: "entradas", label: "Entradas Digitais (Inputs)" },
@@ -14422,6 +14423,20 @@ const QUEBRA_STRING_PERFIS = {
     "data", "hora", "backup", "motivoEnvio", "gpsFixo", "satelites", "latitude", "longitude",
     "velocidade", "curso", "lbs", "ignicao", "modo", "alarme", "statusExtra", "sinalGsm",
     "entradas", "saidas", "mensagemTransparente", "assigns",
+  ],
+  ST310U: [
+    "possivelRastreador", "tipoPacote", "idImei", "firmware", "contador", "data", "hora",
+    "backup", "motivoEnvio", "gpsFixo", "satelites", "latitude", "longitude", "velocidade", "curso", "lbs",
+    "ignicao", "modo", "alarme", "evento", "statusExtra", "rpm", "limiteVelocidade", "velocidadeMaxima",
+    "cercaId", "forcaDpa", "gpsStatus", "tensao", "bateria", "sinalGsm", "odometro", "horimetro",
+    "entrada1", "entrada2", "entrada3", "saida1", "saida2", "entradas", "saidas",
+  ],
+  ST340UR: [
+    "possivelRastreador", "tipoPacote", "idImei", "firmware", "contador", "data", "hora",
+    "backup", "motivoEnvio", "gpsFixo", "satelites", "latitude", "longitude", "velocidade", "curso", "lbs",
+    "ignicao", "modo", "alarme", "evento", "statusExtra", "rpm", "limiteVelocidade", "velocidadeMaxima",
+    "cercaId", "forcaDpa", "gpsStatus", "tensao", "bateria", "sinalGsm", "odometro", "horimetro",
+    "motorista", "entrada1", "entrada2", "saida1", "entradas", "saidas", "mensagemTransparente",
   ],
   MT2000: [
     "possivelRastreador", "tipoPacote", "numeroSerial", "idImei", "iccid", "telefone", "firmware", "contador",
@@ -15621,6 +15636,762 @@ function parseSuntechZip(bytes) {
   return stResultado(tipo || bytes[0], comAck, "zip", v, bytes, "", problemas, { bruto: bytes[0], i: 0, f: 1 });
 }
 
+// ST310U uses the older ST300 report framing, distinct from Suntech Universal.
+const ST310U_RELATORIOS = {
+  STT: ["Status (posição periódica)", "10"],
+  EMG: ["Emergência", "11"],
+  EVT: ["Evento de entrada", "12"],
+  ALT: ["Alerta", "13"],
+  ALV: ["Keep-alive", "14"],
+  UEX: ["Dados RS232 externos", "16"],
+  HTE: ["Relatório de viagem", "1B"],
+};
+
+const ST310U_EMERGENCIAS = {
+  1: "Botão de pânico",
+  2: "Trava de estacionamento",
+  3: "Alimentação principal removida",
+  5: "Antifurto",
+  6: "Porta antifurto",
+  7: "Movimento",
+  8: "Choque antifurto",
+};
+
+const ST310U_EVENTOS = {
+  1: "Entrada 1 aterrada",
+  2: "Entrada 1 aberta",
+  3: "Entrada 2 aterrada",
+  4: "Entrada 2 aberta",
+  5: "Entrada 3 aterrada",
+  6: "Entrada 3 aberta",
+};
+
+const ST310U_ALERTAS = {
+  1: "Início de excesso de velocidade",
+  2: "Fim de excesso de velocidade",
+  3: "Antena GPS desconectada",
+  4: "Antena GPS reconectada",
+  5: "Saída de cerca",
+  6: "Entrada em cerca",
+  8: "Antena GPS em curto",
+  9: "Entrada em modo deep sleep",
+  10: "Saída do modo deep sleep",
+  13: "Erro na bateria interna",
+  14: "Bateria do veículo muito baixa",
+  15: "Choque",
+  16: "Colisão",
+  40: "Alimentação principal conectada",
+  41: "Alimentação principal desconectada",
+  44: "Bateria interna conectada",
+  45: "Bateria interna desconectada",
+  46: "Aceleração brusca (DPA)",
+  47: "Frenagem brusca (DPA)",
+  48: "Curva brusca (DPA)",
+  50: "Jammer detectado",
+  59: "iButton inserido",
+  60: "iButton removido",
+  61: "Ignição ligada sem movimento",
+  62: "Parada acima do tempo configurado",
+  63: "Ponto morto",
+  64: "Excesso de RPM",
+  65: "Calibração automática de RPM concluída",
+  66: "Calibração automática de odômetro concluída",
+  67: "Calibração de odômetro em segunda marcha concluída",
+  68: "Calibração automática DPA concluída",
+  70: "Excesso de velocidade durante chuva",
+  71: "Velocidade abaixo do limite durante chuva",
+  72: "Velocidade abaixo do limite após a chuva",
+  73: "Excesso de velocidade dentro da cerca",
+  74: "Velocidade abaixo do limite dentro da cerca",
+};
+
+function st310uNumero(valor) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? formatarNumeroBR(numero, 3) : String(valor);
+}
+
+function st310uBcd(byteHex) {
+  const alto = parseInt(byteHex[0], 16);
+  const baixo = parseInt(byteHex[1], 16);
+  return alto <= 9 && baixo <= 9 ? alto * 10 + baixo : null;
+}
+
+function st310uBcdTexto(bytes) {
+  const digitos = bytes.map((byte) => byte.toUpperCase());
+  if (digitos.some((byte) => !/^[0-9A-F]{2}$/.test(byte) || st310uBcd(byte) === null)) return null;
+  return digitos.join("");
+}
+
+function st310uFirmwareZip(hex) {
+  const versao = hexParaInt(hex);
+  const letra = versao >> 12;
+  const numero = versao & 0x0fff;
+  return `${letra ? String.fromCharCode(64 + letra) : ""}${letra ? "." : ""}${numero}`;
+}
+
+function st310uSetCampo(campos, bytes, separador, chave, campo, final) {
+  if (!campo) return;
+  campos[chave] = {
+    bruto: bytes.slice(campo.i, campo.f).join(separador),
+    final,
+    inicioByte: campo.i,
+    fimByte: campo.f,
+  };
+}
+
+function st310uMontarCampos(v, tipo, formato, bytes, separador, modeloRastreador = "ST310U") {
+  const campos = {};
+  const formatoZip = formato.toLowerCase() === "zip";
+  const adicionar = (chave, campo, final) => st310uSetCampo(campos, bytes, separador, chave, campo, final);
+  const numero = (chave) => (v[chave] ? Number(v[chave].v) : undefined);
+  const texto = (chave) => (v[chave] ? String(v[chave].v) : undefined);
+  const descricaoTipo = ST310U_RELATORIOS[tipo][0];
+  const modelo = texto("MODEL");
+  const modeloNumero = modelo === undefined ? undefined : Number(modelo);
+  const nomeModelo = modeloRastreador === "ST340UR"
+    ? "ST340UR"
+    : modeloNumero === 7 ? "ST310U" : modelo === undefined ? "ST310U" : `ST300 (modelo ${modelo})`;
+  const marcador = v.HDR;
+
+  adicionar("possivelRastreador", marcador, `Suntech ${nomeModelo} — protocolo ST300, formato ${formato}`);
+  adicionar("tipoPacote", marcador, descricaoTipo);
+  adicionar("idImei", v.DEV_ID, texto("DEV_ID"));
+  adicionar("firmware", v.SW_VER, texto("SW_VER"));
+  adicionar("contador", v.MSG_NUM, texto("MSG_NUM"));
+
+  if (v.DATE && v.TIME) {
+    const dataHora = stDataHora(texto("DATE"), texto("TIME"));
+    adicionar("data", v.DATE, dataHora.data);
+    adicionar("hora", v.TIME, `${dataHora.hora} (Brasília, convertido do UTC do GPS)`);
+  } else if (v.DATE) {
+    adicionar("data", v.DATE, texto("DATE"));
+  }
+
+  if (v.LAT) adicionar("latitude", v.LAT, Number.isFinite(Number(v.LAT.v)) ? formatarCoordenada(Number(v.LAT.v)) : "Coordenada inválida");
+  if (v.LON) adicionar("longitude", v.LON, Number.isFinite(Number(v.LON.v)) ? formatarCoordenada(Number(v.LON.v)) : "Coordenada inválida");
+  if (v.SPD) adicionar("velocidade", v.SPD, `${st310uNumero(v.SPD.v)} km/h`);
+  if (v.CRS) adicionar("curso", v.CRS, `${st310uNumero(v.CRS.v)}°`);
+  adicionar("gpsFixo", v.FIX, Number(v.FIX && v.FIX.v) ? "GPS fixado" : "GPS não fixado");
+  adicionar("satelites", v.SATT, texto("SATT"));
+  adicionar("modo", v.MODE, ({ 1: "Estacionado", 2: "Dirigindo", 4: "Por distância", 5: "Por ângulo" })[numero("MODE")] || (v.MODE && `Desconhecido (${v.MODE.v})`));
+  adicionar("motivoEnvio", v.MSG_TYPE, ({ 0: "Armazenado na memória", 1: "Tempo real" })[numero("MSG_TYPE")] || (v.MSG_TYPE && `Desconhecido (${v.MSG_TYPE.v})`));
+  adicionar("backup", v.MSG_TYPE, ({ 0: "Sim (armazenado na memória)", 1: "Não (tempo real)" })[numero("MSG_TYPE")]);
+  adicionar("motorista", v.DID, texto("DID") && `iButton ${texto("DID")}`);
+  adicionar("statusExtra", v.DID_REG, ({ 0: "iButton não registrado", 1: "iButton registrado" })[numero("DID_REG")]);
+  adicionar("rpm", v.RPM, `${texto("RPM")} RPM`);
+  adicionar("limiteVelocidade", v.SET_SPD, `${texto("SET_SPD")} km/h`);
+  adicionar("velocidadeMaxima", v.MAX_SPD, `${texto("MAX_SPD")} km/h`);
+  adicionar("cercaId", v.GEO_ID, `Cerca ${texto("GEO_ID")}`);
+  adicionar("forcaDpa", v.FORCE, `${texto("FORCE")} x/256 G`);
+  adicionar("gpsStatus", v.GPS_ON_OFF, ({ 0: "GPS desligado", 1: "GPS ligado" })[numero("GPS_ON_OFF")]);
+  adicionar("mensagemTransparente", v.DATA, texto("DATA"));
+  adicionar("tensao", v.PWR_VOLT, `${texto("PWR_VOLT")} V (alimentação principal)`);
+  adicionar("bateria", v.BCK_VOLT, `${texto("BCK_VOLT")} V (bateria interna)`);
+  adicionar("odometro", v.DIST, `${texto("DIST")} m (${st310uNumero(Number(v.DIST && v.DIST.v) / 1000)} km)`);
+  adicionar("horimetro", v.H_METER, `${texto("H_METER")} h`);
+
+  if (v.RX_LVL) {
+    const nivel = texto("RX_LVL");
+    adicionar("sinalGsm", v.RX_LVL, `${nivel}${nivel.startsWith("-") ? " dBm" : ""}`);
+  }
+
+  const camposLbs = [v.CELL, v.CELL_ID, v.MCC, v.MNC, v.LAC, v.TM_ADV].filter(Boolean);
+  if (camposLbs.length) {
+    const i = Math.min(...camposLbs.map((campo) => campo.i));
+    const f = Math.max(...camposLbs.map((campo) => campo.f));
+    const partes = [
+      v.CELL && `Cell ${v.CELL.v}`,
+      v.CELL_ID && `Cell ID ${v.CELL_ID.v}`,
+      v.MCC && `MCC ${v.MCC.v}`,
+      v.MNC && `MNC ${v.MNC.v}`,
+      v.LAC && `LAC ${v.LAC.v}`,
+      v.TM_ADV && `Timing Advance ${v.TM_ADV.v}`,
+    ].filter(Boolean);
+    campos.lbs = { bruto: bytes.slice(i, f).join(separador), final: partes.join(", "), inicioByte: i, fimByte: f };
+  }
+
+  if (v.IO) {
+    const io = formatoZip ? Number(v.IO.v) : null;
+    const valorIo = (bit, posicao) => (formatoZip ? (io & (1 << bit) ? "1" : "0") : String(v.IO.v)[posicao]);
+    const estadoEntrada = (n) => (n === "1" ? "Ativa (aterrada)" : "Inativa (aberta)");
+    const estadoSaida = (n) => (n === "1" ? "Ativa" : "Inativa");
+    const entrada = (n, bit) => valorIo(bit, n);
+    adicionar("ignicao", v.IO, entrada(0, 0) === "1" ? "Ligada" : "Desligada");
+    adicionar("entrada1", v.IO, estadoEntrada(entrada(1, 1)));
+    adicionar("entrada2", v.IO, estadoEntrada(entrada(2, 2)));
+    if (modeloRastreador !== "ST340UR") adicionar("entrada3", v.IO, estadoEntrada(entrada(3, 3)));
+    adicionar("saida1", v.IO, estadoSaida(entrada(4, 4)));
+    if (modeloRastreador !== "ST340UR") adicionar("saida2", v.IO, estadoSaida(entrada(5, 5)));
+    const entradasAtivas = (modeloRastreador === "ST340UR" ? [1, 2] : [1, 2, 3])
+      .filter((n) => entrada(n, n) === "1").map((n) => `Input ${n}`);
+    const saidasAtivas = (modeloRastreador === "ST340UR" ? [4] : [4, 5])
+      .filter((n) => entrada(n, n) === "1").map((n) => `Output ${n - 3}`);
+    adicionar("entradas", v.IO, entradasAtivas.length ? `Aterradas: ${entradasAtivas.join(", ")}` : "Todas abertas");
+    adicionar("saidas", v.IO, saidasAtivas.length ? `Ativas: ${saidasAtivas.join(", ")}` : "Todas inativas");
+  }
+
+  if (v.EMG_ID) adicionar("alarme", v.EMG_ID, ST310U_EMERGENCIAS[numero("EMG_ID")] || `Emergência desconhecida (${v.EMG_ID.v})`);
+  if (v.ALERT_ID) adicionar("alarme", v.ALERT_ID, ST310U_ALERTAS[numero("ALERT_ID")] || `Alerta desconhecido (${v.ALERT_ID.v})`);
+  if (v.EVT_ID) adicionar("evento", v.EVT_ID, ST310U_EVENTOS[numero("EVT_ID")] || `Evento desconhecido (${v.EVT_ID.v})`);
+  return campos;
+}
+
+function st300TextoPareceIButton(valor) {
+  return typeof valor === "string" && /^[0-9A-F]{14}$/i.test(valor);
+}
+
+function st300LerOpcionaisTexto(tokens, inicio, guardar, problemas, temForcaDpa = false) {
+  let pos = inicio;
+  const restantes = tokens.length - pos - (temForcaDpa ? 1 : 0);
+  const pareceRede = (valor) => typeof valor === "string" && /^[0-9A-F]{10}$/i.test(valor);
+
+  if (restantes >= 6 && pareceRede(tokens[pos])) {
+    ["CELL_ID", "MCC", "MNC", "RX_LVL", "LAC", "TM_ADV", "GPS_ON_OFF"]
+      .slice(0, Math.min(restantes, 7))
+      .forEach((chave, n) => guardar(chave, pos + n, ["MCC", "MNC", "RX_LVL", "TM_ADV", "GPS_ON_OFF"].includes(chave) ? Number : undefined));
+    if (restantes < 7) problemas.push("campos opcionais de localização celular incompletos");
+    return pos + restantes;
+  }
+
+  if (restantes >= 3 && /^[01]$/.test(tokens[pos + 2]) &&
+      Number.isFinite(Number(tokens[pos])) && Number.isFinite(Number(tokens[pos + 1]))) {
+    guardar("H_METER", pos, Number);
+    guardar("BCK_VOLT", pos + 1, Number);
+    guardar("MSG_TYPE", pos + 2, Number);
+    pos += 3;
+  } else if (restantes > 0 && !st300TextoPareceIButton(tokens[pos])) {
+    problemas.push("campos opcionais H_METER/BCK_VOLT/MSG_TYPE incompletos ou inválidos");
+    return pos;
+  }
+
+  if (st300TextoPareceIButton(tokens[pos]) && /^[01]$/.test(tokens[pos + 1] || "")) {
+    guardar("DID", pos);
+    guardar("DID_REG", pos + 1, Number);
+    pos += 2;
+  } else if (/^\d{1,5}$/.test(tokens[pos] || "") &&
+      st300TextoPareceIButton(tokens[pos + 1]) && /^[01]$/.test(tokens[pos + 2] || "")) {
+    guardar("RPM", pos, Number);
+    guardar("DID", pos + 1);
+    guardar("DID_REG", pos + 2, Number);
+    pos += 3;
+  }
+
+  const restantesRede = tokens.length - pos - (temForcaDpa ? 1 : 0);
+  if (restantesRede >= 6 && pareceRede(tokens[pos])) {
+    ["CELL_ID", "MCC", "MNC", "RX_LVL", "LAC", "TM_ADV", "GPS_ON_OFF"]
+      .slice(0, Math.min(restantesRede, 7))
+      .forEach((chave, n) => guardar(chave, pos + n, ["MCC", "MNC", "RX_LVL", "TM_ADV", "GPS_ON_OFF"].includes(chave) ? Number : undefined));
+    if (restantesRede < 7) problemas.push("campos opcionais de localização celular incompletos");
+  } else if (restantesRede > 0) {
+    problemas.push("campos opcionais de localização celular incompletos");
+  }
+  return pos + restantesRede;
+}
+
+function st300LerDetalhesAlertaTexto(tokens, guardar) {
+  const alerta = Number(tokens[16]);
+  if ([1, 2, 70, 71, 72].includes(alerta) && tokens.length >= 19) {
+    guardar("SET_SPD", 17, Number);
+    guardar("MAX_SPD", 18, Number);
+    return 2;
+  }
+  if ([73, 74].includes(alerta) && tokens.length >= 20) {
+    guardar("GEO_ID", 17);
+    guardar("SET_SPD", 18, Number);
+    guardar("MAX_SPD", 19, Number);
+    return 3;
+  }
+  return 0;
+}
+
+function parseST310UTexto(texto, modeloRastreador = "ST310U") {
+  let tokens = texto.replace(/[\r\n]+$/, "").split(";").map((token) => token.trim());
+  const tipo = tokens[0].toUpperCase().slice("ST300".length);
+  const problemas = [];
+  const v = {};
+  const guardar = (chave, indice, conversor = (valor) => valor) => {
+    if (tokens[indice] !== undefined) v[chave] = { v: conversor(tokens[indice]), i: indice, f: indice + 1 };
+  };
+  const mapaBase = [
+    ["DEV_ID", 1], ["MODEL", 2], ["SW_VER", 3], ["DATE", 4], ["TIME", 5], ["CELL", 6],
+    ["LAT", 7, Number], ["LON", 8, Number], ["SPD", 9, Number], ["CRS", 10, Number],
+    ["SATT", 11], ["FIX", 12], ["DIST", 13, Number], ["PWR_VOLT", 14, Number], ["IO", 15],
+  ];
+  v.HDR = { v: tokens[0], i: 0, f: 1 };
+  for (const [chave, indice, conversor] of mapaBase) guardar(chave, indice, conversor);
+
+  const indiceEvento = tipo === "STT" ? undefined : 16;
+  if (tipo === "STT") {
+    guardar("MODE", 16);
+    guardar("MSG_NUM", 17);
+    st300LerOpcionaisTexto(tokens, 18, guardar, problemas);
+  } else if (tipo === "UEX" && modeloRastreador === "ST340UR") {
+    let inicio = 0;
+    for (let i = 0; i < 16; i++) inicio = texto.indexOf(";", inicio) + 1;
+    const fimLen = texto.indexOf(";", inicio);
+    const comprimento = Number(texto.slice(inicio, fimLen));
+    const inicioData = fimLen + 1;
+    const fimData = inicioData + comprimento;
+    const separadorData = texto[fimData];
+    if (!Number.isInteger(comprimento) || comprimento < 0 || comprimento > 500 || separadorData !== ";") {
+      problemas.push("LEN/DATA inválidos ou incompletos no relatório UEX");
+    } else {
+      const dados = texto.slice(inicioData, fimData);
+      const restantes = texto.slice(fimData + 1).split(";");
+      tokens = tokens.slice(0, 16).concat([String(comprimento), dados], restantes);
+      guardar("LEN", 16, Number);
+      guardar("DATA", 17);
+      guardar("CHK_SUM", 18);
+      guardar("H_METER", 19, Number);
+      guardar("BCK_VOLT", 20, Number);
+      guardar("MSG_TYPE", 21, Number);
+      if (tokens.length >= 24) {
+        guardar("DID", 22);
+        guardar("DID_REG", 23, Number);
+      }
+      if (tokens.length >= 31) {
+        ["CELL_ID", "MCC", "MNC", "RX_LVL", "LAC", "TM_ADV", "GPS_ON_OFF"]
+          .forEach((chave, n) => guardar(chave, 24 + n, chave === "CELL_ID" || chave === "LAC" ? undefined : Number));
+      }
+      const soma = [...dados].reduce((total, caractere) => total + caractere.charCodeAt(0), 0) & 0xff;
+      if (tokens[18] && Number.parseInt(tokens[18], 16) !== soma) problemas.push("CHK_SUM não confere com a soma dos bytes de DATA");
+    }
+  } else if (tipo !== "ALV") {
+    guardar(tipo === "EMG" ? "EMG_ID" : tipo === "EVT" ? "EVT_ID" : "ALERT_ID", indiceEvento);
+    const camposAlerta = tipo === "ALT" ? st300LerDetalhesAlertaTexto(tokens, guardar) : 0;
+    const temForcaDpa = tipo === "ALT" && [46, 47, 48].includes(Number(v.ALERT_ID && v.ALERT_ID.v));
+    const fimOpcionais = st300LerOpcionaisTexto(tokens, 17 + camposAlerta, guardar, problemas, temForcaDpa);
+    if (temForcaDpa && tokens[fimOpcionais] !== undefined) guardar("FORCE", fimOpcionais, Number);
+  }
+
+  const minimo = tipo === "ALV" ? 2 : tipo === "STT" ? 18 : tipo === "UEX" ? 22 : 17;
+  if (tokens.length < minimo) problemas.push(`pacote incompleto: esperados ao menos ${minimo} campos, recebidos ${tokens.length}`);
+  const maximo = tipo === "STT" ? 31 : tipo === "ALV" ? 2 : tipo === "UEX" ? 31 : tipo === "ALT" ? 33 : 30;
+  if (tokens.length > maximo) problemas.push("há campos extras após o fim do relatório");
+  if (v.IO && !/^[01]{6}$/.test(String(v.IO.v))) problemas.push("campo I/O deve conter 6 bits");
+  for (const chave of ["LAT", "LON", "SPD", "CRS"]) {
+    if (v[chave] && !Number.isFinite(v[chave].v)) problemas.push(`campo ${chave} não é numérico`);
+  }
+  for (const chave of ["DIST", "PWR_VOLT", "H_METER", "BCK_VOLT"]) {
+    if (v[chave] && !Number.isFinite(Number(v[chave].v))) problemas.push(`campo ${chave} não é numérico`);
+  }
+  if (tipo !== "ALV" && v.DATE && !/^\d{8}$/.test(String(v.DATE.v))) problemas.push("data fora do formato AAAAMMDD");
+  if (tipo !== "ALV" && v.TIME && !/^\d{2}:\d{2}:\d{2}$/.test(String(v.TIME.v))) problemas.push("hora fora do formato HH:MM:SS");
+
+  const bytes = tokens.slice();
+  return {
+    campos: st310uMontarCampos(v, tipo, "texto", bytes, ";", modeloRastreador),
+    bytes,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    separador: ";",
+    perfil: modeloRastreador,
+  };
+}
+
+function parseST310UZip(bytes, modeloRastreador = "ST310U") {
+  const tipoNome = Object.keys(ST310U_RELATORIOS).find((chave) => ST310U_RELATORIOS[chave][1] === bytes[3]);
+  const problemas = [];
+  const v = {};
+  let pos = 3;
+  let tamanhoDeclarado = null;
+  const limite = bytes[bytes.length - 1] === "03" ? bytes.length - 1 : bytes.length;
+  const ler = (inicio, fim) => bytes.slice(inicio, fim).join("");
+  const pegar = (chave, tamanho, conversor = (bruto) => bruto) => {
+    const inicio = pos;
+    pos += tamanho;
+    if (pos > limite) {
+      problemas.push(`o pacote termina antes do campo ${chave}`);
+      return;
+    }
+    const bruto = ler(inicio, pos);
+    v[chave] = { v: conversor(bruto), i: inicio, f: pos };
+  };
+  const lerBCD = (hex) => st310uBcd(hex);
+  const bcdHexTexto = (hex) => st310uBcdTexto((hex.match(/../g) || [])) || hex;
+  const inteiro = (hex) => hexParaInt(hex);
+  const bcdDecimal3 = (hex) => {
+    const valor = hexParaInt(hex.slice(0, 4));
+    const fracao = lerBCD(hex.slice(4, 6));
+    return fracao === null ? Number.NaN : valor + fracao / 100;
+  };
+  const signed16 = (hex) => {
+    const valor = hexParaInt(hex);
+    return valor & 0x8000 ? valor - 0x10000 : valor;
+  };
+  const ascii = (hex) => (hex.match(/../g) || [])
+    .map((byte) => Number.parseInt(byte, 16))
+    .filter((byte) => byte !== 0)
+    .map((byte) => String.fromCharCode(byte))
+    .join("");
+
+  v.HDR = { v: bytes[3], i: 3, f: 4 };
+  if (!tipoNome) return { campos: {}, bytes, aviso: "Pacote ST300 Zip não reconhecido.", perfil: modeloRastreador };
+  if (bytes.length < 4) problemas.push("pacote incompleto: faltam cabeçalho ou comprimento");
+  if (bytes[0] !== "02") problemas.push("STX inválido (esperado 0x02)");
+  if (bytes[bytes.length - 1] !== "03") problemas.push("ETX ausente ou inválido (esperado 0x03)");
+  if (bytes.length >= 3) {
+    tamanhoDeclarado = hexParaInt(ler(1, 3));
+  }
+
+  pos = 4;
+  pegar("DEV_ID", 5, (hex) => {
+    const bcd = st310uBcdTexto(hex.match(/../g) || []);
+    return bcd ? bcd.slice(0, 9) : hex;
+  });
+  if (tipoNome === "ALV") {
+    if (pos < limite) problemas.push(`${limite - pos} byte(s) inesperado(s) após o ID do keep-alive`);
+  } else {
+    pegar("MODEL", 1, inteiro);
+    pegar("SW_VER", 2, st310uFirmwareZip);
+    pegar("DATE_TIME", 6, bcdHexTexto);
+    if (v.DATE_TIME && v.DATE_TIME.v.length === 12) {
+      const data = `20${v.DATE_TIME.v.slice(0, 2)}${v.DATE_TIME.v.slice(2, 4)}${v.DATE_TIME.v.slice(4, 6)}`;
+      const hora = `${v.DATE_TIME.v.slice(6, 8)}:${v.DATE_TIME.v.slice(8, 10)}:${v.DATE_TIME.v.slice(10, 12)}`;
+      v.DATE = { v: data, i: v.DATE_TIME.i, f: v.DATE_TIME.f };
+      v.TIME = { v: hora, i: v.DATE_TIME.i, f: v.DATE_TIME.f };
+    } else if (v.DATE_TIME) {
+      problemas.push("DATE_TIME contém bytes BCD inválidos");
+    }
+    pegar("CELL", 3, (hex) => hex);
+    pegar("LAT", 4, (hex) => hex);
+    pegar("LON", 4, (hex) => hex);
+    const latitudeBruta = v.LAT;
+    const longitudeBruta = v.LON;
+    pegar("SPD", 3, bcdDecimal3);
+    pegar("CRS", 3, bcdDecimal3);
+    pegar("SATT_FIX", 1, inteiro);
+    if (latitudeBruta) {
+      const bytesHex = latitudeBruta.v.match(/../g);
+      const fracao = st310uBcdTexto(bytesHex.slice(1));
+      const sinal = hexParaInt(v.SATT_FIX && v.SATT_FIX.v || "0") & 0x40 ? -1 : 1;
+      v.LAT.v = fracao === null ? Number.NaN : sinal * (hexParaInt(bytesHex[0]) + Number(`0.${fracao}`));
+    }
+    if (longitudeBruta) {
+      const bytesHex = longitudeBruta.v.match(/../g);
+      const fracao = st310uBcdTexto(bytesHex.slice(1));
+      const sinal = hexParaInt(v.SATT_FIX && v.SATT_FIX.v || "0") & 0x20 ? -1 : 1;
+      v.LON.v = fracao === null ? Number.NaN : sinal * (hexParaInt(bytesHex[0]) + Number(`0.${fracao}`));
+    }
+    pegar("DIST", 4, inteiro);
+    pegar("PWR_VOLT", 2, (hex) => {
+      const volts = lerBCD(hex.slice(2, 4));
+      return volts === null ? Number.NaN : hexParaInt(hex.slice(0, 2)) + volts / 100;
+    });
+    pegar("IO", 1, inteiro);
+    if (tipoNome === "STT") {
+      pegar("MODE", 1, inteiro);
+      pegar("MSG_NUM", 2, inteiro);
+    } else if (tipoNome === "UEX") {
+      pegar("LEN", 2, inteiro);
+      if (v.LEN && v.LEN.v <= 500) {
+        pegar("DATA", v.LEN.v, (hex) => String.fromCharCode(...(hex.match(/../g) || []).map((byte) => Number.parseInt(byte, 16))));
+      } else if (v.LEN) {
+        problemas.push("LEN excede o limite de 500 bytes");
+      }
+      pegar("CHK_SUM", 1, inteiro);
+    } else {
+      pegar(tipoNome === "EMG" ? "EMG_ID" : tipoNome === "EVT" ? "EVT_ID" : "ALERT_ID", 1, inteiro);
+    }
+    if (tipoNome === "ALT") {
+      const alerta = Number(v.ALERT_ID && v.ALERT_ID.v);
+      const comprimentoSemDetalhes = [
+        pos + 7 - 3,
+        pos + 8 - 3,
+        pos + 15 - 3,
+        pos + 17 - 3,
+        pos + 18 - 3,
+      ];
+      const pacoteSemDetalhes = tamanhoDeclarado !== null &&
+        tamanhoDeclarado !== bytes.length - 4 &&
+        comprimentoSemDetalhes.includes(tamanhoDeclarado);
+      if ([1, 2, 70, 71, 72].includes(alerta) && limite - pos >= 6 && !pacoteSemDetalhes) {
+        pegar("SET_SPD", 3, bcdDecimal3);
+        pegar("MAX_SPD", 3, bcdDecimal3);
+      } else if ([73, 74].includes(alerta) && limite - pos >= 8 && !pacoteSemDetalhes) {
+        pegar("GEO_ID", 2, inteiro);
+        pegar("SET_SPD", 3, bcdDecimal3);
+        pegar("MAX_SPD", 3, bcdDecimal3);
+      }
+    }
+
+    const bytesOpcionais = limite - pos;
+    const alertaDpa = tipoNome === "ALT" && [46, 47, 48].includes(Number(v.ALERT_ID && v.ALERT_ID.v));
+    const forcaSemLbs = alertaDpa && bytesOpcionais === 4;
+    const lerForca = (hex) => {
+      const fracao = st310uBcdTexto((hex.match(/../g) || []).slice(1));
+      return fracao === null ? Number.NaN : hexParaInt(hex.slice(0, 2)) + Number(`0.${fracao}`);
+    };
+    if (forcaSemLbs) pegar("FORCE", 4, lerForca);
+    const pareceLbsModerno = (inicio) => limite - inicio >= 19 &&
+      bytes.slice(inicio + 5, inicio + 13).every((byte) => byte && /^[0-9A-F]{2}$/.test(byte) &&
+        Number.parseInt(byte, 16) >= 0x30 && Number.parseInt(byte, 16) <= 0x39);
+    const lbsSemHmeter = forcaSemLbs || pareceLbsModerno(pos) ||
+      (modeloRastreador === "ST340UR" && bytesOpcionais === 10);
+    if (!lbsSemHmeter && bytesOpcionais >= 7) {
+      pegar("H_METER", 4, inteiro);
+      pegar("BCK_VOLT", 2, (hex) => {
+        const volts = lerBCD(hex.slice(2, 4));
+        return volts === null ? Number.NaN : hexParaInt(hex.slice(0, 2)) + volts / 100;
+      });
+      pegar("MSG_TYPE", 1, inteiro);
+    } else if (!lbsSemHmeter && bytesOpcionais > 0) {
+      problemas.push("campos opcionais H_METER/BCK_VOLT/MSG_TYPE incompletos");
+    }
+
+    let bytesDepoisStatus = limite - pos;
+    const flagDid = (indice) => ["00", "01"].includes(bytes[indice]);
+    const tamanhosRedeOpcional = [0, 4, 10, 14, 19, 23];
+    if (bytesDepoisStatus >= 10 && flagDid(pos + 9) && modeloRastreador !== "ST340UR" &&
+        tamanhosRedeOpcional.includes(bytesDepoisStatus - 10)) {
+      pegar("RPM", 2, inteiro);
+      pegar("DID", 7, bcdHexTexto);
+      pegar("DID_REG", 1, inteiro);
+    } else if (bytesDepoisStatus >= 8 && flagDid(pos + 7) &&
+        tamanhosRedeOpcional.includes(bytesDepoisStatus - 8)) {
+      pegar("DID", 7, bcdHexTexto);
+      pegar("DID_REG", 1, inteiro);
+    }
+
+    bytesDepoisStatus = limite - pos;
+    if (bytesDepoisStatus >= 19) {
+      pegar("CELL_ID", 5, (hex) => hex);
+      pegar("MCC", 4, ascii);
+      pegar("MNC", 4, ascii);
+      pegar("RX_LVL", 2, signed16);
+      pegar("LAC", 2, (hex) => hex);
+      pegar("TM_ADV", 1, inteiro);
+      pegar("GPS_ON_OFF", 1, inteiro);
+    } else if (bytesDepoisStatus >= 10) {
+      pegar("CELL_ID", 2, (hex) => hex);
+      pegar("MCC", 2, (hex) => hexParaInt(hex));
+      pegar("MNC", 1, inteiro);
+      pegar("RX_LVL", 2, signed16);
+      pegar("LAC", 2, (hex) => hex);
+      pegar("TM_ADV", 1, inteiro);
+    } else if (bytesDepoisStatus > 0 && !(alertaDpa && bytesDepoisStatus === 4)) {
+      problemas.push("campos opcionais de localização celular incompletos");
+    }
+
+    if (alertaDpa && !v.FORCE && limite - pos >= 4) {
+      pegar("FORCE", 4, lerForca);
+    }
+    if (tipoNome === "UEX" && v.DATA && v.CHK_SUM) {
+      const soma = [...String(v.DATA.v)].reduce((total, caractere) => total + caractere.charCodeAt(0), 0) & 0xff;
+      if (soma !== v.CHK_SUM.v) problemas.push("CHK_SUM não confere com a soma dos bytes de DATA");
+    }
+  }
+
+  if (tamanhoDeclarado !== null) {
+    const tamanhosValidos = [bytes.length - 4];
+    if (v.MSG_TYPE) tamanhosValidos.push(v.MSG_TYPE.f - 3);
+    if (v.DID_REG) tamanhosValidos.push(v.DID_REG.f - 3);
+    if (!tamanhosValidos.includes(tamanhoDeclarado)) {
+      problemas.push(`PKT_LEN declara ${tamanhoDeclarado} bytes, recebidos ${bytes.length - 4}`);
+    }
+  }
+
+  if (v.SATT_FIX) {
+    const info = Number(v.SATT_FIX.v);
+    v.FIX = { v: info >> 7 & 1, i: v.SATT_FIX.i, f: v.SATT_FIX.f };
+    v.SATT = { v: info & 0x1f, i: v.SATT_FIX.i, f: v.SATT_FIX.f };
+  }
+  for (const chave of ["LAT", "LON", "SPD", "CRS", "PWR_VOLT", "BCK_VOLT"]) {
+    if (v[chave] && !Number.isFinite(Number(v[chave].v))) problemas.push(`campo ${chave} contém valor inválido ou BCD incorreto`);
+  }
+  if (v.PWR_VOLT) v.PWR_VOLT.v = Number.isFinite(v.PWR_VOLT.v) ? `${formatarNumeroBR(v.PWR_VOLT.v, 2)}` : String(v.PWR_VOLT.v);
+  if (v.BCK_VOLT) v.BCK_VOLT.v = Number.isFinite(v.BCK_VOLT.v) ? `${formatarNumeroBR(v.BCK_VOLT.v, 1)}` : String(v.BCK_VOLT.v);
+  if (v.SPD && Number.isFinite(v.SPD.v)) v.SPD.v = formatarNumeroBR(v.SPD.v, 3);
+  if (v.CRS && Number.isFinite(v.CRS.v)) v.CRS.v = formatarNumeroBR(v.CRS.v, 3);
+  if (tipoNome === "ALV" && bytes.length !== 10) problemas.push("tamanho inesperado para keep-alive (esperados 10 bytes)");
+
+  return {
+    campos: st310uMontarCampos(v, tipoNome, "Zip", bytes, "", modeloRastreador),
+    bytes,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    perfil: modeloRastreador,
+  };
+}
+
+function st340URLinhaExtra(label, bruto, final, inicioByte, fimByte) {
+  return { label, bruto, final: String(final), inicioByte, fimByte };
+}
+
+function parseST340URViagemTexto(texto) {
+  const bytes = texto.replace(/[\r\n]+$/, "").split(";").map((token) => token.trim());
+  const problemas = [];
+  const v = {};
+  const guardar = (chave, indice, conversor = (valor) => valor) => {
+    if (bytes[indice] !== undefined) v[chave] = { v: conversor(bytes[indice]), i: indice, f: indice + 1 };
+  };
+  v.HDR = { v: bytes[0], i: 0, f: 1 };
+  [["DEV_ID", 1], ["MODEL", 2], ["SW_VER", 3], ["DATE", 4], ["TIME", 5], ["DIST", 6, Number],
+    ["PWR_VOLT", 7, Number], ["H_METER", 8, Number], ["BCK_VOLT", 9, Number], ["MSG_TYPE", 10, Number]]
+    .forEach(([chave, indice, conversor]) => guardar(chave, indice, conversor));
+  if (bytes.length >= 28) guardar("DID", 27);
+
+  const nomes = [
+    "Distância da viagem (m)", "Duração da viagem (min)", "Tempo parado (min)", "Tempo em movimento (min)",
+    "Latitude inicial", "Longitude inicial", "Latitude final", "Longitude final",
+    "Velocidade média (km/h)", "Velocidade máxima (km/h)", "Tempo em excesso de velocidade (min)",
+    "Tempo em faixa econômica alta (min)", "Tempo em faixa econômica baixa (min)",
+    "Tempo em faixa econômica (min)", "Tempo acima do RPM máximo (min)",
+    "Tempo em ponto morto (min)", "ID do motorista",
+  ];
+  const linhasExtras = bytes.slice(11).map((bruto, n) => {
+    const indice = n + 11;
+    const motorista = indice === bytes.length - 1;
+    const final = motorista ? `iButton ${bruto}`
+      : n === 0 ? `${bruto} m`
+        : n >= 4 && n <= 7 ? formatarCoordenada(Number(bruto))
+          : n === 8 || n === 9 ? `${bruto} km/h`
+            : `${bruto} min`;
+    return st340URLinhaExtra(
+      motorista ? "ID do motorista" : nomes[n] || `Campo de viagem ${n + 1}`,
+      bruto,
+      final,
+      indice,
+      indice + 1,
+    );
+  });
+  if (bytes.length < 28) problemas.push(`relatório HTE incompleto: esperados 28 campos, recebidos ${bytes.length}`);
+  if (bytes[6] !== undefined && !Number.isFinite(Number(bytes[6]))) problemas.push("DIST não é numérico");
+  if (bytes[7] !== undefined && !Number.isFinite(Number(bytes[7]))) problemas.push("PWR_VOLT não é numérico");
+
+  return {
+    campos: st310uMontarCampos(v, "HTE", "texto", bytes, ";", "ST340UR"),
+    bytes,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    separador: ";",
+    perfil: "ST340UR",
+    linhasExtras,
+  };
+}
+
+function parseST340URViagemZip(bytes) {
+  const problemas = [];
+  const v = {};
+  const linhasExtras = [];
+  let pos = 3;
+  const limite = bytes[bytes.length - 1] === "03" ? bytes.length - 1 : bytes.length;
+  const ler = (inicio, fim) => bytes.slice(inicio, fim).join("");
+  const pegar = (chave, tamanho, conversor = (hex) => hex) => {
+    const inicio = pos;
+    pos += tamanho;
+    if (pos > limite) {
+      problemas.push(`o pacote termina antes do campo ${chave}`);
+      return;
+    }
+    v[chave] = { v: conversor(ler(inicio, pos)), i: inicio, f: pos };
+  };
+  const inteiro = (hex) => hexParaInt(hex);
+  const bcdTexto = (hex) => st310uBcdTexto((hex.match(/../g) || [])) || hex;
+  const bcd3 = (hex) => {
+    const fracao = st310uBcd(hex.slice(4, 6));
+    return fracao === null ? Number.NaN : hexParaInt(hex.slice(0, 4)) + fracao / 100;
+  };
+  const coordenada = (hex, sinalNegativo) => {
+    const fracao = st310uBcdTexto((hex.slice(2).match(/../g) || []));
+    return fracao === null ? Number.NaN : (sinalNegativo ? -1 : 1) * (hexParaInt(hex.slice(0, 2)) + Number(`0.${fracao}`));
+  };
+  const linha = (label, campo, final) => {
+    if (campo) linhasExtras.push(st340URLinhaExtra(label, ler(campo.i, campo.f), final, campo.i, campo.f));
+  };
+
+  v.HDR = { v: bytes[3], i: 3, f: 4 };
+  pos = 4;
+  if (bytes[0] !== "02") problemas.push("STX inválido (esperado 0x02)");
+  if (bytes[bytes.length - 1] !== "03") problemas.push("ETX ausente ou inválido (esperado 0x03)");
+  if (bytes.length >= 3 && hexParaInt(ler(1, 3)) !== bytes.length - 4) problemas.push("PKT_LEN não confere com o tamanho recebido");
+  pegar("DEV_ID", 5, (hex) => bcdTexto(hex).slice(0, 9));
+  pegar("MODEL", 1, inteiro);
+  pegar("SW_VER", 2, st310uFirmwareZip);
+  pegar("DATE_TIME", 6, bcdTexto);
+  if (v.DATE_TIME && v.DATE_TIME.v.length === 12) {
+    v.DATE = { v: `20${v.DATE_TIME.v.slice(0, 6)}`, i: v.DATE_TIME.i, f: v.DATE_TIME.f };
+    v.TIME = { v: `${v.DATE_TIME.v.slice(6, 8)}:${v.DATE_TIME.v.slice(8, 10)}:${v.DATE_TIME.v.slice(10, 12)}`, i: v.DATE_TIME.i, f: v.DATE_TIME.f };
+  } else if (v.DATE_TIME) {
+    problemas.push("DATE_TIME contém bytes BCD inválidos");
+  }
+  pegar("DIST", 4, inteiro);
+  pegar("PWR_VOLT", 2, (hex) => {
+    const fracao = st310uBcd(hex.slice(2));
+    return fracao === null ? Number.NaN : hexParaInt(hex.slice(0, 2)) + fracao / 100;
+  });
+  pegar("H_METER", 4, inteiro);
+  pegar("BCK_VOLT", 2, (hex) => {
+    const fracao = st310uBcd(hex.slice(2));
+    return fracao === null ? Number.NaN : hexParaInt(hex.slice(0, 2)) + fracao / 100;
+  });
+  pegar("MSG_TYPE", 1, inteiro);
+  const definicoes = [
+    ["TRAVEL_DIST", 3, inteiro, "Distância da viagem (m)"],
+    ["TRAVEL_TIME", 2, inteiro, "Duração da viagem (min)"],
+    ["TIME_STOP", 2, inteiro, "Tempo parado (min)"],
+    ["TIME_MOVING", 2, inteiro, "Tempo em movimento (min)"],
+    ["LAT_TRAVEL_ST", 4, (hex) => coordenada(hex, false), "Latitude inicial"],
+    ["LON_TRAVEL_ST", 4, (hex) => coordenada(hex, false), "Longitude inicial"],
+    ["LAT_TRAVEL_FI", 4, (hex) => coordenada(hex, false), "Latitude final"],
+    ["LON_TRAVEL_FI", 4, (hex) => coordenada(hex, false), "Longitude final"],
+  ];
+  definicoes.forEach(([chave, tamanho, conversor]) => pegar(chave, tamanho, conversor));
+  pegar("POS_SIGN", 1, inteiro);
+  const sinais = Number(v.POS_SIGN && v.POS_SIGN.v || 0);
+  ["LAT_TRAVEL_ST", "LON_TRAVEL_ST", "LAT_TRAVEL_FI", "LON_TRAVEL_FI"].forEach((chave, indice) => {
+    if (v[chave]) v[chave].v = Math.abs(v[chave].v) * (sinais & (1 << (3 - indice)) ? -1 : 1);
+  });
+  pegar("AVERAGE_SPD", 3, bcd3);
+  pegar("MAX_SPD", 3, bcd3);
+  pegar("TIME_OVER_SPD", 2, inteiro);
+  pegar("TIME_ECO_UP", 2, inteiro);
+  pegar("TIME_ECO_DOWN", 2, inteiro);
+  pegar("TIME_ECO_INSIDE", 2, inteiro);
+  pegar("TIME_OVER_RPM", 2, inteiro);
+  pegar("TIME_DC", 2, inteiro);
+  pegar("DID", 7, bcdTexto);
+  [
+    ["LAT_TRAVEL_ST", "Latitude inicial", (valor) => formatarCoordenada(Number(valor))],
+    ["LON_TRAVEL_ST", "Longitude inicial", (valor) => formatarCoordenada(Number(valor))],
+    ["LAT_TRAVEL_FI", "Latitude final", (valor) => formatarCoordenada(Number(valor))],
+    ["LON_TRAVEL_FI", "Longitude final", (valor) => formatarCoordenada(Number(valor))],
+    ["TRAVEL_DIST", "Distância da viagem (m)", (valor) => `${valor} m`],
+    ["TRAVEL_TIME", "Duração da viagem (min)", (valor) => `${valor} min`],
+    ["TIME_STOP", "Tempo parado (min)", (valor) => `${valor} min`],
+    ["TIME_MOVING", "Tempo em movimento (min)", (valor) => `${valor} min`],
+    ["AVERAGE_SPD", "Velocidade média (km/h)", (valor) => `${st310uNumero(valor)} km/h`],
+    ["MAX_SPD", "Velocidade máxima (km/h)", (valor) => `${st310uNumero(valor)} km/h`],
+    ["TIME_OVER_SPD", "Tempo em excesso de velocidade (min)", (valor) => `${valor} min`],
+    ["TIME_ECO_UP", "Tempo em faixa econômica alta (min)", (valor) => `${valor} min`],
+    ["TIME_ECO_DOWN", "Tempo em faixa econômica baixa (min)", (valor) => `${valor} min`],
+    ["TIME_ECO_INSIDE", "Tempo em faixa econômica (min)", (valor) => `${valor} min`],
+    ["TIME_OVER_RPM", "Tempo acima do RPM máximo (min)", (valor) => `${valor} min`],
+    ["TIME_DC", "Tempo em ponto morto (min)", (valor) => `${valor} min`],
+    ["DID", "ID do motorista", (valor) => `iButton ${valor}`],
+  ].forEach(([chave, label, formatar]) => linha(label, v[chave], formatar(v[chave] && v[chave].v)));
+  if (v.HDR && bytes.length < 83) problemas.push("relatório HTE Zip incompleto");
+  for (const chave of ["PWR_VOLT", "BCK_VOLT", "AVERAGE_SPD", "MAX_SPD"]) {
+    if (v[chave] && !Number.isFinite(Number(v[chave].v))) problemas.push(`${chave} contém valor inválido ou BCD incorreto`);
+  }
+  if (v.PWR_VOLT) v.PWR_VOLT.v = Number.isFinite(v.PWR_VOLT.v) ? formatarNumeroBR(v.PWR_VOLT.v, 2) : String(v.PWR_VOLT.v);
+  if (v.BCK_VOLT) v.BCK_VOLT.v = Number.isFinite(v.BCK_VOLT.v) ? formatarNumeroBR(v.BCK_VOLT.v, 1) : String(v.BCK_VOLT.v);
+  return {
+    campos: st310uMontarCampos(v, "HTE", "Zip", bytes, "", "ST340UR"),
+    bytes,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    perfil: "ST340UR",
+    linhasExtras,
+  };
+}
+
+function parseST340URTexto(texto) {
+  if (/^ST300HTE;/i.test(texto)) return parseST340URViagemTexto(texto);
+  return parseST310UTexto(texto, "ST340UR");
+}
+
+function parseST340URZip(bytes) {
+  if (bytes[3] === "1B") return parseST340URViagemZip(bytes);
+  return parseST310UZip(bytes, "ST340UR");
+}
+
 // Protocolo MT2000 (Mobilogix) "T Message" v1.3.8: texto ASCII [TIMESTAMP,TIPO,campo,...,campo]
 // Tx = rastreador → servidor, Sx = servidor → rastreador. Os campos de cada tipo vêm em ordem fixa.
 // [nome, grupo]: o grupo define a lista de campos (MT_CAMPOS) e em qual linha o tipo aparece.
@@ -16101,13 +16872,18 @@ function parseTeltonikaAvl(bytes) {
 // Devolve { campos, bytes, aviso, separador, perfil }: campos[chave] = { bruto, final, inicioByte, fimByte }
 // (campo ausente = não encontrado nessa string → exibe "-").
 // aviso = erro de entrada ou problema de tamanho/CRC; "" quando está tudo certo.
-// Roteamento: *ET → E3; ~ → J-R12 String; { → J-R12 JSON; [ → MT2000; STT;/ALT;... → Suntech Normal;
+// Roteamento: *ET → E3; ~ → J-R12 String; { → J-R12 JSON; [ → MT2000; ST300STT;/... → ST310U/ST340UR;
+// STT;/ALT;... → Suntech Universal;
 // hex 5E... → J-R12 Zip; hex 81/82/83... → Suntech Zip; hex 00000000... → Teltonika AVL;
-// hex 00+tamanho+IMEI ASCII → Teltonika (login); hex 78 78 → GT06.
+// hex 02+tamanho+10..14/16/1B → ST310U/ST340UR Zip; hex 00+tamanho+IMEI ASCII → Teltonika (login); hex 78 78 → GT06.
 function quebrarString(strBruta) {
   const texto = (strBruta || "").trim().replace(/^(\\r\\n)+/, "").trim();
   if (/^\*?ET\s*,/i.test(texto)) return parseE3(texto);
   if (texto.startsWith("[")) return parseMT2000(texto);
+  if (/^ST300(STT|EMG|EVT|ALT|ALV|UEX|HTE);/i.test(texto)) {
+    const ehST340 = /^ST300(UEX|HTE);/i.test(texto) || texto.split(";")[2] === "04";
+    return ehST340 ? parseST340URTexto(texto) : parseST310UTexto(texto);
+  }
   if (/^A?(STT|ALT|ALV|UEX|TRV|CAM|FTR|CID|MNT|RFA|GED|PRM|ACK|CRR);/i.test(texto)) return parseSuntechNormal(texto);
   if (texto.startsWith("~")) return parseJR12String(texto);
   if (texto.startsWith("{")) return parseJR12Json(texto);
@@ -16120,11 +16896,16 @@ function quebrarString(strBruta) {
       campos: {},
       bytes: [],
       aviso:
-        "Entrada inválida: use hex em número par de dígitos (GT06, J-R12 Zip, Suntech Zip, Teltonika), texto *ET (E3), ~...$ ou JSON (J-R12), STT;... (Suntech), [...] (MT2000).",
+        "Entrada inválida: use hex em número par de dígitos (GT06, J-R12 Zip, Suntech Zip, ST310U/ST340UR Zip, Teltonika), texto *ET (E3), ~...$ ou JSON (J-R12), ST300STT;... (ST310U/ST340UR), STT;... (Suntech), [...] (MT2000).",
     };
   }
 
   const bytes = hexParaBytes(hexLimpo);
+  if (bytes[0] === "02" && Object.values(ST310U_RELATORIOS).some(([, hdr]) => hdr === bytes[3])) {
+    return bytes[3] === "1B" || bytes[3] === "16" || bytes[9] === "04"
+      ? parseST340URZip(bytes)
+      : parseST310UZip(bytes);
+  }
   if (bytes[0] === "5E") return parseJR12Zip(bytes);
   if (ST_ZIP_HDR[bytes[0]]) return parseSuntechZip(bytes);
   if (bytes.slice(0, 4).join("") === "00000000") return parseTeltonikaAvl(bytes);
@@ -16137,7 +16918,7 @@ function quebrarString(strBruta) {
       campos: {},
       bytes,
       aviso:
-        "Equipamento não reconhecido: o hex precisa começar com 78 78 (GT06), 5E (J-R12 Zip), 81/82/83... (Suntech Zip) ou 00 00 00 00 (Teltonika AVL).",
+        "Equipamento não reconhecido: o hex precisa começar com 78 78 (GT06), 5E (J-R12 Zip), 81/82/83... (Suntech Zip), 02 ... 10–14/16/1B (ST310U/ST340UR Zip) ou 00 00 00 00 (Teltonika AVL).",
     };
   }
 
