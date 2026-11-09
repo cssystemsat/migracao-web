@@ -1995,8 +1995,41 @@ table.conversor-edicao-tabela tr.conversor-edicao-linha-erro td { background: #f
    células, pra os textos ficarem alinhados na mesma coluna. */
 .quebra-string-layout { display: flex; flex-direction: column; gap: 11px; }
 .quebra-string-layout .campo-migracao { gap: 3px; }
+.quebra-string-protocolo-cabecalho { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--cinza-700); }
+.quebra-string-protocolo-auto { color: var(--verde-600, #1a7f4e); font-size: 0.8rem; }
 .quebra-string-layout textarea { padding: 5px 8px; font-size: 0.82rem; font-family: monospace; resize: vertical; }
 .quebra-string-acoes { display: flex; align-items: center; gap: 6px; margin-top: -6px; }
+.quebra-string-acoes select {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  margin: 0;
+  padding: 6px 40px 6px 12px;
+  appearance: none;
+  border: 1px solid var(--cinza-300);
+  border-radius: 9px;
+  color: var(--cinza-900);
+  background-color: var(--painel);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='m4 6 4 4 4-4' stroke='%236b7280' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.quebra-string-acoes select:hover { border-color: #93a4bd; }
+.quebra-string-acoes select:focus-visible {
+  outline: none;
+  border-color: var(--azul);
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.16);
+}
+.quebra-string-acoes select option,
+.quebra-string-acoes select optgroup { color: var(--cinza-900); background: var(--painel); }
+:root[data-theme="dark"] .quebra-string-acoes select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='m4 6 4 4 4-4' stroke='%23a7b3cc' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
 .quebra-string-acoes button { width: auto; padding: 5px 11px; margin: 0; }
 .quebra-string-acoes .btn-primary { padding: 5px 14px; }
 .quebra-string-disponiveis { width: auto; flex-shrink: 0; margin: 0; padding: 6px 11px; }
@@ -2039,8 +2072,6 @@ table.conversor-edicao-tabela tr.conversor-edicao-linha-erro td { background: #f
 
 /* Tabela: linhas sem informação apagadas; linha escolhida pelo clique num byte em destaque. */
 table.quebra-string-tabela tr.qs-linha-vazia td { opacity: 0.45; }
-table.quebra-string-tabela tbody tr.qs-linha-selecionada td { background: #dbeafe; }
-:root[data-theme="dark"] table.quebra-string-tabela tbody tr.qs-linha-selecionada td { background: #1e3a5f; }
 
 /* Badges de status no valor final. */
 .qs-badge { display: inline-block; padding: 0 6px; border-radius: 999px; line-height: 1.6; }
@@ -2077,7 +2108,10 @@ table.quebra-string-tabela tbody tr.qs-linha-selecionada td { background: #dbeaf
   z-index: 2;
   max-height: 30vh;
   overflow-y: auto;
-  margin: 0;
+  /* O gap do flex (11px) é menor que a sombra de -14px abaixo, que existe pra
+     cobrir linhas da tabela ao rolar; sem essa margem extra, a sombra invade
+     a barra de botões (.quebra-string-acoes) logo acima. */
+  margin: 3px 0 0;
   padding: 5px 8px;
   border: 1px solid var(--cinza-200);
   border-radius: var(--radius);
@@ -2128,6 +2162,22 @@ table.quebra-string-tabela td:last-child { width: 40%; font-weight: 500; overflo
 table.quebra-string-tabela tbody tr:nth-child(even) td { background: var(--cinza-100); }
 table.quebra-string-tabela tbody tr:hover td { background: #f0f7ff; }
 :root[data-theme="dark"] table.quebra-string-tabela tbody tr:hover td { background: #1e2a42; }
+table.quebra-string-tabela tbody tr.qs-linha-selecionada td {
+  background: #bfdbfe;
+  opacity: 1;
+}
+table.quebra-string-tabela tbody tr.qs-linha-selecionada td:first-child {
+  box-shadow: inset 4px 0 #2563eb;
+  color: #1e40af;
+  font-weight: 700;
+}
+:root[data-theme="dark"] table.quebra-string-tabela tbody tr.qs-linha-selecionada td {
+  background: #1e3a5f;
+}
+:root[data-theme="dark"] table.quebra-string-tabela tbody tr.qs-linha-selecionada td:first-child {
+  box-shadow: inset 4px 0 #60a5fa;
+  color: #bfdbfe;
+}
 .quebra-string-bruto-ativo { cursor: help; text-decoration: underline dotted var(--cinza-300); text-underline-offset: 3px; }
 table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef3c7; }
 :root[data-theme="dark"] table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #4a3b12; }

@@ -1923,9 +1923,32 @@
               <span>String Bruta (RAW)</span>
               <textarea id="quebra-string-input" rows="3" placeholder="Cole aqui o pacote enviado pelo rastreador."></textarea>
             </label>
-            <div class="quebra-string-acoes">
-              <button id="btn-quebra-string" class="btn-primary" disabled>Quebrar string</button>
+            <div class="quebra-string-protocolo-cabecalho">
+              <span>Protocolo</span>
+              <span id="quebra-string-protocolo-auto" class="quebra-string-protocolo-auto hidden"></span>
+            </div>
+            <div class="quebra-string-acoes" title="Por padrão o Quebra-String tenta identificar o protocolo pelo conteúdo. Force um protocolo quando dois fabricantes reaproveitam o mesmo formato de pacote (ex.: GT06 x X3Tech) e a detecção automática não dá pra confiar.">
+              <select id="quebra-string-protocolo">
+                <option value="auto" selected>Automático (detectar pelo conteúdo)</option>
+                <option value="rst">RST</option>
+                <option value="e3">E3</option>
+                <option value="mt2000">MT2000</option>
+                <option value="st310u-texto">ST310U (texto)</option>
+                <option value="st340ur-texto">ST340UR (texto)</option>
+                <option value="suntech-texto">Suntech Universal</option>
+                <option value="jr12-texto">J-R12 (texto)</option>
+                <option value="jr12-json">J-R12 (JSON)</option>
+                <option value="gt06">GT06</option>
+                <option value="x3tech">X3Tech</option>
+                <option value="teltonika">Teltonika</option>
+                <option value="teltonika-login">Teltonika (login)</option>
+                <option value="jr12-zip">J-R12 (ZIP)</option>
+                <option value="suntech-zip">Suntech (ZIP)</option>
+                <option value="st310u-zip">ST310U (ZIP)</option>
+                <option value="st340ur-zip">ST340UR (ZIP)</option>
+              </select>
               <button type="button" id="btn-quebra-string-limpar" class="btn-secondary" disabled>Limpar</button>
+              <button id="btn-quebra-string" class="btn-primary" disabled>Quebrar string</button>
             </div>
             <div id="quebra-string-bytes" class="quebra-string-bytes"></div>
             <div id="quebra-string-resultado" class="quebra-string-resultado"></div>
@@ -3560,12 +3583,15 @@
       <div class="modal-body quebra-string-disponiveis-conteudo">
         <p>Protocolos com decodificador disponível nesta ferramenta. A compatibilidade pode variar conforme o modelo e a versão do firmware.</p>
         <ul>
-          <li><strong>Concox e compatíveis</strong> — GT06</li>
+          <li><strong>Padrão GT06</strong> — Concox, J16 e compatíveis (inclui variantes CRX1 e CRX3)</li>
           <li><strong>BWS IoT</strong> — E3</li>
           <li><strong>Jmak</strong> — J-R12 (String, JSON e Zip)</li>
+          <li><strong>Suntech ST3xx</strong> — ST310U e ST340UR (texto e Zip)</li>
           <li><strong>Suntech 4G</strong></li>
           <li><strong>Mobilogix</strong> — MT2000 (T Message)</li>
-          <li><strong>Teltonika</strong> — AVL Codec 8/Codec 8 Extended e login com IMEI</li>
+          <li><strong>Teltonika</strong> — AVL Codec 8/Codec 8 Extended, login com IMEI e comandos/respostas Codec 12 (GPRS)</li>
+          <li><strong>Absolut</strong> — RST (ASCII)</li>
+          <li><strong>X3Tech</strong> — XT40-TM e NT40-6F (protocolo NT20; mesmo formato de pacote do GT06 — use o botão "Escolher protocolo" pra forçar essa variante)</li>
         </ul>
       </div>
     </div>

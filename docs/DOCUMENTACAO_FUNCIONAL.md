@@ -235,7 +235,54 @@ status, emergência, evento, alerta e keep-alive, o parser interpreta os campos
 opcionais de RPM/iButton e localização celular, detalhes de excesso de
 velocidade e DPA, e as métricas econômicas do relatório de viagem (HTE). O
 ST340UR também inclui dados de dispositivo RS232 (UEX) e seu mapeamento de
-entradas/saídas. Os protocolos já suportados permanecem disponíveis.
+entradas/saídas. Inclui também o protocolo ASCII do Absolut (RST), com a base
+de tracking, bits de informações adicionais e as mensagens de evento do
+rastreador (sensor, bateria, antifurto, macro/formulário, evento embarcado,
+viagem/estacionamento). O "Padrão GT06" cobre, além do GT06 clássico
+(0x01/0x12/0x13/0x15/0x16/0x1A/0x80), as variantes CRX1 e CRX3 da Concox:
+login com modelo/fuso (CRX3), localização 0x22 com ACC/modo de envio/
+odômetro, alarme 0x26 com tabela de alarmes estendida (inclui bateria
+baixa, violação, porta, SIM trocado etc.), resposta de comando 0x21 e
+transmissão de informação 0x94 (cabeçalho 79 79, 2 bytes de tamanho),
+LBS múltiplas bases 0x28 e checagem de horário 0x8A. Os protocolos já
+suportados permanecem disponíveis.
+Comportamento do CRX1 (não é formato de pacote, mas ajuda no diagnóstico):
+com o veículo parado — ACC ligado ou desligado — o equipamento não envia
+0x12 (filtra dados sem movimento); só envia 0x12 quando há movimento,
+usando o intervalo configurado para o estado do ACC no momento. ACC
+desligado + movimento também dispara um alarme de vibração (0x16),
+como indício de furto. "Modo sleep" é ACC desligado + parado (economia
+de GPRS). Ou seja, a ausência de 0x12 durante longos períodos não é
+necessariamente falha de comunicação.
+A cada novo protocolo adicionado, atualizar também a lista "Equipamentos
+disponíveis" em `templates/index.html` (modal do Quebra-String).
+Inclui também o protocolo AVL da Teltonika (famílias FMB9XX/FMB130/FMM130/
+FMC130): pacote de login (IMEI em ASCII, sem preamble) e pacote AVL em
+Codec 8/Codec 8 Extended (preamble, CRC-16/IBM, data/hora, GPS, bloco de
+elementos de I/O — cada I/O do registro vira uma linha própria na tabela,
+com nome/conversão pelos AVL IDs documentados: entradas/saídas digitais e
+analógicas, odômetro/combustível/CAN, acelerômetro, sensores BLE (temperatura/
+bateria/umidade), geofence (as 50 zonas de evento), condução econômica,
+viagem (trip), colisão, jamming, dados de OBD-II, entre outros). IDs sem
+mapeamento aparecem como "IO <id>" com o valor bruto. Também decodifica
+comandos/respostas em Codec 12 (ex.: `getinfo`, `#GET VERSION`) — mesmo
+preamble e CRC do Codec 8, mas com texto ASCII no lugar de registro AVL.
+Inclui também o protocolo X3Tech (rastreadores XT40-TM e NT40-6F em modo
+"NT20", protocolo próprio da X3Tech — distinto do modo GT06 que esses
+mesmos equipamentos também suportam via comando SETLOCX12#): login (0x01),
+localização (0x12), heartbeat (0x13), alarme (0x16), os frames novos 0x22
+(localização com tensão principal/bateria, hodômetro e horímetro) e 0x25
+(mesmo frame 0x22 + identificação de motorista por iButton/RFID), IMSI
+(0x90) e ICCID/transmissão geral de informação (0x94). **Importante**: o
+X3Tech reaproveita o mesmo formato de pacote do GT06/Concox (78 78/79 79 +
+CRC-ITU, inclusive os mesmos números de protocolo 0x01/0x12/0x13/0x16/0x94),
+mas com tabela de alarmes e, nos frames 0x22/0x25, layout de campos
+totalmente diferentes — não dá pra diferenciar os dois fabricantes só pelo
+conteúdo do pacote. Por isso o Quebra-String tem o botão "Escolher
+protocolo" (menu suspenso, oculto até o clique) que força a decodificação
+por um protocolo específico em vez da detecção automática; é obrigatório
+usá-lo pra ler corretamente um pacote X3Tech (a detecção automática sempre
+tenta GT06/Concox primeiro nesse formato de pacote).
 
 ### Área de Importação e Consulta
 

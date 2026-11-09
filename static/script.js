@@ -14322,6 +14322,8 @@ el("btn-convare-importar-api").addEventListener("click", () => {
 // Sub-tela "/ferramentas/quebra-string": entrada + bytes à esquerda, tabela à direita.
 const quebraStringInput = el("quebra-string-input");
 const quebraStringBytesView = el("quebra-string-bytes");
+const quebraStringProtocoloSelect = el("quebra-string-protocolo");
+const quebraStringProtocoloAuto = el("quebra-string-protocolo-auto");
 const btnQuebraString = el("btn-quebra-string");
 const btnQuebraStringDisponiveis = el("btn-quebra-string-disponiveis");
 const overlayQuebraStringDisponiveis = el("overlay-quebra-string-disponiveis");
@@ -14339,14 +14341,21 @@ const QUEBRA_STRING_CAMPOS = [
   { chave: "contador", label: "Contador de mensagens" },
   { chave: "firmware", label: "Firmware / Versão" },
   { chave: "iccid", label: "ICCID do chip" },
+  { chave: "imsi", label: "IMSI do chip" },
   { chave: "telefone", label: "Telefone (consulta)" },
   { chave: "comando", label: "Comando / resposta" },
+  { chave: "tipoInfo94", label: "Tipo de informação (0x94)" },
+  { chave: "dadosInfo94", label: "Dados (0x94)" },
   { chave: "data", label: "Data" },
   { chave: "hora", label: "Hora" },
+  { chave: "dataInterna", label: "Data (relógio interno)" },
+  { chave: "horaInterna", label: "Hora (relógio interno)" },
   { chave: "envio", label: "Data/hora de envio" },
   { chave: "motivoEnvio", label: "Motivo do envio" },
+  { chave: "origemLocalizacao", label: "Origem da localização" },
   { chave: "backup", label: "Dado de backup" },
   { chave: "gpsFixo", label: "Posição GPS" },
+  { chave: "gpsStatus", label: "Status do GPS" },
   { chave: "satelites", label: "Satélites" },
   { chave: "hdop", label: "HDOP" },
   { chave: "latitude", label: "Latitude" },
@@ -14356,14 +14365,25 @@ const QUEBRA_STRING_CAMPOS = [
   { chave: "curso", label: "Curso" },
   { chave: "lbs", label: "Torre de celular (LBS)" },
   { chave: "ignicao", label: "Ignição" },
+  { chave: "rastreamento", label: "Rastreamento GPS (status)" },
   { chave: "modo", label: "Modo do veículo" },
   { chave: "corteOleo", label: "Óleo/eletricidade" },
   { chave: "alarme", label: "Alarme" },
+  { chave: "alarmeStatus", label: "Alarme (byte de status)" },
   { chave: "evento", label: "Evento" },
   { chave: "statusExtra", label: "Outros status" },
+  { chave: "rpm", label: "RPM" },
+  { chave: "limiteVelocidade", label: "Limite de velocidade configurado" },
+  { chave: "velocidadeMaxima", label: "Velocidade máxima registrada" },
+  { chave: "cercaId", label: "ID da cerca" },
+  { chave: "forcaDpa", label: "Força DPA" },
   { chave: "tensao", label: "Bateria Principal (Veículo)" },
+  { chave: "tensaoPrincipal", label: "Tensão principal" },
+  { chave: "tensaoBateria", label: "Tensão da bateria interna" },
+  { chave: "tensaoExterna", label: "Tensão externa" },
   { chave: "bateria", label: "Bateria Interna (Backup)" },
   { chave: "sinalGsm", label: "Sinal GSM" },
+  { chave: "rede", label: "Rede (2G/4G)" },
   { chave: "operadora", label: "Operadora" },
   { chave: "tecnologia", label: "Tecnologia celular" },
   { chave: "temperatura", label: "Temperatura" },
@@ -14371,6 +14391,8 @@ const QUEBRA_STRING_CAMPOS = [
   { chave: "horimetro", label: "Horímetro" },
   { chave: "tipoUpload", label: "Tipo de upload" },
   { chave: "motorista", label: "Motorista" },
+  { chave: "motoristaTipo", label: "Tipo de identificação do motorista" },
+  { chave: "motoristaInfo", label: "Identificação do motorista (dados)" },
   { chave: "entrada1", label: "Entrada Digital 1 (Input 1)" },
   { chave: "entrada2", label: "Entrada Digital 2 (Input 2)" },
   { chave: "entrada3", label: "Entrada Digital 3 (Input 3)" },
@@ -14444,12 +14466,22 @@ const QUEBRA_STRING_PERFIS = {
     "velocidade", "curso", "lbs", "ignicao", "alarme", "statusExtra", "tensao", "bateria", "sinalGsm",
     "odometro", "horimetro", "entrada1", "saida1",
   ],
+  RST: ["possivelRastreador", "tipoPacote"],
   // Os valores de I/O (ignição, entradas, CAN, etc.) não entram aqui: cada um vira a sua
   // própria linha dinâmica na tabela (ver "linhasExtras" em parseTeltonikaAvl), porque o
   // conjunto de IOs enviado muda de equipamento pra equipamento e de configuração pra configuração.
   TELTONIKA: [
     "possivelRastreador", "tipoPacote", "idImei", "contador", "motivoEnvio",
     "data", "hora", "gpsFixo", "satelites", "latitude", "longitude", "altitude", "velocidade", "curso",
+  ],
+  X3TECH: [
+    "possivelRastreador", "tipoPacote", "idImei", "telefone", "comando",
+    "origemLocalizacao", "dataInterna", "horaInterna",
+    "data", "hora", "gpsFixo", "satelites", "latitude", "longitude", "velocidade", "curso", "lbs", "rede",
+    "corteOleo", "rastreamento", "statusExtra", "alarmeStatus", "alarme", "bateria", "sinalGsm",
+    "tensaoPrincipal", "tensaoBateria", "tensaoExterna", "odometro", "horimetro",
+    "motoristaTipo", "motoristaInfo", "motorista",
+    "imsi", "iccid", "tipoInfo94", "dadosInfo94",
   ],
 };
 
@@ -14487,10 +14519,16 @@ const GT06_TIPO_PACOTE = {
   "13": "Status (heartbeat)",
   "15": "Resposta a comando",
   "16": "Alarme (GPS + LBS + status)",
-  "17": "Endereço em chinês (resposta do servidor)",
+  "17": "Consulta de endereço por LBS",
+  "18": "LBS múltiplas estações (estendido)",
   "1A": "Consulta de endereço por telefone",
-  "22": "Posição (layout de exemplo)",
+  "21": "Resposta de comando online (CRX3)",
+  "22": "Localização UTC (CRX3)",
+  "26": "Alarme UTC (CRX3)",
+  "28": "LBS múltiplas bases (estendido, CRX3)",
   "80": "Comando do servidor",
+  "8A": "Checagem de horário",
+  "94": "Transmissão de informação",
 };
 
 // GPS data upload mode (não vale para a série 06).
@@ -14503,8 +14541,35 @@ const GT06_TIPO_UPLOAD = {
   "05": "Envio do último ponto válido ao recuperar a rede",
 };
 
-// Alarme (primeiro byte de alarme/idioma), tabela 5.3.1.17 do protocolo.
-const GT06_ALARME = ["Normal", "SOS", "Corte de energia", "Vibração/choque", "Entrada em cerca", "Saída de cerca"];
+// Alarme (primeiro byte de alarme/idioma). Base (0-5) do protocolo GT06 padrão; 0x06 em diante
+// são extensões dos protocolos CRX1 (até 0x14, 0xFE/0xFF) e CRX3 (até 0x15) da Concox.
+const GT06_ALARME = {
+  0x00: "Normal",
+  0x01: "SOS",
+  0x02: "Corte de energia",
+  0x03: "Vibração/choque",
+  0x04: "Entrada em cerca",
+  0x05: "Saída de cerca",
+  0x06: "Excesso de velocidade",
+  0x09: "Deslocamento/movimento",
+  0x0a: "Entrada em zona sem GPS",
+  0x0b: "Saída de zona sem GPS",
+  0x0c: "Ligado (power on)",
+  0x0d: "Primeira fixação de GPS",
+  0x0e: "Bateria baixa",
+  0x0f: "Proteção por bateria baixa",
+  0x10: "Troca de SIM",
+  0x11: "Desligado (power off)",
+  0x12: "Modo avião",
+  0x13: "Violação (disassemble)",
+  0x14: "Porta (door alarm)",
+  0x15: "Desligamento (shutdown)",
+  0xfe: "ACC ligado",
+  0xff: "ACC desligado",
+};
+// Alarme embutido nos bits 3-5 do byte de informação do terminal, tabela 5.3.1.14/5.4.1.4
+// (000/001/010/011/100 em binário = 0/1/2/3/4 decimal). É o único lugar que mostra bateria baixa.
+const GT06_ALARME_TERMINAL = ["Normal", "Vibração/choque", "Corte de energia", "Bateria baixa", "SOS"];
 // Nível de tensão, tabela 5.3.1.15.
 const GT06_NIVEL_BATERIA = [
   "Sem energia (desligado)",
@@ -14545,37 +14610,38 @@ function gt06Campo(campos, bytes, chave, inicio, qtd, calcularFinal) {
   campos[chave] = { bruto, final: calcularFinal(bruto), inicioByte: inicio, fimByte: inicio + qtd };
 }
 
-// Bloco GPS comum a 0x12, 0x16, 0x1A e ao layout 0x22:
-// data/hora (4-9), latitude (11-14), longitude (15-18), velocidade (19), curso/status (20-21).
-function gt06PreencherGps(campos, bytes) {
-  if (bytes.length >= 10) {
-    // Bytes 4-9: Ano, Mês, Dia, Hora, Min, Seg — valor hex direto (não BCD), em UTC.
-    const [ano, mes, dia, hora, min, seg] = bytes.slice(4, 10).map(hexParaInt);
+// Bloco GPS comum a 0x12, 0x16, 0x1A, 0x22 e 0x26: data/hora (base..+5), satélites (base+6),
+// latitude (base+7..+10), longitude (base+11..+14), velocidade (base+15), curso/status (base+16..+17).
+// "base" é o índice de início do bloco (4 nos pacotes com cabeçalho 78 78 de 1 byte de tamanho).
+function gt06PreencherGps(campos, bytes, base = 4) {
+  if (bytes.length >= base + 6) {
+    // Ano, Mês, Dia, Hora, Min, Seg — valor hex direto (não BCD), em UTC.
+    const [ano, mes, dia, hora, min, seg] = bytes.slice(base, base + 6).map(hexParaInt);
     const dataUtc = new Date(Date.UTC(2000 + ano, mes - 1, dia, hora, min, seg));
     // Exibição em horário de Brasília (UTC-3).
     const dataBrasilia = new Date(dataUtc.getTime() - 3 * 60 * 60 * 1000);
-    gt06Campo(campos, bytes, "data", 4, 3, () => formatarDataBR(dataBrasilia));
-    gt06Campo(campos, bytes, "hora", 7, 3, () => formatarHoraBR(dataBrasilia));
+    gt06Campo(campos, bytes, "data", base, 3, () => formatarDataBR(dataBrasilia));
+    gt06Campo(campos, bytes, "hora", base + 3, 3, () => formatarHoraBR(dataBrasilia));
   }
 
-  // Byte 10: nibble alto = tamanho da info GPS, nibble baixo = satélites usados no posicionamento.
-  gt06Campo(campos, bytes, "satelites", 10, 1, (b) => String(hexParaInt(b) & 0x0f));
-  gt06Campo(campos, bytes, "velocidade", 19, 1, (bruto) => `${hexParaInt(bruto)} km/h`);
+  // Byte seguinte: nibble alto = tamanho da info GPS, nibble baixo = satélites usados no posicionamento.
+  gt06Campo(campos, bytes, "satelites", base + 6, 1, (b) => String(hexParaInt(b) & 0x0f));
+  gt06Campo(campos, bytes, "velocidade", base + 15, 1, (bruto) => `${hexParaInt(bruto)} km/h`);
 
-  // Sem os bytes 20-21 não dá para saber o hemisfério: as coordenadas ficam de fora.
-  if (bytes.length < 22) return;
+  // Sem os 2 bytes de curso/status não dá para saber o hemisfério: as coordenadas ficam de fora.
+  if (bytes.length < base + 18) return;
 
-  // Bytes 20-21: bit13 = GPS diferencial (0 = tempo real), bit12 = GPS posicionado,
+  // bit13 = GPS diferencial (0 = tempo real), bit12 = GPS posicionado,
   // bit11 = hemisfério da longitude (1=Oeste), bit10 = hemisfério da latitude (1=Norte), bits 0-9 = curso.
-  const cursoStatus = hexParaInt(bytes[20] + bytes[21]);
+  const cursoStatus = hexParaInt(bytes[base + 16] + bytes[base + 17]);
   const sinalLat = cursoStatus & 0x0400 ? 1 : -1;
   const sinalLon = cursoStatus & 0x0800 ? -1 : 1;
 
   // Coordenadas: valor = minutos × 30000, então graus = valor / 1800000.
-  gt06Campo(campos, bytes, "latitude", 11, 4, (bruto) => formatarCoordenada(sinalLat * (hexParaInt(bruto) / 1800000)));
-  gt06Campo(campos, bytes, "longitude", 15, 4, (bruto) => formatarCoordenada(sinalLon * (hexParaInt(bruto) / 1800000)));
-  gt06Campo(campos, bytes, "curso", 20, 2, () => `${cursoStatus & 0x03ff}°`);
-  gt06Campo(campos, bytes, "gpsFixo", 20, 2, () =>
+  gt06Campo(campos, bytes, "latitude", base + 7, 4, (bruto) => formatarCoordenada(sinalLat * (hexParaInt(bruto) / 1800000)));
+  gt06Campo(campos, bytes, "longitude", base + 11, 4, (bruto) => formatarCoordenada(sinalLon * (hexParaInt(bruto) / 1800000)));
+  gt06Campo(campos, bytes, "curso", base + 16, 2, () => `${cursoStatus & 0x03ff}°`);
+  gt06Campo(campos, bytes, "gpsFixo", base + 16, 2, () =>
     `${cursoStatus & 0x1000 ? "Posicionado" : "Não posicionado"} (${cursoStatus & 0x2000 ? "diferencial" : "tempo real"})`
   );
 }
@@ -14597,14 +14663,20 @@ function gt06PreencherStatus(campos, bytes, base) {
   // Bit7 do byte de terminal: 1 = óleo e eletricidade cortados. Bit1: 1 = ACC alto (ignição ligada).
   gt06Campo(campos, bytes, "corteOleo", base, 1, (b) => (hexParaInt(b) & 0x80 ? "Cortado" : "Conectado"));
   gt06Campo(campos, bytes, "ignicao", base, 1, (b) => (hexParaInt(b) & 0x02 ? "Ligada" : "Desligada"));
-  // Bit0: antifurto ativado, bit2: carregando, bit6: rastreamento GPS ligado.
+  // Bit0: antifurto (setado/desarmado), bit2: carregando, bit6: GPS já definiu posição.
   gt06Campo(campos, bytes, "statusExtra", base, 1, (b) => {
     const v = hexParaInt(b);
     return [
       v & 0x01 ? "Antifurto ativado" : "Antifurto desativado",
       v & 0x04 ? "Carregando" : "Sem carga",
-      v & 0x40 ? "Rastreamento GPS ligado" : "Rastreamento GPS desligado",
+      v & 0x40 ? "GPS já definiu posição" : "GPS ainda sem posição",
     ].join("; ");
+  });
+  // Bits 3-5: tipo de alarme embutido no byte de status (único lugar que mostra bateria baixa —
+  // o campo "alarme" abaixo, vindo do byte separado alarme/idioma, não cobre esse caso).
+  gt06Campo(campos, bytes, "alarmeStatus", base, 1, (b) => {
+    const tipo = (hexParaInt(b) >> 3) & 0x07;
+    return GT06_ALARME_TERMINAL[tipo] || `Desconhecido (${tipo})`;
   });
   gt06Campo(campos, bytes, "bateria", base + 1, 1, (b) => GT06_NIVEL_BATERIA[hexParaInt(b)] || `Desconhecido (0x${b})`);
   gt06Campo(campos, bytes, "sinalGsm", base + 2, 1, (b) => GT06_SINAL_GSM[hexParaInt(b)] || `Desconhecido (0x${b})`);
@@ -14612,90 +14684,523 @@ function gt06PreencherStatus(campos, bytes, base) {
   gt06Campo(campos, bytes, "alarme", base + 3, 1, (b) => GT06_ALARME[hexParaInt(b)] || `Desconhecido (0x${b})`);
 }
 
-// Login (0x01): IMEI em BCD, 8 bytes a partir do byte 4.
-function gt06PreencherLogin(campos, bytes) {
+// Login (0x01): IMEI em BCD (8 bytes) a partir de "base". Nos pacotes CRX3 (conteúdo com 12 bytes em
+// vez de 8) há ainda o código do modelo (2) e o fuso/idioma (2) logo depois do IMEI.
+function gt06PreencherLogin(campos, bytes, base = 4, conteudoLen = 8) {
   // Os 16 dígitos vêm com um 0 à esquerda quando o IMEI tem 15 dígitos.
-  gt06Campo(campos, bytes, "idImei", 4, 8, (bruto) => bruto.replace(/^0/, ""));
+  gt06Campo(campos, bytes, "idImei", base, 8, (bruto) => bruto.replace(/^0/, ""));
+  if (conteudoLen >= 12) {
+    gt06Campo(campos, bytes, "modeloId", base + 8, 2, (bruto) => `Código do modelo (hex): ${bruto}`);
+    gt06Campo(campos, bytes, "fusoIdioma", base + 10, 2, (bruto) => `Fuso/idioma (bruto, hex): ${bruto}`);
+  }
 }
 
-// Comando de texto (0x15 e 0x80): byte 4 = tamanho (4 bytes de Server Flag + conteúdo ASCII).
-function gt06PreencherComando(campos, bytes) {
-  const tamanhoComando = hexParaInt(bytes[4]);
-  gt06Campo(campos, bytes, "comando", 9, tamanhoComando - 4, (bruto) => hexParaTexto(bruto));
+// Comando de texto (0x15 e 0x80): byte "base" = tamanho (4 bytes de Server Flag + conteúdo ASCII).
+function gt06PreencherComando(campos, bytes, base = 4) {
+  const tamanhoComando = hexParaInt(bytes[base]);
+  gt06Campo(campos, bytes, "comando", base + 5, tamanhoComando - 4, (bruto) => hexParaTexto(bruto));
 }
 
-// Layout de exemplo do protocolo 0x22, mapeado a partir de um pacote real informado pelo usuário.
-// O GPS é o mesmo dos demais pacotes; os campos após o byte 29 seguem esse exemplo.
-function gt06PreencherLayout22(campos, bytes) {
-  gt06Campo(campos, bytes, "ignicao", 30, 1, (bruto) => (hexParaInt(bruto) === 0 ? "Desligada" : "Ligada"));
-  gt06Campo(campos, bytes, "tipoUpload", 31, 1, (bruto) => GT06_TIPO_UPLOAD[bruto] || `Desconhecido (0x${bruto})`);
-  gt06Campo(campos, bytes, "odometro", 33, 4, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} km`);
+// Resposta de comando do terminal no protocolo CRX3 (0x21): Server Flag(4) + código de conteúdo(1) +
+// conteúdo (ASCII ou UTF16-BE), sem o campo de idioma separado que o 0x15 clássico tem.
+function gt06PreencherRespostaCRX3(campos, bytes, base) {
+  const codigo = hexParaInt(bytes[base + 4]);
+  gt06Campo(campos, bytes, "codigoConteudo", base + 4, 1, () =>
+    codigo === 2 ? "UTF16-BE" : codigo === 1 ? "ASCII" : `Desconhecido (${codigo})`
+  );
+  const inicioConteudo = base + 5;
+  const fimConteudo = bytes.length - 4; // reserva 2 bytes de serial + 2 de CRC antes do stop
+  if (fimConteudo > inicioConteudo) {
+    gt06Campo(campos, bytes, "comando", inicioConteudo, fimConteudo - inicioConteudo, (bruto) =>
+      codigo === 2 ? hexParaTextoUtf16Be(bruto) : hexParaTexto(bruto)
+    );
+  }
 }
 
-// Identifica o pacote pelo Protocol Number (byte 3) e extrai os campos que ele traz.
+function hexParaTextoUtf16Be(hex) {
+  const bytesArr = hex.match(/../g) || [];
+  let texto = "";
+  for (let i = 0; i + 1 < bytesArr.length; i += 2) {
+    texto += String.fromCharCode(parseInt(bytesArr[i] + bytesArr[i + 1], 16));
+  }
+  return texto;
+}
+
+// Campos extras da localização CRX3 (0x22), depois do bloco LBS: ACC, modo de envio, reenvio em
+// tempo real e, quando o dispositivo suporta, a quilometragem (hodômetro). Mileage é opcional —
+// só aparece se sobrarem bytes além de ACC+Modo+Reenvio antes de serial/CRC/stop.
+function gt06PreencherLocalizacaoExtra22(campos, bytes, base) {
+  gt06Campo(campos, bytes, "accStatus", base, 1, (b) => (hexParaInt(b) ? "ACC alto" : "ACC baixo"));
+  gt06Campo(campos, bytes, "tipoUpload", base + 1, 1, (b) => GT06_TIPO_UPLOAD[b] || `Desconhecido (0x${b})`);
+  gt06Campo(campos, bytes, "reenvioTempoReal", base + 2, 1, (b) => (hexParaInt(b) ? "Reenvio" : "Tempo real"));
+  const restante = bytes.length - (base + 3) - 4; // reserva serial(2)+crc(2) antes do stop
+  if (restante >= 4) {
+    gt06Campo(campos, bytes, "odometro", base + 3, 4, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} km`);
+  }
+}
+
+// LBS múltiplas bases (0x28, CRX3): célula principal + até 6 vizinhas + timing advance.
+function gt06PreencherLbsMultiBase(campos, bytes, base) {
+  gt06Campo(campos, bytes, "mcc", base, 2, (b) => `MCC ${hexParaInt(b)}`);
+  gt06Campo(campos, bytes, "mnc", base + 2, 1, (b) => `MNC ${hexParaInt(b)}`);
+  gt06Campo(campos, bytes, "lac", base + 3, 2, (b) => `LAC ${hexParaInt(b)}`);
+  gt06Campo(campos, bytes, "ci", base + 5, 3, (b) => `Cell ID ${hexParaInt(b)}`);
+  gt06Campo(campos, bytes, "rssi", base + 8, 1, (b) => `RSSI ${hexParaInt(b)} (0=mais fraco, 255=mais forte)`);
+  let pos = base + 9;
+  for (let i = 1; i <= 6 && pos + 6 <= bytes.length; i++) {
+    const lac = bytes.slice(pos, pos + 2).join("");
+    const ci = bytes.slice(pos + 2, pos + 5).join("");
+    const rssi = bytes[pos + 5];
+    gt06Campo(campos, bytes, `vizinha${i}`, pos, 6, () =>
+      `Vizinha ${i}: LAC ${hexParaInt(lac)}, Cell ID ${hexParaInt(ci)}, RSSI ${hexParaInt(rssi)}`
+    );
+    pos += 6;
+  }
+  if (pos < bytes.length - 4) {
+    gt06Campo(campos, bytes, "timingAdvance", pos, 1, (b) => `Timing advance: ${hexParaInt(b)}`);
+  }
+}
+
+// Transmissão de informação (0x94): sub-protocolo (byte "base") define o conteúdo que segue.
+function gt06PreencherTransmissaoInfo(campos, bytes, base) {
+  const tipo = hexParaInt(bytes[base]);
+  gt06Campo(campos, bytes, "tipoInfo", base, 1, () => `Tipo de informação: ${tipo}`);
+  const inicioDados = base + 1;
+  const fimDados = bytes.length - 4; // reserva serial(2)+crc(2) antes do stop
+  if (fimDados <= inicioDados) return;
+  if (tipo === 0x00) {
+    gt06Campo(campos, bytes, "tensaoExterna", inicioDados, fimDados - inicioDados, (bruto) =>
+      `Tensão externa: ${(hexParaInt(bruto) / 100).toFixed(2)} V`
+    );
+  } else if (tipo === 0x05) {
+    gt06Campo(campos, bytes, "ioExterno", inicioDados, 1, (b) => {
+      const v = hexParaInt(b);
+      return [
+        v & 0x04 ? "IO alto" : "IO baixo",
+        v & 0x02 ? "Disparo por nível alto" : "Disparo por nível baixo",
+        v & 0x01 ? "Porta ligada (ON)" : "Porta desligada (OFF)",
+      ].join("; ");
+    });
+  } else {
+    gt06Campo(campos, bytes, "dadosInfo", inicioDados, fimDados - inicioDados, (bruto) =>
+      `Dados (ASCII, chave=valor): ${hexParaTexto(bruto)}`
+    );
+  }
+}
+
+// Checagem de horário (0x8A): sem conteúdo = solicitação do terminal; com 6 bytes = resposta do servidor.
+function gt06PreencherHorario(campos, bytes, base) {
+  const fim = bytes.length - 4;
+  if (fim - base < 6) {
+    campos.horarioTipo = { bruto: "", final: "Solicitação de horário (sem conteúdo)", inicioByte: base, fimByte: base };
+    return;
+  }
+  const [ano, mes, dia, hora, min, seg] = bytes.slice(base, base + 6).map(hexParaInt);
+  gt06Campo(campos, bytes, "horarioServidor", base, 6, () =>
+    `Horário do servidor (UTC): ${String(dia).padStart(2, "0")}/${String(mes).padStart(2, "0")}/${2000 + ano} ${String(hora).padStart(2, "0")}:${String(min).padStart(2, "0")}:${String(seg).padStart(2, "0")}`
+  );
+}
+
+// Identifica o pacote pelo Protocol Number e extrai os campos que ele traz.
+// Suporta cabeçalho padrão (78 78 + tamanho de 1 byte) e o cabeçalho longo do CRX3
+// (79 79 + tamanho de 2 bytes, usado nos protocolos 0x21 e 0x94).
 function parseGT06(bytes) {
+  const cabecalhoLongo = bytes[0] === "79" && bytes[1] === "79";
+  const protocoloIdx = cabecalhoLongo ? 4 : 3;
+  const base = protocoloIdx + 1;
   const campos = {
-    possivelRastreador: { bruto: bytes.slice(0, 2).join(""), final: "GT06 (Concox e compatíveis)", inicioByte: 0, fimByte: 2 },
+    possivelRastreador: {
+      bruto: bytes.slice(0, 2).join(""),
+      final: "GT06 (Concox, J16 e compatíveis)",
+      inicioByte: 0,
+      fimByte: 2,
+    },
   };
-  if (bytes.length > 3) {
+  const protocolo = bytes[protocoloIdx];
+  if (bytes.length > protocoloIdx) {
     campos.tipoPacote = {
-      bruto: bytes[3],
-      final: GT06_TIPO_PACOTE[bytes[3]] || `Desconhecido (0x${bytes[3]})`,
-      inicioByte: 3,
-      fimByte: 4,
+      bruto: protocolo,
+      final: GT06_TIPO_PACOTE[protocolo] || `Desconhecido (0x${protocolo})`,
+      inicioByte: protocoloIdx,
+      fimByte: protocoloIdx + 1,
     };
   }
 
-  switch (bytes[3]) {
+  const tamanhoDeclarado = gt06TamanhoDeclarado(bytes, cabecalhoLongo);
+  const conteudoLen = tamanhoDeclarado != null ? tamanhoDeclarado - 1 - 2 - 2 : null;
+
+  switch (protocolo) {
     case "01":
-      gt06PreencherLogin(campos, bytes);
+      gt06PreencherLogin(campos, bytes, base, conteudoLen ?? 8);
       break;
     case "12":
-      gt06PreencherGps(campos, bytes);
-      gt06PreencherLbs(campos, bytes, 22);
+      gt06PreencherGps(campos, bytes, base);
+      gt06PreencherLbs(campos, bytes, base + 18);
+      // Variante com quilometragem: 4 bytes extras após o LBS, convertidos /100.
+      if (conteudoLen != null && conteudoLen > 26) {
+        gt06Campo(campos, bytes, "odometro", base + 26, 4, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} km`);
+      }
       break;
     case "13":
-      gt06PreencherStatus(campos, bytes, 4);
+      gt06PreencherStatus(campos, bytes, base);
       break;
     case "15":
     case "80":
-      gt06PreencherComando(campos, bytes);
+      gt06PreencherComando(campos, bytes, base);
       break;
     case "16":
-      gt06PreencherGps(campos, bytes);
-      // Byte 22 = tamanho do bloco LBS; o LBS começa no 23.
-      gt06PreencherLbs(campos, bytes, 23);
-      gt06PreencherStatus(campos, bytes, 31);
+    case "26":
+      gt06PreencherGps(campos, bytes, base);
+      // Byte base+18 = tamanho do bloco LBS; o LBS começa em base+19.
+      gt06PreencherLbs(campos, bytes, base + 19);
+      gt06PreencherStatus(campos, bytes, base + 27);
       break;
     case "1A":
-      gt06PreencherGps(campos, bytes);
-      // Bytes 22-42: telefone ASCII com preenchimento de 0x00 à direita.
-      gt06Campo(campos, bytes, "telefone", 22, 21, (bruto) => hexParaTexto(bruto).replace(/\0[\s\S]*$/, ""));
+      gt06PreencherGps(campos, bytes, base);
+      // Telefone ASCII com preenchimento de 0x00 à direita, logo após o bloco GPS.
+      gt06Campo(campos, bytes, "telefone", base + 18, 21, (bruto) => hexParaTexto(bruto).replace(/\0[\s\S]*$/, ""));
       break;
     case "22":
-      gt06PreencherGps(campos, bytes);
-      gt06PreencherLbs(campos, bytes, 22);
-      gt06PreencherLayout22(campos, bytes);
+      gt06PreencherGps(campos, bytes, base);
+      gt06PreencherLbs(campos, bytes, base + 18);
+      gt06PreencherLocalizacaoExtra22(campos, bytes, base + 26);
+      break;
+    case "21":
+      gt06PreencherRespostaCRX3(campos, bytes, base);
+      break;
+    case "28":
+      gt06PreencherLbsMultiBase(campos, bytes, base + 6);
+      break;
+    case "8A":
+      gt06PreencherHorario(campos, bytes, base);
+      break;
+    case "94":
+      gt06PreencherTransmissaoInfo(campos, bytes, base);
       break;
   }
 
   return campos;
 }
 
+// Lê o tamanho declarado do pacote (campo "Packet Length"), em 1 byte (cabeçalho 78 78) ou 2 bytes
+// (cabeçalho 79 79, usado pelos protocolos 0x21/0x94 do CRX3). Devolve null se faltam bytes.
+function gt06TamanhoDeclarado(bytes, cabecalhoLongo) {
+  if (cabecalhoLongo) return bytes.length > 3 ? hexParaInt(bytes[2] + bytes[3]) : null;
+  return bytes.length > 2 ? hexParaInt(bytes[2]) : null;
+}
+
 // Confere tamanho, stop bit e CRC-ITU. Não bloqueia a leitura: só devolve o aviso.
+// Suporta cabeçalho padrão (78 78, tamanho 1 byte) e o cabeçalho longo do CRX3 (79 79, tamanho 2 bytes).
 function gt06Validar(bytes) {
   if (bytes.length < 3) return "Pacote incompleto.";
-  const tamanho = hexParaInt(bytes[2]);
+  const cabecalhoLongo = bytes[0] === "79" && bytes[1] === "79";
+  const lenBytes = cabecalhoLongo ? 2 : 1;
+  const tamanho = gt06TamanhoDeclarado(bytes, cabecalhoLongo);
   const problemas = [];
-  if (bytes.length !== tamanho + 5) {
-    problemas.push(`tamanho declarado ${tamanho + 5} bytes, recebidos ${bytes.length}`);
+  if (tamanho == null) return "Pacote incompleto.";
+  const fimEsperado = 2 + lenBytes + tamanho + 2; // start + tamanho + (protocolo+conteudo+serial+crc) + stop
+  if (bytes.length !== fimEsperado) {
+    problemas.push(`tamanho declarado ${fimEsperado} bytes, recebidos ${bytes.length}`);
   }
   if (bytes.slice(-2).join("") !== "0D0A") problemas.push("stop bit 0D 0A ausente");
-  if (bytes.length >= tamanho + 3) {
-    const crcRecebido = hexParaInt(bytes[tamanho + 1] + bytes[tamanho + 2]);
-    if (crcRecebido !== crc16Itu(bytes.slice(2, tamanho + 1))) problemas.push("CRC-ITU não confere");
+  // CRC cobre do campo "tamanho" (lenBytes) até o fim do número de série (protocolo+conteúdo+serial,
+  // ou seja lenBytes + tamanho - 2, já que "tamanho" inclui os 2 bytes do próprio CRC).
+  const crcFim = lenBytes + tamanho; // índice (exclusivo) logo após o trecho coberto pelo CRC
+  if (bytes.length >= crcFim + 2) {
+    const crcRecebido = hexParaInt(bytes[crcFim] + bytes[crcFim + 1]);
+    if (crcRecebido !== crc16Itu(bytes.slice(2, crcFim))) problemas.push("CRC-ITU não confere");
   }
   return problemas.length ? `Aviso: ${problemas.join("; ")}.` : "";
+}
+
+// ===== X3Tech XT40-TM / NT40-6F (protocolo "NT20") =====
+// Mesmo formato de pacote do GT06 (78 78/79 79 + CRC-ITU, Apêndice A idêntico), mas com tabela de
+// alarmes e pacotes 0x22/0x25/0x90/0x94 próprios da X3Tech — não dá pra distinguir do GT06/Concox só
+// pelo conteúdo (mesmos protocolos 0x01/0x12/0x13/0x16/0x94 reaproveitados com layout diferente), por
+// isso é selecionado à mão pelo usuário no Quebra-String (dropdown "Variante").
+const X3TECH_TIPO_PACOTE = {
+  "01": "Login (identificação)",
+  "12": "Localização (GPS+LBS)",
+  "13": "Status (heartbeat)",
+  "15": "Resposta de comando (string)",
+  "16": "Alarme (GPS+LBS+status)",
+  "1A": "GPS + consulta de endereço por telefone",
+  "22": "Localização X3Tech (frame novo)",
+  "25": "Localização X3Tech + identificação de motorista",
+  "80": "Comando do servidor para o terminal",
+  "90": "IMSI",
+  "94": "ICCID / transmissão geral de informação",
+};
+
+// Byte 1 do campo Alarme/Idioma (former bit), tabelas 5.3.1.17/5.5.1.22/5.6.1.23 do protocolo XT40-TM.
+const X3TECH_ALARME = {
+  0x00: "Normal",
+  0x01: "SOS",
+  0x02: "Corte de energia",
+  0x03: "Choque/vibração",
+  0x04: "ACC ligado",
+  0x05: "ACC desligado",
+  0x08: "Excesso de velocidade",
+  0x0e: "Aceleração brusca",
+  0x0f: "Frenagem brusca/desaceleração rápida",
+  0x10: "Curva brusca/perigosa",
+  0x11: "Colisão",
+  0x13: "Sensor de reboque (moveu sem ignição ligada)",
+  0x14: "Energia principal baixa",
+  0x15: "Energia principal reconectada",
+  0x18: "Bateria de backup baixa",
+  0x23: "Queda (fall alarm)",
+  0x27: "Temperatura alta",
+  0x28: "Temperatura baixa",
+};
+
+// Bloco de status X3Tech: terminal (1) + nível de tensão (1) + sinal GSM (1) + alarme/idioma (2) —
+// mesmas posições do GT06 (0x13/0x16), mas bit6 do byte de terminal aqui É rastreamento GPS
+// ligado/desligado (diferente do GT06/Concox, onde esse bit é status de fix) e a tabela de alarme é a
+// X3TECH_ALARME, conforme o próprio protocolo documenta.
+function x3techPreencherStatus(campos, bytes, base) {
+  gt06Campo(campos, bytes, "corteOleo", base, 1, (b) => (hexParaInt(b) & 0x80 ? "Óleo/eletricidade cortados" : "Óleo/eletricidade conectados"));
+  gt06Campo(campos, bytes, "rastreamento", base, 1, (b) => (hexParaInt(b) & 0x40 ? "Rastreamento GPS ligado" : "Rastreamento GPS desligado"));
+  gt06Campo(campos, bytes, "statusExtra", base, 1, (b) => {
+    const v = hexParaInt(b);
+    return [
+      v & 0x01 ? "Antifurto ativado" : "Antifurto desativado",
+      v & 0x04 ? "Carregando" : "Sem carga",
+      v & 0x02 ? "ACC alto (ignição ligada)" : "ACC baixo (ignição desligada)",
+    ].join("; ");
+  });
+  gt06Campo(campos, bytes, "alarmeStatus", base, 1, (b) => {
+    const tipo = (hexParaInt(b) >> 3) & 0x07;
+    return GT06_ALARME_TERMINAL[tipo] || `Desconhecido (${tipo})`;
+  });
+  gt06Campo(campos, bytes, "bateria", base + 1, 1, (b) => GT06_NIVEL_BATERIA[hexParaInt(b)] || `Desconhecido (0x${b})`);
+  gt06Campo(campos, bytes, "sinalGsm", base + 2, 1, (b) => `${hexParaInt(b)}%`);
+  gt06Campo(campos, bytes, "alarme", base + 3, 1, (b) => X3TECH_ALARME[hexParaInt(b)] || `Desconhecido (0x${b})`);
+}
+
+// LBS com Cell ID de 4 bytes (frame 0x25 — os demais pacotes usam Cell ID de 3 bytes, ver gt06PreencherLbs).
+function x3techPreencherLbs4(campos, bytes, base) {
+  gt06Campo(campos, bytes, "lbs", base, 9, () => {
+    const mcc = hexParaInt(bytes[base] + bytes[base + 1]);
+    const mnc = hexParaInt(bytes[base + 2]);
+    const lac = hexParaInt(bytes[base + 3] + bytes[base + 4]);
+    const cell = hexParaInt(bytes.slice(base + 5, base + 9).join(""));
+    return `MCC ${mcc}, MNC ${mnc}, LAC ${lac}, Cell ID ${cell}`;
+  });
+}
+
+const X3TECH_IDENTIFICADOR_TIPO = {
+  "00": "iButton (porta 1-wire)",
+  "01": "RFID (serial, valor bruto)",
+  "02": "RFID (serial, valor decimal)",
+};
+
+// Identificador de motorista (só no frame 0x25): tamanho(1) + tipo(1) + informação(tamanho-1).
+// Decodificação simplificada — mostra o valor bruto em hex; a reconstrução completa do número de
+// RFID (converter pra texto e os últimos 6 caracteres de hex pra decimal) fica fora do escopo aqui.
+function x3techPreencherIdentificadorMotorista(campos, bytes, base) {
+  if (bytes.length <= base) return;
+  const tamanho = hexParaInt(bytes[base]);
+  if (tamanho === 0) {
+    gt06Campo(campos, bytes, "motorista", base, 1, () => "Nenhum motorista identificado");
+    return;
+  }
+  gt06Campo(campos, bytes, "motoristaTipo", base + 1, 1, (b) => X3TECH_IDENTIFICADOR_TIPO[b] || `Desconhecido (0x${b})`);
+  gt06Campo(campos, bytes, "motoristaInfo", base + 2, tamanho - 1, (bruto) => bruto.toUpperCase());
+}
+
+// Frame novo 0x22 (seção 5.5.1): tipo de origem + IMEI + data/hora interna + bloco GPS + LBS + status
+// estendido (tensão principal, tensão de bateria, hodômetro, horímetro).
+function x3techPreencherFrame22(campos, bytes, base) {
+  gt06Campo(campos, bytes, "origemLocalizacao", base, 1, (b) => ({ "01": "Rastreamento (TIMER)", "02": "Estático (STATIC)", "03": "Alarme" }[b.toUpperCase()] || `Desconhecido (0x${b})`));
+  gt06Campo(campos, bytes, "idImei", base + 1, 8, (bruto) => bruto.replace(/^0/, ""));
+
+  if (bytes.length >= base + 15) {
+    const [ano, mes, dia, hora, min, seg] = bytes.slice(base + 9, base + 15).map(hexParaInt);
+    const dataUtc = new Date(Date.UTC(2000 + ano, mes - 1, dia, hora, min, seg));
+    const dataBrasilia = new Date(dataUtc.getTime() - 3 * 60 * 60 * 1000);
+    gt06Campo(campos, bytes, "dataInterna", base + 9, 6, () => formatarDataBR(dataBrasilia));
+    gt06Campo(campos, bytes, "horaInterna", base + 9, 6, () => formatarHoraBR(dataBrasilia));
+  }
+
+  gt06PreencherGps(campos, bytes, base + 15); // data/hora GPS, satélites, lat/lon, velocidade, curso
+  gt06PreencherLbs(campos, bytes, base + 34); // base+33 = tamanho do bloco LBS (ignorado)
+
+  const st = base + 42;
+  gt06Campo(campos, bytes, "corteOleo", st, 1, (b) => (hexParaInt(b) & 0x80 ? "Óleo/eletricidade cortados" : "Óleo/eletricidade conectados"));
+  gt06Campo(campos, bytes, "rastreamento", st, 1, (b) => (hexParaInt(b) & 0x40 ? "Rastreamento GPS ligado" : "Rastreamento GPS desligado"));
+  gt06Campo(campos, bytes, "statusExtra", st, 1, (b) => {
+    const v = hexParaInt(b);
+    return [
+      v & 0x01 ? "Antifurto ativado" : "Antifurto desativado",
+      v & 0x04 ? "Carregando" : "Sem carga",
+      v & 0x02 ? "ACC alto (ignição ligada)" : "ACC baixo (ignição desligada)",
+    ].join("; ");
+  });
+  gt06Campo(campos, bytes, "alarmeStatus", st, 1, (b) => {
+    const tipo = (hexParaInt(b) >> 3) & 0x07;
+    return (tipo === 4 ? "SOS / porta aberta" : GT06_ALARME_TERMINAL[tipo]) || `Desconhecido (${tipo})`;
+  });
+  gt06Campo(campos, bytes, "tensaoPrincipal", st + 1, 2, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} V`);
+  gt06Campo(campos, bytes, "tensaoBateria", st + 3, 1, (bruto) => `${(hexParaInt(bruto) / 10).toFixed(1)} V`);
+  gt06Campo(campos, bytes, "sinalGsm", st + 4, 1, (b) => `${hexParaInt(b)}%`);
+  gt06Campo(campos, bytes, "alarme", st + 5, 1, (b) => X3TECH_ALARME[hexParaInt(b)] || `Desconhecido (0x${b})`);
+
+  const hod = st + 7;
+  gt06Campo(campos, bytes, "odometro", hod, 3, (bruto) => `${hexParaInt(bruto)} km`);
+  gt06Campo(campos, bytes, "horimetro", hod + 3, 3, (bruto) => `${(hexParaInt(bruto) / 60).toFixed(2)} h (${hexParaInt(bruto)} min)`);
+}
+
+// Frame novo 0x25 (seção 5.6.1): igual ao 0x22, mas com Cell ID de 4 bytes, byte extra de rede
+// (2G/4G) e identificação de motorista (iButton/RFID) no final.
+function x3techPreencherFrame25(campos, bytes, base) {
+  gt06Campo(campos, bytes, "origemLocalizacao", base, 1, (b) => ({ "01": "Rastreamento (TIMER)", "02": "Estático (STATIC)", "03": "Alarme" }[b.toUpperCase()] || `Desconhecido (0x${b})`));
+  gt06Campo(campos, bytes, "idImei", base + 1, 8, (bruto) => bruto.replace(/^0/, ""));
+
+  if (bytes.length >= base + 15) {
+    const [ano, mes, dia, hora, min, seg] = bytes.slice(base + 9, base + 15).map(hexParaInt);
+    const dataUtc = new Date(Date.UTC(2000 + ano, mes - 1, dia, hora, min, seg));
+    const dataBrasilia = new Date(dataUtc.getTime() - 3 * 60 * 60 * 1000);
+    gt06Campo(campos, bytes, "dataInterna", base + 9, 6, () => formatarDataBR(dataBrasilia));
+    gt06Campo(campos, bytes, "horaInterna", base + 9, 6, () => formatarHoraBR(dataBrasilia));
+  }
+
+  gt06PreencherGps(campos, bytes, base + 15); // 18 bytes: base+15..base+32
+  x3techPreencherLbs4(campos, bytes, base + 34); // base+33 = tamanho do bloco LBS (ignorado)
+  gt06Campo(campos, bytes, "rede", base + 43, 1, (b) => ({ "04": "4G", "02": "2G" }[b.toUpperCase()] || `Desconhecido (0x${b})`));
+
+  const st = base + 44;
+  gt06Campo(campos, bytes, "corteOleo", st, 1, (b) => (hexParaInt(b) & 0x80 ? "Óleo/eletricidade cortados" : "Óleo/eletricidade conectados"));
+  gt06Campo(campos, bytes, "rastreamento", st, 1, (b) => (hexParaInt(b) & 0x40 ? "Rastreamento GPS ligado" : "Rastreamento GPS desligado"));
+  gt06Campo(campos, bytes, "statusExtra", st, 1, (b) => {
+    const v = hexParaInt(b);
+    return [
+      v & 0x01 ? "Antifurto ativado" : "Antifurto desativado",
+      v & 0x04 ? "Carregando" : "Sem carga",
+      v & 0x02 ? "ACC alto (ignição ligada)" : "ACC baixo (ignição desligada)",
+    ].join("; ");
+  });
+  gt06Campo(campos, bytes, "alarmeStatus", st, 1, (b) => {
+    const tipo = (hexParaInt(b) >> 3) & 0x07;
+    return (tipo === 4 ? "SOS / porta aberta" : GT06_ALARME_TERMINAL[tipo]) || `Desconhecido (${tipo})`;
+  });
+  gt06Campo(campos, bytes, "tensaoPrincipal", st + 1, 2, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} V`);
+  gt06Campo(campos, bytes, "tensaoBateria", st + 3, 1, (bruto) => `${(hexParaInt(bruto) / 10).toFixed(1)} V`);
+  gt06Campo(campos, bytes, "sinalGsm", st + 4, 1, (b) => `${hexParaInt(b)}%`);
+  gt06Campo(campos, bytes, "alarme", st + 5, 1, (b) => X3TECH_ALARME[hexParaInt(b)] || `Desconhecido (0x${b})`);
+
+  const hod = st + 7;
+  gt06Campo(campos, bytes, "odometro", hod, 3, (bruto) => `${hexParaInt(bruto)} km`);
+  gt06Campo(campos, bytes, "horimetro", hod + 3, 3, (bruto) => `${(hexParaInt(bruto) / 60).toFixed(2)} h (${hexParaInt(bruto)} min)`);
+  x3techPreencherIdentificadorMotorista(campos, bytes, hod + 6);
+}
+
+// Pacote de IMSI (0x90, cabeçalho 78 78): "IMSI:" (5) + IMSI ASCII (15) + reservado (2) + fixo (1)=0x9F.
+function x3techPreencherImsi(campos, bytes, base) {
+  gt06Campo(campos, bytes, "imsi", base + 5, 15, (bruto) => hexParaTexto(bruto));
+}
+
+const X3TECH_TIPO_INFO_94 = {
+  "00": "Tensão externa",
+  "04": "Sincronização de status do terminal",
+  "05": "Status da porta",
+  "08": "Parâmetros de autoteste",
+  "09": "Informação de satélites de posicionamento",
+  "0A": "ICCID/IMEI/IMSI",
+  "0D": "Sensor de óleo",
+  "1E": "Sensor de temperatura",
+  "1F": "Sensor de nível de óleo",
+};
+
+// Pacote 0x94 "antigo" (cabeçalho 79 79): subtipo + conteúdo. Só o subtipo 0x0A (ICCID) tem layout
+// fixo documentado (IMEI 8 + IMSI 8 + ICCID 10, todos como dígitos decimais em hex).
+function x3techPreencherInfoAntiga94(campos, bytes, base) {
+  const tipo = (bytes[base] || "").toUpperCase();
+  gt06Campo(campos, bytes, "tipoInfo94", base, 1, () => X3TECH_TIPO_INFO_94[tipo] || `Desconhecido (0x${tipo})`);
+  if (tipo === "0A") {
+    gt06Campo(campos, bytes, "idImei", base + 1, 8, (bruto) => bruto.replace(/^0/, ""));
+    gt06Campo(campos, bytes, "imsi", base + 9, 8, (bruto) => bruto);
+    gt06Campo(campos, bytes, "iccid", base + 17, 10, (bruto) => bruto);
+  }
+}
+
+// Pacote geral de transmissão de informação 0x94 (seção 5.9, cabeçalho 79 79): subtipo + dado(s).
+// Só o subtipo 0x00 (tensão externa) tem conversão numérica aqui; os demais (texto ASCII tipo
+// "ALM1=C4;...") são mostrados em texto bruto.
+function x3techPreencherTransmissaoGeral94(campos, bytes, base, tamanhoConteudo) {
+  const tipo = (bytes[base] || "").toUpperCase();
+  gt06Campo(campos, bytes, "tipoInfo94", base, 1, () => X3TECH_TIPO_INFO_94[tipo] || `Desconhecido (0x${tipo})`);
+  const dadosLen = tamanhoConteudo != null ? tamanhoConteudo - 1 : null;
+  if (dadosLen == null || dadosLen <= 0) return;
+  if (tipo === "00") {
+    gt06Campo(campos, bytes, "tensaoExterna", base + 1, 2, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} V`);
+    return;
+  }
+  gt06Campo(campos, bytes, "dadosInfo94", base + 1, dadosLen, (bruto) => hexParaTexto(bruto));
+}
+
+// Roteador principal da variante X3Tech (XT40-TM/NT40-6F), espelhando parseGT06 mas com os pacotes e
+// tabela de alarme próprios dessa fabricante.
+function parseX3Tech(bytes) {
+  const cabecalhoLongo = bytes[0] === "79" && bytes[1] === "79";
+  const protocoloIdx = cabecalhoLongo ? 4 : 3;
+  const base = protocoloIdx + 1;
+  const campos = {
+    possivelRastreador: {
+      bruto: bytes.slice(0, 2).join(""),
+      final: "X3Tech (XT40-TM, NT40-6F em modo NT20)",
+      inicioByte: 0,
+      fimByte: 2,
+    },
+  };
+  const protocolo = (bytes[protocoloIdx] || "").toUpperCase();
+  if (bytes.length > protocoloIdx) {
+    campos.tipoPacote = { bruto: protocolo, final: X3TECH_TIPO_PACOTE[protocolo] || `Desconhecido (0x${protocolo})`, inicioByte: protocoloIdx, fimByte: protocoloIdx + 1 };
+  }
+  const tamanhoDeclarado = gt06TamanhoDeclarado(bytes, cabecalhoLongo);
+  const conteudoLen = tamanhoDeclarado != null ? tamanhoDeclarado - 1 - 2 - 2 : null;
+
+  switch (protocolo) {
+    case "01":
+      gt06PreencherLogin(campos, bytes, base, 8);
+      break;
+    case "12":
+      gt06PreencherGps(campos, bytes, base);
+      gt06PreencherLbs(campos, bytes, base + 18);
+      break;
+    case "13":
+      x3techPreencherStatus(campos, bytes, base);
+      break;
+    case "15":
+    case "80":
+      gt06PreencherComando(campos, bytes, base);
+      break;
+    case "16":
+      gt06PreencherGps(campos, bytes, base);
+      gt06PreencherLbs(campos, bytes, base + 19); // base+18 = tamanho do bloco LBS (ignorado)
+      x3techPreencherStatus(campos, bytes, base + 27);
+      break;
+    case "1A":
+      gt06PreencherGps(campos, bytes, base);
+      gt06Campo(campos, bytes, "telefone", base + 18, 21, (bruto) => hexParaTexto(bruto).replace(/\0[\s\S]*$/, ""));
+      break;
+    case "22":
+      x3techPreencherFrame22(campos, bytes, base);
+      break;
+    case "25":
+      x3techPreencherFrame25(campos, bytes, base);
+      break;
+    case "90":
+      x3techPreencherImsi(campos, bytes, base);
+      break;
+    case "94":
+      if (cabecalhoLongo) {
+        if ((bytes[base] || "").toUpperCase() === "0A") x3techPreencherInfoAntiga94(campos, bytes, base);
+        else x3techPreencherTransmissaoGeral94(campos, bytes, base, conteudoLen);
+      }
+      break;
+  }
+  return campos;
 }
 
 // Protocolo E3 (BWS IoT) v3.7.2: texto ASCII *ET,SN,CMD,DADO1,DADO2,...#
@@ -15907,6 +16412,15 @@ function st300LerDetalhesAlertaTexto(tokens, guardar) {
 function parseST310UTexto(texto, modeloRastreador = "ST310U") {
   let tokens = texto.replace(/[\r\n]+$/, "").split(";").map((token) => token.trim());
   const tipo = tokens[0].toUpperCase().slice("ST300".length);
+  if (!Object.prototype.hasOwnProperty.call(ST310U_RELATORIOS, tipo)) {
+    return {
+      campos: {},
+      bytes: tokens,
+      aviso: `Cabeçalho ST300 não reconhecido: ${tokens[0] || "(vazio)"}.`,
+      separador: ";",
+      perfil: modeloRastreador,
+    };
+  }
   const problemas = [];
   const v = {};
   const guardar = (chave, indice, conversor = (valor) => valor) => {
@@ -16392,6 +16906,533 @@ function parseST340URZip(bytes) {
   return parseST310UZip(bytes, "ST340UR");
 }
 
+// Protocolo RST (Absolut) "ASCII RST" v1.03: texto ASCII RST;STATUS;MODELO;FIRMWARE;SERIAL;SEQ;TIPO;campo;...;FIM;
+// Mensagens do rastreador→servidor. "base de tracking" = os 23 campos de posição/status comuns a quase
+// toda mensagem; ID:1/2/37 ainda trazem, depois dela, os bits de informações adicionais + dados variáveis.
+const RST_MODELOS = {
+  "RST-VT": "Rastreador RST-VT",
+  "RST-DTMF": "Rastreador RST-DTMF",
+  "RST-ABS": "Rastreador RST-ABSOLUT",
+  "RST-VT-EVO": "Rastreador RST-VT EVO",
+  "RST-VT-PLUS": "Rastreador RST-VT PLUS",
+  "RST-VTv2": "Rastreador RST-VTv2",
+  "RST-LCv2": "Rastreador RST-LCv2",
+  "RST-MINI": "Rastreador RST-MINI",
+  "RST-CARGA": "Rastreador RST-CARGA",
+};
+
+const RST_MENSAGENS = {
+  1: "Tracking",
+  2: "Tracking em sleep",
+  3: "Ignição ligada",
+  4: "Ignição desligada",
+  5: "Início do modo sleep",
+  6: "ACK do servidor para o rastreador",
+  7: "Reset do rastreador",
+  8: "Solicita timestamp",
+  9: "Evento sensor",
+  11: "Resposta parâmetros",
+  12: "Resposta informações do modem",
+  13: "Resposta posição",
+  20: "Evento botão de pânico",
+  21: "NACK do servidor para o rastreador",
+  22: "Evento perda da antena GPS",
+  23: "Evento conexão da antena GPS",
+  24: "Jammer detectado",
+  25: "Evento remoção da bateria externa",
+  26: "Evento conexão da bateria externa",
+  27: "Evento remoção da bateria interna",
+  28: "Evento conexão da bateria interna",
+  29: "Dados da viagem",
+  30: "Dados do estacionamento",
+  31: "Defeito de hardware",
+  34: "Alvo executado",
+  36: "Início do modo super sleep",
+  37: "Tracking em super sleep",
+  38: "Bloqueio pelo antifurto",
+  39: "Desbloqueio pelo botão antifurto",
+  40: "Violação do antifurto",
+  41: "Bloqueio manobrista",
+  42: "Violação manobrista",
+  43: "Evento operadora conectada",
+  44: "Evento defeito sensor de temperatura",
+  45: "Evento macro",
+  46: "Evento formulário",
+  47: "Evento embarcado",
+  48: "Evento erro de senha",
+  51: "Evento perda de teclado",
+  55: "Evento ID de motorista",
+  59: "Evento motor ocioso",
+  61: "Teste de número de IP",
+};
+
+const RST_OPERADORAS = {
+  0: "Tim", 1: "Claro", 2: "Oi", 3: "Vivo", 4: "Amazônia Telecom", 5: "Br Telecom",
+  6: "Telemig", 7: "Sercomtel", 8: "Ctbc Celular", 9: "Claro Argentina", 10: "Movistar Argentina",
+  11: "Telecom Per", 12: "Claro Uruguai", 13: "Movistar Uruguai", 14: "Antel",
+};
+
+const RST_TIPO_SENSOR = {
+  1: "Habilitado", 2: "Botão de pânico", 3: "Botão antifurto", 4: "Painel", 5: "Teclado",
+  6: "Porta motorista", 7: "Porta carona", 8: "Carreta", 9: "Porta baú", 10: "Porta baú lateral",
+  11: "Quinta roda", 12: "Caixa falsa", 13: "Portas cabine", 14: "Velocidade alarme",
+  15: "Bateria monitorada", 16: "Rastreador de carreta", 17: "Acoplamento móvel",
+  18: "Sensor configurável 1", 19: "Sensor configurável 2", 20: "Sensor configurável 3",
+  21: "Sensor configurável 4", 22: "Sensor configurável 5", 23: "Sensor configurável 6",
+  24: "Sensor configurável 7", 25: "Sensor configurável 8", 26: "Ar condicionado", 27: "Plataforma",
+  28: "Betoneira mecânica lado direito", 29: "Betoneira mecânica lado esquerdo",
+  30: "Betoneira eletrônica lado direito", 31: "Betoneira eletrônica lado esquerdo",
+  32: "Sensor de chuva", 33: "Sensor de embreagem", 34: "Freio de estacionamento",
+  35: "Farol baixo", 36: "Farol alto", 37: "Lanterna",
+  38: "Sensor de chuva para o alerta de velocidade", 39: "Sensor horímetro",
+  40: "Sensor saturação filtro ar", 41: "Sensor saturação filtro hd", 42: "Sensor pressão óleo motor",
+  43: "Botão controle de diesel", 44: "Botão entregue", 45: "Botão em trânsito", 46: "Botão parado",
+  47: "Botão aguardando cliente", 48: "Sensor catraca lado direito", 49: "Sensor catraca lado esquerdo",
+  50: "Sensor catraca luz", 51: "Sensor base estabilizadora", 52: "Sensor betoneira descarregando",
+  53: "Sensor passageiro", 54: "Sensor modo avião", 55: "Sensor tamper",
+  56: "Sensor horímetro led 1", 57: "Sensor horímetro led 2", 58: "Sensor horímetro led 3",
+  59: "Sensor horímetro led 4", 60: "Sensor betoneira único", 61: "Sensor analógico",
+  62: "Sensor freio motor",
+};
+
+const RST_NUMERO_SENSOR = {
+  1: "Sensor 1 do rastreador", 2: "Sensor 2 do rastreador", 3: "Sensor 3 do rastreador",
+  4: "Sensor 4 do rastreador", 5: "Sensor 5 do rastreador", 6: "Sensor 6 do rastreador",
+  7: "Sensor 1 do teclado", 8: "Sensor 2 do teclado", 9: "Sensor 3 do teclado", 10: "Sensor 4 do teclado",
+};
+
+const RST_DEFEITOS_HARDWARE = {
+  1: "Defeito no modulo GPS", 2: "Modulo de GPS sem visada por mais de X tempo configurado",
+  3: "Falha ao gravar na memória flash externa", 4: "Falha ao gravar na área de log",
+  5: "Falha ao gravar o histograma de telemetria", 6: "Erro no Timestamp do GPS",
+  7: "Erro ao efetuar reset no modulo GPS",
+};
+
+const RST_SENHA_ERRO = {
+  2: "Senha para abrir ou fechar baú", 3: "Senha para bloqueio ou desbloqueio",
+  4: "Senha para lacre ou deslacre porta motorista", 5: "Senha para lacre ou deslacre porta carona",
+  6: "Senha para lacre ou deslacre porta baú", 7: "Senha para lacre ou deslacre carreta",
+  8: "Senha para envio de macro", 9: "Senha para colocar em modo viagem ou parado",
+};
+
+const RST_CAUSA_RESET = {
+  0: "Causa indefinida", 1: "Causa perda de clock base", 2: "Causa travamento do firmware",
+  3: "Causa interrupção invalida", 4: "Causa instrução indefinida", 5: "Causa violação de memória",
+  6: "Causa comando do bootloader remoto", 7: "Causa por baixa tensão", 8: "Causa interrupção NMI",
+  9: "Causa interrupção de hard fault", 10: "Causa interrupção de memory fault",
+  11: "Causa interrupção de bus fault", 12: "Causa interrupção de usage fault",
+  13: "Causa interrupção de SVC", 14: "Causa interrupção de debug", 15: "Causa interrupção de pend sv",
+  16: "Causa falha no número serial",
+};
+
+// Tabela de eventos embarcados (mensagem ID 47). Entradas "Não usado" foram omitidas (fallback genérico).
+const RST_EVENTOS_EMBARCADOS = {
+  1: "Evento trava baú um aberto pelo teclado", 2: "Evento trava baú um fechado pelo teclado",
+  3: "Evento sirene ligada pelo teclado", 4: "Evento sirene desligada pelo teclado",
+  5: "Evento porta do motorista lacrada pelo teclado", 6: "Evento porta do motorista deslacrada pelo teclado",
+  7: "Evento porta do carona lacrada pelo teclado", 8: "Evento porta do carona deslacrada pelo teclado",
+  9: "Evento porta do baú lacrada pelo teclado", 10: "Evento porta do baú deslacrada pelo teclado",
+  11: "Evento carreta lacrada pelo teclado", 12: "Evento carreta deslacrada pelo teclado",
+  13: "Evento sistema totalmente lacrado", 14: "Evento sistema totalmente deslacrado",
+  15: "Evento solicita abertura de baú", 16: "Evento solicita fechamento de baú",
+  17: "Evento solicita desbloqueio", 18: "Evento solicita lacra porta motorista",
+  19: "Evento solicita deslacra porta motorista", 20: "Evento solicita lacra porta carona",
+  21: "Evento solicita deslacra porta carona", 22: "Evento solicita lacra porta baú",
+  23: "Evento solicita deslacra porta baú", 24: "Evento solicita lacra carreta",
+  25: "Evento solicita deslacra carreta", 26: "Evento violação botão pânico",
+  27: "Evento violação lacre porta motorista", 28: "Evento violação lacre porta carona",
+  29: "Evento violação lacre porta baú fundo", 30: "Evento violação lacre porta baú lateral",
+  31: "Evento violação do painel", 32: "Evento violação do teclado", 33: "Evento violação da carreta",
+  34: "Evento senha de coação no teclado", 35: "Evento senha geral no teclado",
+  36: "Evento sistema em modo liberado", 37: "Evento sistema em modo protegido",
+  38: "Evento solicita bloqueio", 39: "Evento sirene ligada um minuto", 40: "Evento partida suspeita",
+  41: "Evento solicita desbloqueio motorista", 42: "Evento veículo bloqueado teclado motorista",
+  43: "Evento veículo desbloqueado teclado motorista", 44: "Evento veículo bloqueado violação regras",
+  45: "Evento sirene ligada violação regras", 46: "Evento pisca ligada violação regras",
+  47: "Evento veículo bloqueado regra macro", 48: "Evento veículo desbloqueado regra macro",
+  49: "Evento veículo em modo viagem", 50: "Evento veículo em modo parado",
+  51: "Evento solicita modo viagem", 52: "Evento solicita modo parado",
+  53: "Evento veículo bloqueado manobra", 54: "Evento veículo desbloqueado manobra",
+  55: "Evento veículo movimento suspeito", 56: "Evento veículo bloqueado pela central",
+  57: "Evento veículo desbloqueado pela central", 58: "Evento veículo bloqueado silencioso pela central",
+  59: "Evento veículo corte antena GPS e bateria removida", 60: "Evento veículo desbloqueado movimento suspeito",
+  61: "Evento betoneira girando LD mecânico", 62: "Evento betoneira girando LE mecânico",
+  63: "Evento betoneira parada mecânico", 64: "Evento betoneira girando LD eletrônico",
+  65: "Evento betoneira girando LE eletrônico", 66: "Evento betoneira parada eletrônico",
+  67: "Evento alerta velocidade sem chuva", 68: "Evento alerta velocidade com chuva",
+  69: "Evento alerta velocidade máxima sem chuva", 70: "Evento alerta velocidade máxima com chuva",
+  71: "Evento id não cadastrado", 72: "Evento tempo em velocidade máxima alerta",
+  73: "Evento dados sensor horímetro um", 74: "Evento dados sensor horímetro dois",
+  75: "Evento dados sensor horímetro três", 76: "Evento dados sensor horímetro quatro",
+  77: "Evento dados sensor horímetro cinco", 78: "Evento dados sensor horímetro seis",
+  79: "Evento dados sensor horímetro rpm", 80: "Evento alerta excesso sensor rpm",
+  81: "Evento veículo bloqueado movimento suspeito", 82: "Evento veículo desbloqueado movimento suspeito",
+  83: "Evento veículo bloqueado alvo", 84: "Evento veículo desbloqueado alvo",
+  85: "Evento veículo bloqueado automático", 86: "Evento veículo desbloqueado automático",
+  87: "Evento veículo bloqueado serial", 88: "Evento veículo desbloqueado serial",
+  89: "Evento veículo bloqueado id motorista", 90: "Evento veículo desbloqueado id motorista",
+  91: "Evento veículo bloqueado mensagem SMS", 92: "Evento veículo desbloqueado mensagem SMS",
+  93: "Evento alerta temperatura máxima", 94: "Evento alerta temperatura mínima",
+  95: "Evento alerta temperatura restaure", 96: "Evento sensor hodômetro calibrado",
+  97: "Evento sensor hodômetro re-calibrado", 98: "Evento betoneira temporizadores",
+  99: "Evento veículo bloqueado dentro cerca", 100: "Evento veículo desbloqueado dentro cerca",
+  101: "Evento veículo bloqueado fora cerca", 102: "Evento veículo desbloqueado fora cerca",
+  103: "Evento alerta dentro cerca eletrônica", 104: "Evento alerta fora cerca eletrônica",
+  105: "Evento id carreta conectado", 106: "Evento id carreta desconectado",
+  107: "Evento trava baú dois aberto pelo teclado", 108: "Evento trava baú dois fechado pelo teclado",
+  109: "Evento trava baú três aberto pelo teclado", 110: "Evento trava baú três fechado pelo teclado",
+  111: "Evento trava baú um aberto pela central", 112: "Evento trava baú um fechado pela central",
+  113: "Evento trava baú dois aberto pela central", 114: "Evento trava baú dois fechado pela central",
+  115: "Evento trava baú três aberto pela central", 116: "Evento trava baú três fechado pela central",
+  117: "Evento veículo bloqueado sensor", 118: "Evento dentro alvo betoneira", 119: "Evento fora alvo betoneira",
+  120: "Evento veículo bloqueado alvo volátil", 121: "Evento veículo mensagem alvo volátil",
+  122: "Evento betoneira chegou cliente", 123: "Evento betoneira saiu cliente",
+  124: "Evento veículo bloqueado lacre betoneira", 125: "Evento veículo mensagem lacre betoneira",
+  126: "Evento apaga todos os ids motorista", 127: "Evento apaga todos os ids carretas",
+  128: "Evento veículo bloqueado regra jammer", 129: "Evento dentro ponto controle",
+  130: "Evento fora ponto controle", 131: "Evento veículo bloqueado perda satélite",
+  132: "Evento debug betoneira lado direito", 133: "Evento debug betoneira lado esquerdo",
+  134: "Evento veículo bloqueado pela central satélite", 135: "Evento veículo desbloqueado pela central satélite",
+  136: "Evento veículo parado Agroterenas", 137: "Evento acelerômetro freada brusca",
+  138: "Evento acelerômetro aceleração brusca", 139: "Evento tempo total sensor embreagem acionado",
+  140: "Evento tempo total em banguela", 141: "Evento alerta velocidade dentro ponto controle",
+  142: "Evento alerta velocidade fora ponto controle", 143: "Evento betoneira dados percurso fora alvo",
+  144: "Evento betoneira dados percurso dentro alvo", 145: "Evento betoneira dados percurso fora alvo volátil",
+  146: "Evento betoneira dados percurso dentro alvo volátil", 147: "Evento betoneira dentro alvo abastecimento",
+  148: "Evento betoneira fora alvo abastecimento", 149: "Evento veículo desbloqueado regra jammer",
+  150: "Evento sensor maquina em nível zero", 151: "Evento sensor maquina em nível um",
+  152: "Evento sensor maquina pulsando", 153: "Evento abastecimento não autorizado diesel",
+  154: "Evento abastecimento não autorizado diesel total", 155: "Evento betoneira girando carregando",
+  156: "Evento graneleiro aberto", 157: "Evento graneleiro fechado", 158: "Evento antena GPS externa em curto",
+  159: "Evento antena GPS externa normal", 160: "Evento vibração acelerômetro violado",
+  161: "Evento vibração acelerômetro restaure", 162: "Evento sensor umidade normal",
+  163: "Evento sensor umidade máxima", 164: "Evento sensor umidade mínima",
+  165: "Evento sensor base violado", 166: "Evento sensor base restaurado",
+  167: "Evento monitor sensor base violado", 168: "Evento monitor sensor umidade violado",
+  169: "Evento monitor sensor temperatura violado", 170: "Evento monitor vibração violado",
+  171: "Evento monitor velocidade violado", 172: "Evento monitor desbloqueado senha",
+  173: "Evento betoneira botão descarregamento", 174: "Evento perda medidor Omnicomm",
+  175: "Evento roubo combustível medidor Omnicomm", 176: "Evento abastecimento combustível medidor Omnicomm",
+  177: "Evento conexão medidor Omnicomm", 178: "Evento contagem tempo id carreta",
+  179: "Evento sensor an5 acima do limite", 180: "Evento sensor an5 abaixo do limite",
+  181: "Evento inclinômetro eixo x", 182: "Evento inclinômetro eixo y", 183: "Evento inclinômetro eixo z",
+  184: "Evento uso senha configuração rastreador", 185: "Evento diesel abastecimento acima máximo",
+  186: "Evento diesel abastecimento abaixo mínimo", 187: "Evento diesel tanque abaixo mínimo",
+  188: "Evento câmera serial violação", 189: "Evento câmera serial restaure",
+  190: "Evento impressora serial violação", 191: "Evento impressora serial restaure",
+  192: "Evento balança serial violação", 193: "Evento balança serial restaure",
+  194: "Evento id motorista balança (evento não enviado)", 195: "Evento modulo RF sem comunicação (evento não enviado)",
+  196: "Evento tamper violação", 197: "Evento tamper restaure", 198: "Evento violação transitório acelerômetro",
+  199: "Evento bateria interna baixa", 200: "Evento velocidade máxima dentro cerca eletrônica",
+  201: "Evento veículo bloqueado regra horário", 202: "Evento veículo desbloqueado regra horário",
+  203: "Evento betoneira descarregamento rpm", 204: "Evento modulo RF motivo ativação embarcada (evento não enviado)",
+  205: "Evento perda sensor TPMS", 206: "Evento perda sensor pressão externo",
+  207: "Evento sensor pressão externo mínimo", 208: "Evento sensor pressão externo máximo",
+  209: "Evento modulo RF motivo desativação embarcada (evento não enviado)", 210: "Evento monitor bateria interna ativo",
+  211: "Evento veículo bloqueado regra velocidade", 212: "Evento veículo desbloqueado regra velocidade",
+  213: "Leitor analógico externo conectado", 214: "Leitor analógico externo desconectado",
+  218: "Evento de erro na fonte de alimentação (válido somente para um modelo de rastreador)",
+};
+
+function rstCampo(campos, tokens, chave, idx, final) {
+  const presente = idx < tokens.length && String(tokens[idx]).toUpperCase() !== "FIM";
+  campos[chave] = {
+    bruto: presente ? tokens[idx] : "",
+    final,
+    inicioByte: idx,
+    fimByte: presente ? idx + 1 : idx,
+  };
+}
+
+// Preenche os 23 campos comuns de posição/status ("payload igual ao da mensagem de tracking");
+// devolve o próximo índice livre após esse bloco.
+function rstTrackingBase(campos, tokens, idx) {
+  rstCampo(campos, tokens, "timestampEvento", idx, `Timestamp do evento: ${tokens[idx] ?? "-"}`);
+  rstCampo(campos, tokens, "timestampGps", idx + 1, `Timestamp do GPS: ${tokens[idx + 1] ?? "-"}`);
+  rstCampo(campos, tokens, "latitude", idx + 2, `Latitude: ${tokens[idx + 2] ?? "-"}`);
+  rstCampo(campos, tokens, "longitude", idx + 3, `Longitude: ${tokens[idx + 3] ?? "-"}`);
+  rstCampo(campos, tokens, "velocidade", idx + 4, `Velocidade: ${tokens[idx + 4] ?? "-"} Km/h`);
+  rstCampo(campos, tokens, "direcao", idx + 5, `Direção: ${tokens[idx + 5] ?? "-"}°`);
+  rstCampo(campos, tokens, "altitude", idx + 6, `Altitude: ${tokens[idx + 6] ?? "-"} m`);
+  rstCampo(campos, tokens, "validadeGps", idx + 7, tokens[idx + 7] === "1" ? "GPS válido" : "GPS inválido");
+  rstCampo(campos, tokens, "satelites", idx + 8, `Satélites: ${tokens[idx + 8] ?? "-"}`);
+  rstCampo(campos, tokens, "hdop", idx + 9, `HDOP: ${tokens[idx + 9] ?? "-"}`);
+  rstCampo(campos, tokens, "statusSensores1", idx + 10, `Status sensores 1 (hex): ${tokens[idx + 10] ?? "-"}`);
+  rstCampo(campos, tokens, "statusSensores2", idx + 11, `Status sensores 2 (hex): ${tokens[idx + 11] ?? "-"}`);
+  rstCampo(campos, tokens, "statusTeclado", idx + 12, `Status sensores do teclado (hex): ${tokens[idx + 12] ?? "-"}`);
+  rstCampo(campos, tokens, "statusAtuadores1", idx + 13, `Status atuadores 1 (hex): ${tokens[idx + 13] ?? "-"}`);
+  rstCampo(campos, tokens, "statusAtuadores2", idx + 14, `Status atuadores 2 (hex): ${tokens[idx + 14] ?? "-"}`);
+  rstCampo(campos, tokens, "tensaoExterna", idx + 15, `Tensão bateria externa: ${tokens[idx + 15] ?? "-"} V`);
+  rstCampo(campos, tokens, "tensaoInterna", idx + 16, `Tensão bateria interna: ${tokens[idx + 16] ?? "-"} V`);
+  rstCampo(campos, tokens, "hodometroGps", idx + 17, `Hodômetro GPS: ${tokens[idx + 17] ?? "-"} km`);
+  rstCampo(campos, tokens, "sinalGsm", idx + 18, `Nível sinal GSM: ${tokens[idx + 18] ?? "-"} (0-31)`);
+  rstCampo(campos, tokens, "sensorTemperatura", idx + 19, `Sensor de temperatura (hex): ${tokens[idx + 19] ?? "-"}`);
+  rstCampo(campos, tokens, "lacresSensores", idx + 20, `Lacres dos sensores (hex): ${tokens[idx + 20] ?? "-"}`);
+  rstCampo(campos, tokens, "status1Rastreador", idx + 21, `Status 1 do rastreador (hex): ${tokens[idx + 21] ?? "-"}`);
+  rstCampo(campos, tokens, "status2Rastreador", idx + 22, `Status 2 do rastreador (hex): ${tokens[idx + 22] ?? "-"}`);
+  return idx + 23;
+}
+
+// Mensagens ID:1/2/37 continuam com os bits de informações adicionais (8 hex) e os dados variáveis.
+function rstInformacoesAdicionais(campos, tokens, idx) {
+  if (idx >= tokens.length || tokens[idx] === "FIM") return;
+  const bitsHex = tokens[idx];
+  rstCampo(campos, tokens, "bitsAdicionais", idx, `Bits de informações adicionais (hex): ${bitsHex}`);
+  const restantes = tokens.slice(idx + 1).filter((t) => t && t !== "FIM");
+  if (restantes.length) {
+    campos.dadosAdicionais = {
+      bruto: restantes.join(";"),
+      final: `Dados adicionais (bruto, conforme bits acima): ${restantes.join(";")}`,
+      inicioByte: idx + 1,
+      fimByte: tokens.length - 1,
+    };
+  }
+}
+
+function parseRSTTexto(texto) {
+  const tokens = texto.split(";").map((t) => t.trim());
+  const campos = {};
+  const problemas = [];
+
+  if (tokens.length < 7) problemas.push("header incompleto (esperado ao menos 7 campos antes do payload)");
+  if (!/FIM;?\s*$/i.test(texto)) problemas.push("fim 'FIM;' ausente");
+
+  rstCampo(campos, tokens, "preamble", 0, `Preamble: ${tokens[0] ?? "-"}`);
+  rstCampo(
+    campos,
+    tokens,
+    "statusMsg",
+    1,
+    (tokens[1] || "").toUpperCase() === "L" ? "Mensagem de log (L)" : "Mensagem atual (A)"
+  );
+  const modelo = tokens[2] || "";
+  rstCampo(campos, tokens, "modelo", 2, RST_MODELOS[modelo] ? `${modelo} — ${RST_MODELOS[modelo]}` : `${modelo} (modelo desconhecido)`);
+  rstCampo(campos, tokens, "firmware", 3, `Versão de firmware: ${tokens[3] ?? "-"}`);
+  rstCampo(campos, tokens, "serial", 4, `Número serial do equipamento: ${tokens[4] ?? "-"}`);
+  rstCampo(campos, tokens, "sequencia", 5, `Número de sequência: ${tokens[5] ?? "-"}`);
+  const tipoMsg = parseInt(tokens[6], 10);
+  rstCampo(
+    campos,
+    tokens,
+    "tipoMsg",
+    6,
+    `Tipo de mensagem: ${tokens[6] ?? "-"} — ${RST_MENSAGENS[tipoMsg] || "desconhecido"}`
+  );
+  campos.possivelRastreador = {
+    bruto: tokens[0] || "",
+    final: `Absolut (${modelo || "RST"})`,
+    inicioByte: 0,
+    fimByte: tokens[0] ? 1 : 0,
+  };
+  campos.tipoPacote = {
+    bruto: tokens[6] || "",
+    final: RST_MENSAGENS[tipoMsg] || `Desconhecido (${tokens[6] || "-"})`,
+    inicioByte: 6,
+    fimByte: tokens[6] !== undefined ? 7 : 6,
+  };
+
+  let idx = 7;
+  switch (tipoMsg) {
+    case 1: // Tracking
+    case 2: // Tracking em sleep
+    case 37: // Tracking em super sleep
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstInformacoesAdicionais(campos, tokens, idx);
+      break;
+    case 6: // ACK — só header
+    case 8: // Solicita timestamp — só header
+    case 21: // NACK — só header
+    case 61: // Teste de número de IP — só header
+      break;
+    case 7: // Reset do rastreador
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "origemReset", idx, `Origem do reset (hex, bits): ${tokens[idx] ?? "-"}`);
+      rstCampo(
+        campos,
+        tokens,
+        "causaReset",
+        idx + 1,
+        `Causa do reset: ${tokens[idx + 1] ?? "-"} — ${RST_CAUSA_RESET[parseInt(tokens[idx + 1], 10)] || "desconhecida"}`
+      );
+      break;
+    case 9: { // Evento sensor
+      idx = rstTrackingBase(campos, tokens, idx);
+      const tipoSensor = parseInt(tokens[idx], 10);
+      const numSensor = parseInt(tokens[idx + 1], 10);
+      rstCampo(campos, tokens, "tipoSensor", idx, `Tipo do sensor: ${tokens[idx] ?? "-"} — ${RST_TIPO_SENSOR[tipoSensor] || "desconhecido"}`);
+      rstCampo(campos, tokens, "numeroSensor", idx + 1, `Número do sensor: ${tokens[idx + 1] ?? "-"} — ${RST_NUMERO_SENSOR[numSensor] || "desconhecido"}`);
+      rstCampo(campos, tokens, "tipoEvento", idx + 2, tokens[idx + 2] === "1" ? "Violação do sensor" : "Restaure do sensor");
+      break;
+    }
+    case 11: // Resposta parâmetros (não segue o payload de tracking)
+      rstCampo(campos, tokens, "tempoTracking", idx, `Tempo envio tracking (s): ${tokens[idx] ?? "-"}`);
+      rstCampo(campos, tokens, "tempoInicioSleep", idx + 1, `Tempo início modo sleep (s): ${tokens[idx + 1] ?? "-"}`);
+      rstCampo(campos, tokens, "tempoTrackingSleep", idx + 2, `Tempo envio tracking em sleep (s): ${tokens[idx + 2] ?? "-"}`);
+      rstCampo(campos, tokens, "tempoGpsFix", idx + 3, `Tempo aguarda GPS fix (s): ${tokens[idx + 3] ?? "-"}`);
+      rstCampo(campos, tokens, "tempoGpsSemVisada", idx + 4, `Tempo envio msg GPS sem visada (s): ${tokens[idx + 4] ?? "-"}`);
+      {
+        const op = parseInt(tokens[idx + 5], 10);
+        rstCampo(campos, tokens, "operadora1", idx + 5, `Operadora simcard 1: ${tokens[idx + 5] ?? "-"} — ${RST_OPERADORAS[op] || "desconhecida"}`);
+      }
+      rstCampo(campos, tokens, "apn1", idx + 6, tokens[idx + 6] === "1" ? "APN configurável" : "APN padrão da operadora");
+      rstCampo(campos, tokens, "servidor1", idx + 7, `Servidor 1 (IP:porta): ${tokens[idx + 7] ?? "-"}`);
+      rstCampo(campos, tokens, "servidor2", idx + 8, `Servidor 2 (IP:porta): ${tokens[idx + 8] ?? "-"}`);
+      rstCampo(campos, tokens, "servidor3", idx + 9, `Servidor 3 (IP:porta): ${tokens[idx + 9] ?? "-"}`);
+      rstCampo(campos, tokens, "servidor4", idx + 10, `Servidor 4 (IP:porta): ${tokens[idx + 10] ?? "-"}`);
+      rstCampo(campos, tokens, "qtdLog", idx + 11, `Quantidade de mensagens no log: ${tokens[idx + 11] ?? "-"}`);
+      break;
+    case 12: // Resposta informações do modem (não segue o payload de tracking)
+      rstCampo(campos, tokens, "serialModem", idx, `Número serial do modem: ${tokens[idx] ?? "-"}`);
+      rstCampo(campos, tokens, "simcard1", idx + 1, `Número simcard 1: ${tokens[idx + 1] ?? "-"}`);
+      rstCampo(campos, tokens, "simcard2", idx + 2, `Número simcard 2: ${tokens[idx + 2] ?? "-"}`);
+      break;
+    case 13: // Resposta posição
+    case 22: case 23: case 24: case 25: case 26: case 27: case 28: // eventos simples sem dados extras
+    case 36: case 38: case 39: case 40: case 41: case 42: case 44: case 51:
+      idx = rstTrackingBase(campos, tokens, idx);
+      break;
+    case 3: case 4: case 5: // ignição ligada/desligada, início sleep — base sem dados adicionais
+      idx = rstTrackingBase(campos, tokens, idx);
+      break;
+    case 20: // Evento botão de pânico
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "numeroSensor", idx, `Número do sensor: ${tokens[idx] ?? "-"} — ${RST_NUMERO_SENSOR[parseInt(tokens[idx], 10)] || "desconhecido"}`);
+      break;
+    case 29: { // Dados da viagem (campos próprios, não é o payload de tracking) — blocos de
+      // velocidade máxima são variáveis: só existem tantos quantos "Qtd velocidades máximas" indicar.
+      const nomesFixo1 = [
+        "Timestamp equip. (ignição ligada)", "Timestamp GPS (ignição ligada)", "Latitude (ignição ligada)",
+        "Longitude (ignição ligada)", "Tempo ignição ligada (s)", "Metros percorridos", "Validade GPS",
+        "Satélites", "Leituras válidas GPS", "Leituras inválidas GPS", "Correções GPS", "Tempo GPS inválido (s)",
+        "Contador único", "Velocidade média (km/h)", "Veloc. média faixa 1", "Veloc. média faixa 2",
+        "Veloc. média faixa 3", "Qtd velocidades máximas",
+      ];
+      let pos = idx;
+      nomesFixo1.forEach((nome, i) => rstCampo(campos, tokens, `viagem${i}`, pos + i, `${nome}: ${tokens[pos + i] ?? "-"}`));
+      pos += nomesFixo1.length;
+      const qtdVelMax = parseInt(tokens[idx + nomesFixo1.length - 1], 10) || 0;
+      for (let v = 1; v <= Math.min(qtdVelMax, 5); v++) {
+        rstCampo(campos, tokens, `velMax${v}_valor`, pos, `Velocidade máxima ${v} (km/h): ${tokens[pos] ?? "-"}`);
+        rstCampo(campos, tokens, `velMax${v}_lat`, pos + 1, `Latitude velocidade máxima ${v}: ${tokens[pos + 1] ?? "-"}`);
+        rstCampo(campos, tokens, `velMax${v}_long`, pos + 2, `Longitude velocidade máxima ${v}: ${tokens[pos + 2] ?? "-"}`);
+        rstCampo(campos, tokens, `velMax${v}_ts`, pos + 3, `Timestamp velocidade máxima ${v}: ${tokens[pos + 3] ?? "-"}`);
+        pos += 4;
+      }
+      const nomesFixo2 = [
+        "Timestamp equip. (ignição desligada)", "Timestamp GPS (ignição desligada)",
+        "Latitude (ignição desligada)", "Longitude (ignição desligada)", "Validade GPS (ignição desligada)",
+        "Satélites (ignição desligada)", "Ocorrências excesso velocidade", "Para uso futuro",
+        "Ocorrências aceleração brusca", "Ocorrências freada brusca",
+      ];
+      nomesFixo2.forEach((nome, i) => rstCampo(campos, tokens, `viagemFim${i}`, pos + i, `${nome}: ${tokens[pos + i] ?? "-"}`));
+      break;
+    }
+    case 30: { // Dados do estacionamento (campos próprios)
+      const nomes = [
+        "Timestamp equip. (ignição desligada)", "Timestamp GPS (ignição desligada)", "Latitude (ignição desligada)",
+        "Longitude (ignição desligada)", "Tempo ignição desligada (s)", "Validade GPS", "Satélites",
+        "Contador único", "Timestamp equip. (ignição ligada)", "Timestamp GPS (ignição ligada)",
+        "Latitude (ignição ligada)", "Longitude (ignição ligada)", "Validade GPS (ignição ligada)",
+        "Satélites (ignição ligada)",
+      ];
+      nomes.forEach((nome, i) => rstCampo(campos, tokens, `estac${i}`, idx + i, `${nome}: ${tokens[idx + i] ?? "-"}`));
+      break;
+    }
+    case 31: // Defeito de hardware
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "tipoDefeito", idx, `Tipo de defeito: ${tokens[idx] ?? "-"} — ${RST_DEFEITOS_HARDWARE[parseInt(tokens[idx], 10)] || "desconhecido"}`);
+      break;
+    case 34: // Alvo executado
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "idAlvo", idx, `ID do alvo: ${tokens[idx] ?? "-"}`);
+      rstCampo(campos, tokens, "latAlvo", idx + 1, `Latitude do alvo: ${tokens[idx + 1] ?? "-"}`);
+      rstCampo(campos, tokens, "longAlvo", idx + 2, `Longitude do alvo: ${tokens[idx + 2] ?? "-"}`);
+      rstCampo(campos, tokens, "regraAlvo", idx + 3, tokens[idx + 3] === "2" ? "Regra: desbloqueia veículo no alvo" : "Regra: bloqueia veículo no alvo");
+      rstCampo(campos, tokens, "toleranciaAlvo", idx + 4, `Tolerância (m): ${tokens[idx + 4] ?? "-"}`);
+      break;
+    case 43: { // Evento operadora conectada
+      idx = rstTrackingBase(campos, tokens, idx);
+      const op = parseInt(tokens[idx], 10);
+      rstCampo(campos, tokens, "indexOperadora", idx, `Operadora atual: ${tokens[idx] ?? "-"} — ${RST_OPERADORAS[op] || "desconhecida"}`);
+      rstCampo(campos, tokens, "tamanhoNome", idx + 1, `Tamanho do nome da operadora: ${tokens[idx + 1] ?? "-"}`);
+      rstCampo(campos, tokens, "nomeOperadora", idx + 2, `Nome da operadora: ${tokens[idx + 2] ?? "-"}`);
+      break;
+    }
+    case 45: // Evento macro
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "numeroMacro", idx, `Número da macro: ${tokens[idx] ?? "-"}`);
+      rstCampo(campos, tokens, "regraMacro", idx + 1, `Regra executada (hex, bits): ${tokens[idx + 1] ?? "-"}`);
+      rstCampo(campos, tokens, "tamanhoTextoMacro", idx + 2, `Tamanho do texto: ${tokens[idx + 2] ?? "-"}`);
+      rstCampo(campos, tokens, "textoMacro", idx + 3, `Texto da macro: ${tokens[idx + 3] ?? "-"}`);
+      break;
+    case 46: // Evento formulário
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "numeroFormulario", idx, `Número do formulário: ${tokens[idx] ?? "-"}`);
+      rstCampo(campos, tokens, "regraFormulario", idx + 1, `Regra executada (hex, bits): ${tokens[idx + 1] ?? "-"}`);
+      rstCampo(campos, tokens, "tamanhoTextoFormulario", idx + 2, `Tamanho do texto: ${tokens[idx + 2] ?? "-"}`);
+      rstCampo(campos, tokens, "textoFormulario", idx + 3, `Texto do formulário: ${tokens[idx + 3] ?? "-"}`);
+      break;
+    case 47: { // Evento embarcado
+      idx = rstTrackingBase(campos, tokens, idx);
+      const codEvento = parseInt(tokens[idx], 10);
+      rstCampo(campos, tokens, "codigoEvento", idx, `Código do evento: ${tokens[idx] ?? "-"} — ${RST_EVENTOS_EMBARCADOS[codEvento] || "evento desconhecido"}`);
+      const restantes = tokens.slice(idx + 1).filter((t) => t && t !== "FIM");
+      if (restantes.length) {
+        campos.dadosEvento = {
+          bruto: restantes.join(";"),
+          final: `Dados do evento (formato varia por código, ver documentação): ${restantes.join(";")}`,
+          inicioByte: idx + 1,
+          fimByte: tokens.length - 1,
+        };
+      }
+      break;
+    }
+    case 48: // Evento erro de senha
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "tipoSenha", idx, `Tipo de senha: ${tokens[idx] ?? "-"} — ${RST_SENHA_ERRO[parseInt(tokens[idx], 10)] || "desconhecido"}`);
+      break;
+    case 55: // Evento ID de motorista
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "idMotorista", idx, `Número serial do ID (iButton): ${tokens[idx] ?? "-"}`);
+      rstCampo(campos, tokens, "regraId", idx + 1, `Regra do ID (hex, bits): ${tokens[idx + 1] ?? "-"}`);
+      break;
+    case 59: // Evento motor ocioso
+      idx = rstTrackingBase(campos, tokens, idx);
+      rstCampo(campos, tokens, "tempoMotorOcioso", idx, `Tempo total motor ocioso (s): ${tokens[idx] ?? "-"}`);
+      rstCampo(campos, tokens, "idMotorista", idx + 1, `ID do motorista: ${tokens[idx + 1] ?? "-"}`);
+      break;
+    default:
+      if (tokens.length > idx) {
+        const restantes = tokens.slice(idx).filter((t) => t && t !== "FIM");
+        if (restantes.length) {
+          campos.payloadBruto = {
+            bruto: restantes.join(";"),
+            final: `Mensagem ID ${tokens[6]} não detalhada no parser — payload bruto: ${restantes.join(";")}`,
+            inicioByte: idx,
+            fimByte: tokens.length - 1,
+          };
+        }
+        problemas.push("tipo de mensagem não totalmente mapeado neste parser (payload mostrado em bruto)");
+      }
+  }
+
+  const linhasExtras = Object.entries(campos)
+    .filter(([chave]) => !["possivelRastreador", "tipoPacote", "preamble", "tipoMsg"].includes(chave))
+    .map(([chave, campo]) => ({
+      label: chave.replace(/([A-Z])/g, " $1").replace(/^./, (letra) => letra.toUpperCase()),
+      ...campo,
+    }));
+
+  return {
+    campos,
+    bytes: tokens,
+    aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "",
+    separador: ";",
+    perfil: "RST",
+    linhasExtras,
+  };
+}
+
 // Protocolo MT2000 (Mobilogix) "T Message" v1.3.8: texto ASCII [TIMESTAMP,TIPO,campo,...,campo]
 // Tx = rastreador → servidor, Sx = servidor → rastreador. Os campos de cada tipo vêm em ordem fixa.
 // [nome, grupo]: o grupo define a lista de campos (MT_CAMPOS) e em qual linha o tipo aparece.
@@ -16581,7 +17622,7 @@ function parseMT2000(textoOriginal) {
 // Codec 8 usa 1 byte para ID/contadores de I/O; Codec 8 Extended usa 2 bytes (e tem um
 // grupo a mais, NX, para valores de tamanho variável) — é a diferença que a Teltonika
 // recomenda migrar para poder usar AVL IDs acima de 255.
-const TELTONIKA_CODEC = { "08": "Codec 8", "8E": "Codec 8 Extended", "10": "Codec 16" };
+const TELTONIKA_CODEC = { "08": "Codec 8", "8E": "Codec 8 Extended", "10": "Codec 16", "0C": "Codec 12 (comandos GPRS)" };
 
 // Nome e conversão dos AVL IDs mais comuns, conforme a Teltonika Data Sending Parameters ID
 // de FMC130 (a mesma numeração AVL vale para a família FMB9XX/FMB130/FMM130/FMC130).
@@ -16600,13 +17641,54 @@ const TELTONIKA_IO_INFO = {
   13: ["Taxa de consumo (GPS)", (v) => `${(v / 100).toFixed(2)} L/100km`],
   15: ["Pontuação eco (Eco Score)", (v) => (v / 100).toFixed(2)],
   16: ["Odômetro total", (v) => `${(v / 1000).toFixed(2)} km`],
+  17: ["Acelerômetro eixo X", (v) => `${telInt16Signed(v)} mG`],
+  18: ["Acelerômetro eixo Y", (v) => `${telInt16Signed(v)} mG`],
+  19: ["Acelerômetro eixo Z", (v) => `${telInt16Signed(v)} mG`],
+  20: ["Bateria do sensor BLE #2", (v) => `${v}%`],
   21: ["Sinal GSM", (v) => `Nível ${v}`],
+  22: ["Bateria do sensor BLE #3", (v) => `${v}%`],
+  23: ["Bateria do sensor BLE #4", (v) => `${v}%`],
   24: ["Velocidade (GPS)", (v) => `${v} km/h`],
+  25: ["Temperatura BLE #1", telBleTemp],
+  26: ["Temperatura BLE #2", telBleTemp],
+  27: ["Temperatura BLE #3", telBleTemp],
+  28: ["Temperatura BLE #4", telBleTemp],
+  29: ["Bateria do sensor BLE #1", (v) => `${v}%`],
+  30: ["Número de DTCs (OBD)", (v) => String(v)],
   31: ["Carga do motor, % (OBD)", (v) => `${v}%`],
+  32: ["Temperatura do líquido de arrefecimento (OBD)", (v) => `${v} °C`],
+  33: ["Ajuste de combustível de curto prazo 1 (OBD)", (v) => `${v}%`],
+  34: ["Pressão de combustível (OBD)", (v) => `${v} kPa`],
+  35: ["Pressão absoluta no coletor de admissão (OBD)", (v) => `${v} kPa`],
+  36: ["RPM do motor (OBD)", (v) => `${v} rpm`],
+  37: ["Velocidade do veículo (OBD)", (v) => `${v} km/h`],
+  38: ["Avanço de ignição (OBD)", (v) => `${v}°`],
+  39: ["Temperatura do ar de admissão (OBD)", (v) => `${v} °C`],
+  40: ["Fluxo de ar MAF (OBD)", (v) => `${(v / 100).toFixed(2)} g/s`],
+  41: ["Posição da borboleta (OBD)", (v) => `${v}%`],
+  42: ["Tempo de funcionamento desde partida (OBD)", (v) => `${v} s`],
+  43: ["Distância percorrida com MIL ligada (OBD)", (v) => `${v} km`],
+  44: ["Pressão relativa do trilho de combustível (OBD)", (v) => `${(v / 10).toFixed(1)} kPa`],
+  45: ["Pressão direta do trilho de combustível (OBD)", (v) => `${(v / 10).toFixed(1)} kPa`],
+  46: ["EGR comandado (OBD)", (v) => `${v}%`],
+  47: ["Erro de EGR (OBD)", (v) => `${v}%`],
+  48: ["Nível de combustível (OBD)", (v) => `${v}%`],
+  49: ["Distância desde códigos limpos (OBD)", (v) => `${v} km`],
+  50: ["Pressão barométrica (OBD)", (v) => `${v} kPa`],
+  51: ["Tensão do módulo de controle (OBD)", (v) => `${v} mV`],
+  52: ["Valor de carga absoluta (OBD)", (v) => `${v}%`],
+  53: ["Temperatura do ar ambiente (OBD)", (v) => `${v} °C`],
+  54: ["Tempo com MIL ligada (OBD)", (v) => `${v} min`],
+  55: ["Tempo desde códigos limpos (OBD)", (v) => `${v} min`],
+  56: ["Pressão absoluta do trilho de combustível (OBD)", (v) => `${v * 10} kPa`],
+  57: ["Autonomia da bateria híbrida (OBD)", (v) => `${v}%`],
+  58: ["Temperatura do óleo do motor (OBD)", (v) => `${v} °C`],
+  59: ["Avanço da injeção de combustível (OBD)", (v) => `${(v * 0.01).toFixed(2)}°`],
+  60: ["Taxa de consumo do motor (OBD)", (v) => `${(v / 100).toFixed(2)} L/h`],
   66: ["Tensão externa", (v) => `${(v / 1000).toFixed(2)} V`],
   67: ["Tensão da bateria interna", (v) => `${(v / 1000).toFixed(2)} V`],
   68: ["Corrente da bateria interna", (v) => `${v} mA`],
-  69: ["Status GNSS", (v) => (v ? "Ligado" : "Desligado")],
+  69: ["Status GNSS", (v) => ({ 0: "Desligado", 1: "Ligado, com fix", 2: "Ligado, sem fix", 3: "Em sleep" }[v] ?? String(v))],
   72: ["Temperatura Dallas 1", (v) => `${(telInt32Signed(v) / 10).toFixed(1)} °C`],
   73: ["Temperatura Dallas 2", (v) => `${(telInt32Signed(v) / 10).toFixed(1)} °C`],
   74: ["Temperatura Dallas 3", (v) => `${(telInt32Signed(v) / 10).toFixed(1)} °C`],
@@ -16630,8 +17712,15 @@ const TELTONIKA_IO_INFO = {
   180: ["Saída Digital 2", (v) => (v ? "Ativa" : "Inativa")],
   181: ["PDOP", (v) => (v / 10).toFixed(1)],
   182: ["HDOP", (v) => (v / 10).toFixed(1)],
+  86: ["Umidade BLE #1", (v) => `${(v / 10).toFixed(1)}%RH`],
+  104: ["Umidade BLE #2", (v) => `${(v / 10).toFixed(1)}%RH`],
+  106: ["Umidade BLE #3", (v) => `${(v / 10).toFixed(1)}%RH`],
+  108: ["Umidade BLE #4", (v) => `${(v / 10).toFixed(1)}%RH`],
+  175: ["Evento de autogeofence", (v) => (v ? "Entrada" : "Saída")],
   199: ["Odômetro parcial (trip)", (v) => `${(v / 1000).toFixed(2)} km`],
   200: ["Modo de repouso (sleep)", (v) => String(v)],
+  205: ["ID da célula GSM (Cell ID)", (v) => String(v)],
+  206: ["Código de área GSM (LAC)", (v) => String(v)],
   207: ["Tag RFID (ID lida)", (hex) => hex.toUpperCase(), true],
   236: ["Alarme", (v) => (v ? "Disparado" : "Normal")],
   237: ["Tipo de rede (Network Type)", (v) => String(v)],
@@ -16639,12 +17728,16 @@ const TELTONIKA_IO_INFO = {
   239: ["Ignição", (v) => (v ? "Ligada" : "Desligada")],
   240: ["Movimento", (v) => (v ? "Em movimento" : "Parado")],
   241: ["Operadora GSM ativa", (v) => String(v)],
+  243: ["Duração do evento de condução econômica (ms)", (v) => `${v} ms`],
   246: ["Reboque (Towing)", (v) => (v ? "Detectado" : "Normal")],
-  247: ["Detecção de colisão (Crash)", (v) => String(v)],
+  247: ["Detecção de colisão (Crash)", (v) => (v === 2 ? "Registro de rastro da colisão (Crash Trace Record)" : v ? "Colisão detectada" : "Normal")],
   248: ["Imobilizador", (v) => ({ 0: "iButton não conectado", 1: "iButton conectado (imobilizador)", 2: "iButton conectado (condução autorizada)" }[v] ?? String(v))],
   249: ["Interferência GNSS (jamming)", (v) => (v ? "Início da interferência" : "Fim da interferência")],
+  250: ["Evento de viagem (trip)", (v) => ({ 0: "Viagem finalizada", 1: "Viagem iniciada", 2: "Status: Trabalho", 3: "Status: Particular" }[v] ?? (v >= 4 && v <= 9 ? `Status customizado ${v}` : String(v)))],
   251: ["Marcha lenta (Idling)", (v) => (v ? "Em marcha lenta" : "Normal")],
   252: ["Desconexão de energia (Unplug)", (v) => (v ? "Desconectado" : "Normal")],
+  253: ["Tipo de condução econômica (green driving)", (v) => ({ 1: "Aceleração", 2: "Frenagem", 3: "Curva" }[v] ?? String(v))],
+  254: ["Valor da condução econômica (green driving)", (v) => `${(v / 10).toFixed(1)} g`],
   255: ["Excesso de velocidade", (v) => `${v} km/h`],
   263: ["Status Bluetooth", (v) => String(v)],
   303: ["Movimento instantâneo", (v) => (v ? "Em movimento" : "Parado")],
@@ -16654,6 +17747,32 @@ const TELTONIKA_IO_INFO = {
   381: ["Ground Sense", (v) => (v ? "Ativo" : "Inativo")],
   449: ["Contador de tempo com ignição ligada", (v) => `${(v / 3600).toFixed(2)} h`],
 };
+
+// Mesma ideia de telInt32Signed, mas pra campos AVL de 2 bytes com sinal (ex: acelerômetro).
+function telInt16Signed(v) {
+  return v > 0x7fff ? v - 0x10000 : v;
+}
+
+// BLE Temperature #1-4 (IDs 25-28): multiplicador 0.1 °C, com códigos de erro fixos.
+function telBleTemp(v) {
+  if (v === 4000) return "Erro: sensor em estado anormal";
+  if (v === 3000) return "Erro: sensor não encontrado";
+  if (v === 2000) return "Erro: falha ao interpretar dado do sensor";
+  return `${(telInt16Signed(v) / 10).toFixed(1)} °C`;
+}
+
+// IDs de evento "Geofencing Zone N" (1-50) não seguem uma faixa contígua — mapeados conforme
+// a tabela "Eventual I/O elements" da documentação FMB9XX.
+const TELTONIKA_GEOFENCE_ZONA_ID = {
+  1: 155, 2: 156, 3: 157, 4: 158, 5: 159, 6: 61, 7: 62, 8: 63, 9: 64, 10: 65,
+  11: 70, 12: 88, 13: 91, 14: 92, 15: 93, 16: 94, 17: 95, 18: 96, 19: 97, 20: 98,
+  21: 99, 22: 153, 23: 154, 24: 190, 25: 191, 26: 192, 27: 193, 28: 194, 29: 195, 30: 196,
+  31: 197, 32: 198, 33: 208, 34: 209, 35: 216, 36: 217, 37: 218, 38: 219, 39: 220, 40: 221,
+  41: 222, 42: 223, 43: 224, 44: 225, 45: 226, 46: 227, 47: 228, 48: 229, 49: 230, 50: 231,
+};
+for (const [zona, id] of Object.entries(TELTONIKA_GEOFENCE_ZONA_ID)) {
+  TELTONIKA_IO_INFO[id] = [`Geofence zona ${zona} (evento)`, (v) => (v ? "Entrada" : "Saída")];
+}
 
 // Converte um inteiro sem sinal (até 32 bits, como hexParaInt devolve) pro valor com sinal
 // equivalente — necessário pros campos AVL de 4 bytes que são "Signed" (ex: temperatura Dallas).
@@ -16748,6 +17867,64 @@ function parseTeltonikaImei(bytes) {
     aviso: "",
     perfil: "TELTONIKA",
   };
+}
+
+// Codec 12: comando/resposta GPRS Teltonika em texto ASCII (ex: "getinfo", "#GET VERSION"),
+// não é um registro AVL. Layout: Preamble(4) | Tamanho dos dados(4) | Codec ID(1)=0x0C |
+// Qtd de comandos(1, ignorado) | Tipo(1)=0x05 comando / 0x06 resposta | Tamanho do comando(4) |
+// Comando (ASCII) | Qtd de comandos de novo(1) | CRC-16(4, só os 2 últimos bytes valem).
+function parseTeltonikaCodec12(bytes) {
+  const ler = (p, q) => bytes.slice(p, p + q).join("");
+  const campos = {
+    possivelRastreador: { bruto: ler(0, 4), final: "Teltonika — Codec 12 (comando/resposta GPRS)", inicioByte: 0, fimByte: 4 },
+  };
+  if (bytes.length < 15) {
+    return { campos, bytes, aviso: "Aviso: pacote incompleto para decodificar o Codec 12.", perfil: "TELTONIKA" };
+  }
+
+  const problemas = [];
+  const dataFieldLength = hexParaInt(ler(4, 4));
+  campos.tipoPacote = { bruto: bytes[8], final: TELTONIKA_CODEC["0C"], inicioByte: 8, fimByte: 9 };
+
+  const tipoMsgHex = bytes[10].toUpperCase();
+  campos.tipoMensagem = {
+    bruto: bytes[10],
+    final: tipoMsgHex === "05" ? "Comando (servidor → equipamento)" : tipoMsgHex === "06" ? "Resposta (equipamento → servidor)" : `Desconhecido (0x${tipoMsgHex})`,
+    inicioByte: 10,
+    fimByte: 11,
+  };
+
+  const tamanhoComando = hexParaInt(ler(11, 4));
+  const inicioComando = 15;
+  const fimComando = inicioComando + tamanhoComando;
+  const qtdFim = fimComando + 1;
+  if (bytes.length < qtdFim + 4) {
+    problemas.push("pacote menor que o esperado pelo tamanho de comando declarado");
+    return { campos, bytes, aviso: `Aviso: ${problemas.join("; ")}.`, perfil: "TELTONIKA" };
+  }
+
+  const comandoHex = ler(inicioComando, tamanhoComando);
+  campos.comando = { bruto: comandoHex, final: hexParaTexto(comandoHex).replace(/\r\n$/, ""), inicioByte: inicioComando, fimByte: fimComando };
+  campos.qtdComandos = {
+    bruto: ler(fimComando, 1),
+    final: `${hexParaInt(ler(fimComando, 1))} comando(s)`,
+    inicioByte: fimComando,
+    fimByte: qtdFim,
+  };
+
+  const crcFull = ler(qtdFim, 4);
+  campos.crc = { bruto: crcFull, final: `0x${crcFull.toUpperCase()}`, inicioByte: qtdFim, fimByte: qtdFim + 4 };
+
+  const tamanhoTotalEsperado = 12 + dataFieldLength;
+  if (bytes.length !== tamanhoTotalEsperado) {
+    problemas.push(`tamanho declarado ${tamanhoTotalEsperado} bytes, recebidos ${bytes.length}`);
+  } else {
+    const crcCalculado = crc16Ibm(bytes.slice(8, 8 + dataFieldLength));
+    const crcRecebido = hexParaInt(ler(qtdFim + 2, 2));
+    if (crcRecebido !== crcCalculado) problemas.push("CRC-16 não confere");
+  }
+
+  return { campos, bytes, aviso: problemas.length ? `Aviso: ${problemas.join("; ")}.` : "", perfil: "TELTONIKA" };
 }
 
 // Pacote AVL (posições). Decodifica campo a campo só o 1º registro do pacote (igual o GT06 faz
@@ -16872,12 +18049,74 @@ function parseTeltonikaAvl(bytes) {
 // Devolve { campos, bytes, aviso, separador, perfil }: campos[chave] = { bruto, final, inicioByte, fimByte }
 // (campo ausente = não encontrado nessa string → exibe "-").
 // aviso = erro de entrada ou problema de tamanho/CRC; "" quando está tudo certo.
-// Roteamento: *ET → E3; ~ → J-R12 String; { → J-R12 JSON; [ → MT2000; ST300STT;/... → ST310U/ST340UR;
-// STT;/ALT;... → Suntech Universal;
+// Roteamento: RST;... → RST (Absolut); *ET → E3; ~ → J-R12 String; { → J-R12 JSON; [ → MT2000;
+// ST300STT;/... → ST310U/ST340UR; STT;/ALT;... → Suntech Universal;
 // hex 5E... → J-R12 Zip; hex 81/82/83... → Suntech Zip; hex 00000000... → Teltonika AVL;
 // hex 02+tamanho+10..14/16/1B → ST310U/ST340UR Zip; hex 00+tamanho+IMEI ASCII → Teltonika (login); hex 78 78 → GT06.
-function quebrarString(strBruta) {
+// Decodifica ignorando a auto-detecção por conteúdo, usando o parser do protocolo escolhido no menu
+// "Escolher protocolo" do Quebra-String — útil quando fabricantes diferentes reaproveitam o mesmo
+// formato de pacote (ex.: GT06 x X3Tech, ambos 78 78/79 79 + CRC-ITU) e o conteúdo sozinho não dá
+// pra diferenciar com segurança.
+function quebrarStringForcado(texto, protocolo) {
+  switch (protocolo) {
+    case "rst":
+      return parseRSTTexto(texto);
+    case "e3":
+      return parseE3(texto);
+    case "mt2000":
+      return parseMT2000(texto);
+    case "st310u-texto":
+      return parseST310UTexto(texto);
+    case "st340ur-texto":
+      return parseST340URTexto(texto);
+    case "suntech-texto":
+      return parseSuntechNormal(texto);
+    case "jr12-texto":
+      return parseJR12String(texto);
+    case "jr12-json":
+      return parseJR12Json(texto);
+  }
+
+  // Demais protocolos forçados são todos em hex — mesma limpeza/validação usada na auto-detecção.
+  const hexLimpo = texto.replace(/0x/gi, "").replace(/[\s:,\-]+/g, "").toUpperCase();
+  if (!hexLimpo) return { campos: {}, bytes: [], aviso: "" };
+  if (hexLimpo.length % 2 !== 0 || !/^[0-9A-F]+$/.test(hexLimpo)) {
+    return { campos: {}, bytes: [], aviso: "Entrada inválida: use hex em número par de dígitos." };
+  }
+  const bytes = hexParaBytes(hexLimpo);
+
+  switch (protocolo) {
+    case "jr12-zip":
+      return parseJR12Zip(bytes);
+    case "suntech-zip":
+      return parseSuntechZip(bytes);
+    case "st310u-zip":
+      return parseST310UZip(bytes);
+    case "st340ur-zip":
+      return parseST340URZip(bytes);
+    case "teltonika":
+      return bytes.length > 8 && bytes[8].toUpperCase() === "0C" ? parseTeltonikaCodec12(bytes) : parseTeltonikaAvl(bytes);
+    case "teltonika-login":
+      return (
+        parseTeltonikaImei(bytes) || {
+          campos: {},
+          bytes,
+          aviso: "Não reconheci como pacote de login Teltonika (2 bytes de tamanho + IMEI em ASCII).",
+        }
+      );
+    case "gt06":
+      return { campos: parseGT06(bytes), bytes, aviso: gt06Validar(bytes), perfil: "GT06" };
+    case "x3tech":
+      return { campos: parseX3Tech(bytes), bytes, aviso: gt06Validar(bytes), perfil: "X3TECH" };
+    default:
+      return { campos: {}, bytes, aviso: `Protocolo "${protocolo}" não reconhecido.` };
+  }
+}
+
+function quebrarString(strBruta, forcarProtocolo = "auto") {
   const texto = (strBruta || "").trim().replace(/^(\\r\\n)+/, "").trim();
+  if (forcarProtocolo && forcarProtocolo !== "auto") return quebrarStringForcado(texto, forcarProtocolo);
+  if (/^RST;/i.test(texto)) return parseRSTTexto(texto);
   if (/^\*?ET\s*,/i.test(texto)) return parseE3(texto);
   if (texto.startsWith("[")) return parseMT2000(texto);
   if (/^ST300(STT|EMG|EVT|ALT|ALV|UEX|HTE);/i.test(texto)) {
@@ -16908,17 +18147,20 @@ function quebrarString(strBruta) {
   }
   if (bytes[0] === "5E") return parseJR12Zip(bytes);
   if (ST_ZIP_HDR[bytes[0]]) return parseSuntechZip(bytes);
-  if (bytes.slice(0, 4).join("") === "00000000") return parseTeltonikaAvl(bytes);
+  if (bytes.slice(0, 4).join("") === "00000000") {
+    return bytes.length > 8 && bytes[8].toUpperCase() === "0C" ? parseTeltonikaCodec12(bytes) : parseTeltonikaAvl(bytes);
+  }
   if (bytes[0] === "00" && bytes.length >= 4) {
     const possivelImei = parseTeltonikaImei(bytes);
     if (possivelImei) return possivelImei;
   }
-  if (bytes[0] !== "78" || bytes[1] !== "78") {
+  const prefixo = bytes[0] + bytes[1];
+  if (prefixo !== "7878" && prefixo !== "7979") {
     return {
       campos: {},
       bytes,
       aviso:
-        "Equipamento não reconhecido: o hex precisa começar com 78 78 (GT06), 5E (J-R12 Zip), 81/82/83... (Suntech Zip), 02 ... 10–14/16/1B (ST310U/ST340UR Zip) ou 00 00 00 00 (Teltonika AVL).",
+        "Equipamento não reconhecido: o hex precisa começar com 78 78 ou 79 79 (GT06/CRX1/CRX3), 5E (J-R12 Zip), 81/82/83... (Suntech Zip), 02 ... 10–14/16/1B (ST310U/ST340UR Zip) ou 00 00 00 00 (Teltonika AVL).",
     };
   }
 
@@ -16956,21 +18198,41 @@ function destacarBytes(inicioByte, fimByte, ligar) {
 // byte/token achar a linha que o usa.
 let quebraStringLinhasPorByte = new Map();
 
+function limparSelecaoQuebraString() {
+  quebraStringResultado.querySelectorAll("tr.qs-linha-selecionada").forEach((tr) => tr.classList.remove("qs-linha-selecionada"));
+  quebraStringBytesView.querySelectorAll(".quebra-string-byte.sel").forEach((s) => s.classList.remove("sel"));
+}
+
+function selecionarFaixaQuebraString(inicioByte, fimByte, rolarParaLinha = false) {
+  limparSelecaoQuebraString();
+  const linhas = new Set();
+  for (let i = inicioByte; i < fimByte; i++) {
+    (quebraStringLinhasPorByte.get(i) || []).forEach((tr) => linhas.add(tr));
+  }
+  if (!linhas.size) return;
+  linhas.forEach((tr) => tr.classList.add("qs-linha-selecionada"));
+  for (let i = inicioByte; i < fimByte; i++) {
+    const s = quebraStringBytesView.querySelector(`[data-byte-index="${i}"]`);
+    if (s) s.classList.add("sel");
+  }
+  if (rolarParaLinha) [...linhas][0].scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 // Clique num byte/token: destaca as linhas que usam essa posição e rola até a primeira.
 quebraStringBytesView.addEventListener("click", (e) => {
   const span = e.target.closest("[data-byte-index]");
   if (!span) return;
-  const linhas = quebraStringLinhasPorByte.get(Number(span.dataset.byteIndex)) || [];
-  quebraStringResultado.querySelectorAll("tr.qs-linha-selecionada").forEach((tr) => tr.classList.remove("qs-linha-selecionada"));
-  quebraStringBytesView.querySelectorAll(".quebra-string-byte.sel").forEach((s) => s.classList.remove("sel"));
-  if (!linhas.length) return;
-  linhas.forEach((tr) => tr.classList.add("qs-linha-selecionada"));
-  const { inicioByte, fimByte } = linhas[0].dataset;
-  for (let i = Number(inicioByte); i < Number(fimByte); i++) {
-    const s = quebraStringBytesView.querySelector(`[data-byte-index="${i}"]`);
-    if (s) s.classList.add("sel");
+  const indice = Number(span.dataset.byteIndex);
+  if (span.classList.contains("sel")) {
+    limparSelecaoQuebraString();
+    return;
   }
-  linhas[0].scrollIntoView({ block: "center", behavior: "smooth" });
+  const linha = (quebraStringLinhasPorByte.get(indice) || [])[0];
+  if (!linha) {
+    limparSelecaoQuebraString();
+    return;
+  }
+  selecionarFaixaQuebraString(Number(linha.dataset.inicioByte), Number(linha.dataset.fimByte), true);
 });
 
 // Cor do valor final: ok (verde), neutro (cinza), alerta (amarelo), perigo (vermelho).
@@ -17049,6 +18311,13 @@ function criarLinhaQuebraStringTabela(tbody, label, campo, chave) {
     tdBruto.addEventListener("mouseleave", () => destacarBytes(campo.inicioByte, campo.fimByte, false));
     tr.dataset.inicioByte = String(campo.inicioByte);
     tr.dataset.fimByte = String(campo.fimByte);
+    tr.addEventListener("click", () => {
+      if (tr.classList.contains("qs-linha-selecionada")) {
+        limparSelecaoQuebraString();
+        return;
+      }
+      selecionarFaixaQuebraString(campo.inicioByte, campo.fimByte);
+    });
     for (let i = campo.inicioByte; i < campo.fimByte; i++) {
       if (!quebraStringLinhasPorByte.has(i)) quebraStringLinhasPorByte.set(i, []);
       quebraStringLinhasPorByte.get(i).push(tr);
@@ -17064,6 +18333,7 @@ function criarLinhaQuebraStringTabela(tbody, label, campo, chave) {
 // linhasExtras = linhas dinâmicas (fora do esquema fixo de QUEBRA_STRING_CAMPOS), uma por
 // elemento de I/O do Teltonika encontrado no pacote: [{ label, bruto, final, inicioByte, fimByte, chave? }].
 function renderQuebraStringResultado(campos, aviso, perfil, linhasExtras) {
+  limparSelecaoQuebraString();
   quebraStringResultado.innerHTML = "";
 
   if (aviso) {
@@ -17146,17 +18416,42 @@ btnQuebraStringLimpar.addEventListener("click", () => {
   quebraStringBytesView.innerHTML = "";
   renderQuebraStringResultado({});
   atualizarBotoesQuebraString();
+  quebraStringProtocoloAuto.classList.add("hidden");
+  quebraStringProtocoloAuto.textContent = "";
   quebraStringInput.focus();
 });
 
+// Nome amigável exibido no indicativo "Auto: X" quando o protocolo é detectado automaticamente
+// (chave = perfil devolvido pelo parser).
+const QUEBRA_STRING_PERFIL_NOME = {
+  GT06: "Padrão GT06",
+  X3TECH: "X3Tech (NT20)",
+  E3: "E3 (BWS IoT)",
+  JR12: "J-R12",
+  SUNTECH: "Suntech Universal",
+  ST310U: "Suntech ST300 (ST310U)",
+  ST340UR: "Suntech ST300 (ST340UR)",
+  MT2000: "Mobilogix MT2000",
+  TELTONIKA: "Teltonika",
+  RST: "Absolut (RST)",
+};
+
 function executarQuebraString() {
-  const { campos, bytes, aviso, separador, perfil, linhasExtras } = quebrarString(quebraStringInput.value);
+  const { campos, bytes, aviso, separador, perfil, linhasExtras } = quebrarString(quebraStringInput.value, quebraStringProtocoloSelect.value);
   renderQuebraStringBytes(bytes, separador);
   renderQuebraStringResultado(campos, aviso, perfil, linhasExtras);
   atualizarBotoesQuebraString();
+
+  const auto = quebraStringProtocoloSelect.value === "auto";
+  const nomeDetectado = auto ? QUEBRA_STRING_PERFIL_NOME[perfil] : null;
+  quebraStringProtocoloAuto.classList.toggle("hidden", !nomeDetectado);
+  quebraStringProtocoloAuto.textContent = nomeDetectado ? `✨ Auto: ${nomeDetectado}` : "";
 }
 
 btnQuebraString.addEventListener("click", executarQuebraString);
+quebraStringProtocoloSelect.addEventListener("change", () => {
+  if (quebraStringInput.value.trim()) executarQuebraString();
+});
 btnQuebraStringDisponiveis.addEventListener("click", () => {
   overlayQuebraStringDisponiveis.classList.remove("hidden");
   btnFecharQuebraStringDisponiveis.focus();
