@@ -258,15 +258,11 @@
       </section>
 
       <section id="tela-dashboard-implantacao" class="panel hidden">
-        <div class="conteudo-header conteudo-header-com-acao">
+        <div class="conteudo-header">
           <div>
             <h2 class="conteudo-titulo">Dashboard de Implantação</h2>
             <p class="conteudo-subtitulo">KPIs da operação de Implantação, ligados aos Objetivos de Implantação de cada cliente</p>
           </div>
-          <button type="button" class="btn-secondary" id="btn-di-ir-controle">
-            <span class="material-symbols-outlined">checklist</span>
-            Controle de Implantação
-          </button>
         </div>
 
         <div class="di-periodo" id="di-periodo">
@@ -353,6 +349,19 @@
               </div>
             </div>
             <p class="placeholder di-objetivos-aviso-legado hidden" id="di-objetivos-aviso-legado"></p>
+            <div class="di-objetivo-universal">
+              <h4 class="di-ranking-titulo">Objetivo "Implantação"</h4>
+              <div class="di-objetivos-resumo">
+                <div class="di-objetivos-resumo-item">
+                  <span class="di-objetivos-resumo-label">Concluído</span>
+                  <span class="di-objetivos-resumo-valor" id="di-universal-concluidos">–</span>
+                </div>
+                <div class="di-objetivos-resumo-item">
+                  <span class="di-objetivos-resumo-label">Atrasados</span>
+                  <span class="di-objetivos-resumo-valor" id="di-universal-atrasados">–</span>
+                </div>
+              </div>
+            </div>
             <h4 class="di-ranking-titulo">Ranking dos objetivos mais recorrentes</h4>
             <div id="di-ranking-objetivos" class="di-ranking"></div>
             <h4 class="di-ranking-titulo">Objetivos com maior tempo médio de conclusão</h4>
@@ -361,6 +370,57 @@
           <div class="insight-card">
             <h3>Funil de Implantação</h3>
             <div id="di-funil-etapas"></div>
+          </div>
+        </div>
+
+        <div class="dashboard-insights">
+          <div class="insight-card">
+            <h3>Impedimentos e gargalos</h3>
+            <div class="di-objetivos-resumo">
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Impedimentos ativos</span>
+                <span class="di-objetivos-resumo-valor" id="di-impedimentos-ativos">–</span>
+              </div>
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Tempo médio de resolução</span>
+                <span class="di-objetivos-resumo-valor" id="di-impedimentos-tempo-medio">–</span>
+              </div>
+            </div>
+            <h4 class="di-ranking-titulo">Por responsabilidade</h4>
+            <div id="di-impedimentos-responsabilidade" class="di-ranking"></div>
+            <h4 class="di-ranking-titulo">Maiores categorias de impedimento</h4>
+            <div id="di-impedimentos-categorias" class="di-ranking"></div>
+          </div>
+          <div class="insight-card">
+            <h3>Clientes com mais atraso por impedimento</h3>
+            <p class="conteudo-subtitulo">Dias corridos de impedimento ainda ativo — clique pra abrir a ficha.</p>
+            <div id="di-impedimentos-clientes"></div>
+          </div>
+        </div>
+
+        <div class="dashboard-insights">
+          <div class="insight-card">
+            <h3>Ativação e prevenção de churn</h3>
+            <p class="conteudo-subtitulo">Marco: sub-atividade "Primeiro valor percebido" do objetivo Implantação. Vencimento = entrada + 30 dias.</p>
+            <div class="di-objetivos-resumo">
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Já perceberam valor</span>
+                <span class="di-objetivos-resumo-valor" id="di-ativacao-com-valor">–</span>
+              </div>
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Taxa de ativação</span>
+                <span class="di-objetivos-resumo-valor" id="di-ativacao-taxa">–</span>
+              </div>
+              <div class="di-objetivos-resumo-item">
+                <span class="di-objetivos-resumo-label">Tempo médio até o 1º valor</span>
+                <span class="di-objetivos-resumo-valor" id="di-ativacao-tempo-medio">–</span>
+              </div>
+            </div>
+          </div>
+          <div class="insight-card">
+            <h3>Perto do vencimento sem ter percebido valor</h3>
+            <p class="conteudo-subtitulo">Risco de churn na 1ª mensalidade — clique pra abrir a ficha.</p>
+            <div id="di-ativacao-risco-clientes"></div>
           </div>
         </div>
 
@@ -2584,6 +2644,30 @@
       <div class="modal-body">
         <input type="text" id="implantados-busca" class="implantacao-busca implantados-busca" placeholder="Buscar cliente...">
         <div id="implantados-lista"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-impedimentos-lista" class="overlay hidden">
+    <div class="modal modal-implantados">
+      <div class="modal-header">
+        <h3 id="impedimentos-lista-titulo">Impedimentos</h3>
+        <button id="impedimentos-lista-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div id="impedimentos-lista-corpo"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay-objetivo-clientes" class="overlay hidden">
+    <div class="modal modal-implantados">
+      <div class="modal-header">
+        <h3 id="objetivo-clientes-titulo">Clientes com este objetivo</h3>
+        <button id="objetivo-clientes-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div id="objetivo-clientes-lista"></div>
       </div>
     </div>
   </div>

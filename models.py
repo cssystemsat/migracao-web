@@ -257,6 +257,11 @@ class ObjetivoTemplate(Base):
     # editar livremente depois, sem voltar pro template (nullable = sem prazo
     # padrão definido).
     prazo_dias: Mapped[int | None] = mapped_column(nullable=True)
+    # Template fixo "IMPLANTAÇÃO" (seed da migração) — único com universal=True,
+    # copiado automaticamente pra todo cliente novo (objetivos_sql, chamado por
+    # clientes_sql.criar_cliente). Não exposto em salvar_template/excluir_template
+    # (ver objetivos_sql.py) pra não virar editável/excluível como os demais.
+    universal: Mapped[bool] = mapped_column(default=False)
     criado_em: Mapped[datetime] = mapped_column(default=_agora)
     atualizado_em: Mapped[datetime] = mapped_column(default=_agora, onupdate=_agora)
 
@@ -303,6 +308,11 @@ class ClienteObjetivo(Base):
     # conclusão (criado_em + prazo_dias, calculada na hora, nunca guardada).
     # Nullable = sem prazo definido, fica fora dos KPIs de atraso/previsão.
     prazo_dias: Mapped[int | None] = mapped_column(nullable=True)
+    # Copiado do ObjetivoTemplate.universal na criação (objetivos_sql.
+    # criar_objetivo_universal_para_cliente) — é o objetivo obrigatório
+    # "IMPLANTAÇÃO" de todo cliente novo. Não entra na regra de encerramento
+    # (todos os objetivos ESPECÍFICOS concluídos) nem é excluível pela tela.
+    universal: Mapped[bool] = mapped_column(default=False)
 
     # Só referência ("criado a partir de") — SET NULL pra nunca travar a
     # exclusão do template nem apagar objetivos já em uso nos clientes.
@@ -313,6 +323,9 @@ class ClienteObjetivo(Base):
 
     itens: Mapped[list["ClienteObjetivoItem"]] = relationship(
         back_populates="objetivo", cascade="all, delete-orphan", order_by="ClienteObjetivoItem.ordem"
+    )
+    impedimentos: Mapped[list["ClienteObjetivoImpedimento"]] = relationship(
+        cascade="all, delete-orphan", order_by="ClienteObjetivoImpedimento.criado_em"
     )
 
     __table_args__ = (
@@ -333,6 +346,71 @@ class ClienteObjetivoItem(Base):
     concluido_em: Mapped[str] = mapped_column(default="")
 
     objetivo: Mapped["ClienteObjetivo"] = relationship(back_populates="itens")
+
+
+class ClienteObjetivoImpedimento(Base):
+    """Impedimento (bloqueio externo) de UM objetivo específico do cliente —
+    categoria/responsabilidade/datas pra calcular o prazo ajustado sem perder
+    o prazo original nem o atraso real do histórico (ver seção 5 do contexto
+    de negócio da Implantação, em `docs/DOCUMENTACAO_FUNCIONAL.md`).
+
+    Nunca é excluído, só editado/resolvido — `status` e `data_resolucao` são
+    os únicos campos que uma resolução muda; tudo o resto fica auditável via
+    `log_auditoria` (ver app.py)."""
+
+    __tablename__ = "cliente_objetivo_impedimentos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cliente_objetivo_id: Mapped[int] = mapped_column(
+        ForeignKey("cliente_objetivos.id", ondelete="CASCADE"), index=True
+    )
+
+    categoria: Mapped[str] = mapped_column()
+    # "cliente" | "systemsat" | "terceiro" — validado em app.py, não aqui
+    # (mesmo padrão de outros campos de enum textual do projeto, ex. Cliente.estagio).
+    responsabilidade: Mapped[str] = mapped_column()
+    descricao: Mapped[str] = mapped_column(Text, default="")
+    data_inicio: Mapped[str] = mapped_column(default="")
+    data_resolucao: Mapped[str] = mapped_column(default="")
+    # "ativo" | "resolvido"
+    status: Mapped[str] = mapped_column(default="ativo")
+    impacto: Mapped[str] = mapped_column(Text, default="")
+    proxima_acao: Mapped[str] = mapped_column(Text, default="")
+    # Texto livre (não FK) — mesmo padrão de ClienteEvento.responsavel.
+    responsavel: Mapped[str] = mapped_column(default="")
+
+    criado_em: Mapped[datetime] = mapped_column(default=_agora)
+    atualizado_em: Mapped[datetime] = mapped_column(default=_agora, onupdate=_agora)
+
+    __table_args__ = (
+        Index("ix_cliente_objetivo_impedimentos_objetivo", "cliente_objetivo_id", "status"),
+    )
+
+
+class ClienteDiagnosticoProntidao(Base):
+    """Diagnóstico de prontidão (seção 7 do contexto de negócio da
+    Implantação): condições iniciais do cliente, pra antecipar problemas nos
+    primeiros 30 dias — não é um checklist de tarefas (como o objetivo
+    universal), é uma fotografia das condições do cliente num dado momento,
+    por isso fica em tabela própria em vez de virar sub-atividade. 1:1 com
+    Cliente; `None` em qualquer campo = "não avaliado ainda" (diferente de
+    False = "não possui")."""
+
+    __tablename__ = "cliente_diagnostico_prontidao"
+
+    cliente_id: Mapped[int] = mapped_column(ForeignKey("clientes.id", ondelete="CASCADE"), primary_key=True)
+
+    possui_equipamentos: Mapped[bool | None] = mapped_column(nullable=True)
+    possui_chips: Mapped[bool | None] = mapped_column(nullable=True)
+    possui_operacao_definida: Mapped[bool | None] = mapped_column(nullable=True)
+    possui_clientes_proprios: Mapped[bool | None] = mapped_column(nullable=True)
+    equipe_disponivel_treinamento: Mapped[bool | None] = mapped_column(nullable=True)
+    estrutura_para_operar: Mapped[bool | None] = mapped_column(nullable=True)
+
+    observacoes: Mapped[str] = mapped_column(Text, default="")
+
+    atualizado_em: Mapped[datetime] = mapped_column(default=_agora, onupdate=_agora)
+    atualizado_por: Mapped[str] = mapped_column(default="")
 
 
 class ClienteEvento(Base):

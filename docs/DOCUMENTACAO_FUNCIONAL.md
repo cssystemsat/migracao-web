@@ -78,6 +78,44 @@ KPIs:
   implantação (até 15 / 16–30 / 31–60 / 61–90 / mais de 90) — classificação
   de tempo, não indica atraso por si só.
 
+**Objetivo universal fora do ranking**: "Ranking dos objetivos mais
+recorrentes", "Objetivos com maior tempo médio de conclusão",
+"Clientes com objetivo cadastrado" e "Implantação concluída (por
+objetivos)" nunca contam o objetivo universal "Implantação" — ele tem
+métrica própria e separada (concluído/atrasados) logo abaixo do ranking,
+sem se misturar com os objetivos específicos contratados.
+
+**Drill-down dos tiles do topo**: "Objetivos atrasados", "Clientes sem
+objetivo cadastrado", "Implantações concluídas (por objetivos)" e
+"Implantações concluídas (marcos)" agora são clicáveis — abrem a lista
+correspondente (a de marcos reaproveita o modal "Clientes implantados" já
+existente), clicar no registro abre a ficha.
+
+**Drill-down de impedimentos**: clicar numa linha de "Por responsabilidade"
+ou de "Maiores categorias de impedimento" abre um modal com os impedimentos
+daquele filtro (cliente, objetivo, categoria, status, data de início) —
+clicar num registro abre a ficha do cliente.
+
+**Drill-down do ranking de objetivos**: clicar num objetivo do "Ranking dos
+objetivos mais recorrentes" ou de "Objetivos com maior tempo médio de
+conclusão" abre um modal com os clientes que usam aquele objetivo (status:
+concluído/atrasado/em andamento) — clicar no cliente abre a ficha dele
+direto.
+
+**Impedimentos e gargalos** (novo bloco): impedimentos ativos, tempo médio
+de resolução (só impedimentos já resolvidos), ranking por responsabilidade
+(cliente/Systemsat/terceiro) e por categoria, e lista de clientes com mais
+dias de impedimento ATIVO agora (soma por cliente dos dias mesclados de
+cada objetivo com impedimento em aberto — não conta impedimento já
+resolvido, que é histórico, não atraso atual). Clicar num cliente da lista
+abre a ficha dele.
+
+**Ativação e prevenção de churn** (recalculado em cima do checklist, já que
+`cliente_ativacao` não existe mais): taxa de ativação, tempo médio e lista
+de clientes perto do vencimento (`data_entrada + 30 dias`, calculado na
+hora) sem ter marcado a sub-atividade "Primeiro valor percebido" do
+objetivo universal — ver `docs/HISTORICO_DECISOES.md`.
+
 Consulta sem período fica cacheada 5 min (mesmo racional do `/api/dashboard`,
 ver `docs/DOCUMENTACAO_TECNICA.md`), invalidada automaticamente por qualquer
 escrita em `/api/`; consulta com período não é cacheada.
@@ -110,6 +148,16 @@ regra.
   na Ficha do cliente. Cada cópia é independente do modelo, e a conclusão
   das etapas determina o progresso do objetivo. Objetivos legados sem etapas
   continuam podendo ser concluídos diretamente.
+- **Objetivo universal "IMPLANTAÇÃO"**: todo cliente novo com Implantação
+  recebe automaticamente, na criação, uma cópia do template fixo
+  "IMPLANTAÇÃO" (`ObjetivoTemplate.universal=True`) — régua básica que todo
+  cliente percorre, independente dos objetivos específicos contratados. Não
+  pode ser excluído (nem o template, nem a cópia na ficha do cliente), só
+  editado. Não entra na futura regra de "todos os objetivos específicos
+  concluídos" nem substitui a regra oficial de implantação (marcos). Aparece
+  em TODO cliente de Implantação, inclusive os cadastrados antes dessa
+  mudança — backfill preguiçoso ao abrir a ficha pela primeira vez depois
+  dela (ver `docs/HISTORICO_DECISOES.md`).
 - Lista de clientes implantados (separada da lista "em andamento").
 - Importação de clientes em lote por planilha (preview antes de confirmar).
 - Credencial da SSX do cliente, para autenticar operações na plataforma em
@@ -120,6 +168,70 @@ regra.
   novo substitui o anterior). Guardado em tabela própria (`cliente_documentos`),
   não na linha do cliente — mantém a consulta do cadastro leve mesmo com
   PDFs anexados (ver `docs/DOCUMENTACAO_TECNICA.md`).
+
+### Jornada de ativação (primeiros 30 dias) — virou checklist do objetivo universal
+
+Não existe mais como controle separado (`cliente_ativacao` foi removida —
+ver `docs/HISTORICO_DECISOES.md`). As métricas da jornada viraram
+sub-atividades com data do próprio checklist do objetivo universal
+"Implantação", reaproveitando `ClienteObjetivoItem.concluido_em` (carimbado
+ao marcar a etapa como feita, igual qualquer outra sub-atividade):
+
+- "Orientar sobre o primeiro acesso" → data do primeiro acesso.
+- "Iniciou os treinamentos" (antes "Realizar treinamento inicial") → data do
+  primeiro treinamento.
+- "Finalizou esteira de treinamentos" → data de conclusão da capacitação.
+- "Primeiro valor percebido" → inclui teste com equipamento de demonstração.
+
+Não existe mais campo de "situação de ativação", "motivo pelo qual não
+iniciou" nem "próxima ação de ativação" como campos próprios — atraso real
+(bloqueio externo) é registrado como impedimento do objetivo (seção
+seguinte), e a "próxima ação" é, na prática, a próxima sub-atividade não
+concluída do checklist. "Primeiro vencimento" também não é mais campo
+nenhum — quando precisar, é sempre `data_entrada + 30 dias`, calculado na
+hora.
+
+### Diagnóstico de prontidão
+
+Painel próprio na aba Implantação da Ficha (fora do card de qualquer
+objetivo, entre as informações gerais e os Objetivos): 6 perguntas sobre as
+condições iniciais do cliente
+(equipamentos, chips, operação definida, clientes próprios, equipe
+disponível pra treinamento, estrutura pra operar), cada uma Sim/Não/Não
+avaliado. Classificação calculada (nunca guardada): "Pronto para iniciar"
+(todas Sim), "Não preparado para iniciar" (todas Não), "Parcialmente
+preparado" (mistura) ou "Não avaliado" (nenhuma respondida ainda) — não
+avaliado não conta como negativo, é só falta de dado. **Nota de 0 a 10**
+(proporção de "Sim" entre as respondidas, campo não avaliado não entra na
+conta) — serve de apoio pro CS num eventual churn, mostrando com um número
+que as condições de entrada já eram frágeis. Campo de observações livre.
+Não é um checklist de tarefas (não tem data de conclusão por pergunta) — é
+uma fotografia das condições do cliente, atualizável a qualquer momento.
+
+O botão do painel já mostra a nota e a classificação sem precisar abrir
+(carregadas assim que a ficha abre); o formulário fica fechado por padrão e
+recolhe de novo automaticamente depois de salvar. O card "IdCentral/Etapa/
+Implantado/Responsável" no topo da aba também mostra a nota+classificação
+num campo próprio ("Score de implantação"), no lugar de "Última ação"
+(removido desse card — continua disponível na timeline completa).
+
+### Impedimentos de objetivo
+
+Cada objetivo específico (não o universal) pode ter impedimentos — bloqueios
+externos que atrasam a execução sem ser culpa da equipe (ex.: cliente sem
+chip pro equipamento). Um impedimento tem categoria (lista fixa por
+responsabilidade — cliente/Systemsat/terceiro, ver `impedimentos_sql.
+CATEGORIAS`), descrição, data de início, status (ativo/resolvido), data de
+resolução, impacto e próxima ação. Nunca é excluído — só editado ou
+resolvido/reaberto —, pra preservar o histórico de atraso.
+
+O prazo do objetivo nunca é sobrescrito: a Ficha mostra o prazo original
+(`prazo_dias`) e, quando há dias de impedimento, um **prazo ajustado**
+(`prazo_ajustado_dias` = original - dias de impedimento, calculado na hora,
+nunca guardado) ao lado — impedimentos que se sobrepõem no tempo não
+descontam o mesmo dia duas vezes. Toda criação/resolução de impedimento gera
+auditoria e evento na timeline do cliente (setor "Implantação"), igual à
+conclusão de objetivo.
 
 ## Controle de Migração
 

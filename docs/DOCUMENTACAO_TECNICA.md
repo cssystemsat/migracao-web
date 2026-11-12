@@ -66,6 +66,43 @@
   objetivos da implantação exige perfil operacional (não `visualizacao`).
 - O downgrade da revisão `0a9ef9c2b741` é bloqueado intencionalmente: o JSON
   legado não representa a hierarquia sem perda de dados.
+- **Objetivo universal "IMPLANTAÇÃO"** (`ObjetivoTemplate.universal`/
+  `ClienteObjetivo.universal`, migração `44240710c2b8`): só um template pode
+  ter `universal=True` (seed da migração, protegido contra exclusão em
+  `objetivos_sql.excluir_template`). Cópia automática pro cliente em
+  `clientes_sql.criar_cliente` (depois do commit da criação do cliente, numa
+  segunda transação — não é atômico com a criação do cliente, mesmo padrão
+  de `registrar_acao` já usado no resto do projeto) via
+  `objetivos_sql.criar_objetivo_universal_para_cliente`, idempotente. Só
+  clientes criados depois dessa migração recebem — sem backfill retroativo
+  (decisão explícita, ver `docs/HISTORICO_DECISOES.md`).
+- **Impedimentos** (`impedimentos_sql.py`, tabela `cliente_objetivo_impedimentos`,
+  migração `b4fe5b856939`): CRUD sem exclusão (só edita/resolve/reabre).
+  `prazo_ajustado_dias` é calculado em `objetivos_sql._objetivo_dict` a
+  partir dos impedimentos pré-carregados em lote por
+  `impedimentos_sql.listar_impedimentos_por_objetivos` (evita N+1 query em
+  `listar_objetivos`); a mescla de intervalos sobrepostos está em
+  `impedimentos_sql.dias_impedimento_objetivo`. Rotas em `app.py`:
+  `/api/clientes/<id>/objetivos/<id>/impedimentos` (listar/criar) e
+  `/api/impedimentos/<id>` (`PUT` editar, `/resolver`, `/reabrir`).
+
+- **Jornada de ativação**: `cliente_ativacao` existiu por um dia e foi
+  removida (migração `24e683c0ce3a`, tabela nunca teve dados reais) — as
+  métricas viraram sub-atividades do checklist do objetivo universal (ver
+  `docs/DOCUMENTACAO_FUNCIONAL.md` e `docs/HISTORICO_DECISOES.md`).
+  `objetivos_sql.atualizar_checklist_universal_ativacao()` fez a correção
+  pontual (rename + 2 itens novos) no template e em todo `ClienteObjetivo`
+  universal já existente — idempotente, não precisa rodar de novo.
+
+- **Diagnóstico de prontidão** (`diagnostico_sql.py`, tabela
+  `cliente_diagnostico_prontidao`, migração `3c1f3fccee31`): 1:1 com
+  `Cliente`, campos booleanos nullable (`None` = não avaliado, diferente de
+  `False`). Classificação (`pronto`/`parcial`/`nao_preparado`/
+  `nao_avaliado`) calculada em `diagnostico_sql._classificar`, nunca
+  persistida. Rota única `GET/PUT /api/clientes/<id>/diagnostico-prontidao`.
+  Renderizado dentro do card do objetivo universal
+  (`construirSecaoDiagnosticoProntidao`), mesmo padrão lazy-load do painel
+  de impedimentos.
 
 ## Autenticação (duas camadas, não confundir)
 

@@ -38,7 +38,9 @@ import conversor_uo
 import conversor_colaboradores
 import conversorkml
 import credenciais_sql
+import diagnostico_sql
 import feed_sql
+import impedimentos_sql
 import migracoes_sql
 import municipios_sql
 import objetivos_sql
@@ -2594,6 +2596,8 @@ def api_objetivos_template(template_id):
             objetivos_sql.excluir_template(template_id)
         except objetivos_sql.RegistroNaoEncontradoError:
             return jsonify(ok=False, error="Template não encontrado."), 404
+        except objetivos_sql.TemplateUniversalProtegidoError:
+            return jsonify(ok=False, error="O template universal \"Implantação\" não pode ser excluído."), 400
         registrar_acao(
             acao="excluir",
             entidade_tipo="objetivo_template",
@@ -2642,6 +2646,12 @@ def api_objetivos_implantacao_detalhados(cliente_id):
     if not cliente.get("tem_implantacao", True):
         return jsonify(ok=False, error="Esse cliente não possui Implantação."), 400
     if request.method == "GET":
+        # Backfill preguiçoso do objetivo universal: clientes cadastrados
+        # antes da migração que o criou não o recebem em lote (decisão
+        # explícita, ver docs/HISTORICO_DECISOES.md), mas a usuária pediu pra
+        # ele sempre aparecer — então garante aqui, na primeira vez que a
+        # ficha é aberta (idempotente, não-op se já existir).
+        objetivos_sql.criar_objetivo_universal_para_cliente(cliente_id)
         objetivos = objetivos_sql.listar_objetivos(cliente_id)
         if _sincronizar_eventos_objetivos_pendentes(cliente_id, objetivos):
             cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
@@ -2692,6 +2702,192 @@ def api_objetivos_implantacao_detalhados(cliente_id):
         cliente_nome=cliente.get("cliente", ""),
     )
     return jsonify(ok=True, objetivos=salvos)
+
+
+@app.route("/api/impedimentos/categorias", methods=["GET"])
+def api_impedimentos_categorias():
+    return jsonify(ok=True, categorias=impedimentos_sql.CATEGORIAS)
+
+
+def _validar_impedimento(data, exigir_categoria_responsabilidade=True):
+    if not isinstance(data, dict):
+        return None, "Informe os dados do impedimento."
+    dados = {}
+    if exigir_categoria_responsabilidade or "responsabilidade" in data:
+        responsabilidade = str(data.get("responsabilidade") or "").strip()
+        if responsabilidade not in impedimentos_sql.RESPONSABILIDADES:
+            return None, "Responsabilidade inválida."
+        dados["responsabilidade"] = responsabilidade
+    if exigir_categoria_responsabilidade or "categoria" in data:
+        categoria = str(data.get("categoria") or "").strip()
+        responsabilidade = dados.get("responsabilidade") or str(data.get("responsabilidade") or "").strip()
+        categorias_validas = impedimentos_sql.CATEGORIAS.get(responsabilidade, [])
+        if not categoria or categoria not in categorias_validas:
+            return None, "Categoria inválida para a responsabilidade informada."
+        dados["categoria"] = categoria
+    for campo, limite in (("descricao", 2000), ("impacto", 1000), ("proxima_acao", 1000), ("responsavel", 200)):
+        if campo in data:
+            valor = str(data.get(campo) or "").strip()
+            if len(valor) > limite:
+                return None, f"O campo \"{campo}\" excedeu o tamanho máximo."
+            dados[campo] = valor
+    if "data_inicio" in data:
+        data_inicio = str(data.get("data_inicio") or "").strip()
+        if data_inicio and not re.match(r"^\d{4}-\d{2}-\d{2}$", data_inicio):
+            return None, "Data de início inválida."
+        dados["data_inicio"] = data_inicio
+    return dados, None
+
+
+@app.route("/api/clientes/<int:cliente_id>/objetivos/<int:objetivo_id>/impedimentos", methods=["GET", "POST"])
+def api_impedimentos_objetivo(cliente_id, objetivo_id):
+    objetivo_nome = objetivos_sql.buscar_objetivo_do_cliente(objetivo_id, cliente_id)
+    if objetivo_nome is None:
+        return jsonify(ok=False, error="Objetivo não encontrado para este cliente."), 404
+    if request.method == "GET":
+        return jsonify(ok=True, impedimentos=impedimentos_sql.listar_impedimentos(objetivo_id))
+    if not _posso_operar():
+        return jsonify(ok=False, error="Perfil de visualização não pode registrar impedimentos."), 403
+    data = request.get_json(force=True) or {}
+    dados, erro = _validar_impedimento(data)
+    if erro:
+        return jsonify(ok=False, error=erro), 400
+    impedimento = impedimentos_sql.criar_impedimento(objetivo_id, dados)
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    registrar_acao(
+        acao="criar", entidade_tipo="impedimento", entidade_id=impedimento["id"],
+        entidade_nome=f"{impedimento['categoria']} ({objetivo_nome})",
+        titulo="Impedimento registrado", cliente_id=cliente_id,
+        idcentral=cliente.get("idcentral", "") if cliente else "",
+        cliente_nome=cliente.get("cliente", "") if cliente else "",
+    )
+    _registrar_evento_automatico_cliente(
+        cliente_id, f"Impedimento registrado: {impedimento['categoria']} ({objetivo_nome})",
+    )
+    return jsonify(ok=True, impedimento=impedimento), 201
+
+
+@app.route("/api/impedimentos/<int:impedimento_id>", methods=["PUT"])
+def api_editar_impedimento(impedimento_id):
+    if not _posso_operar():
+        return jsonify(ok=False, error="Perfil de visualização não pode editar impedimentos."), 403
+    contexto = impedimentos_sql.buscar_contexto(impedimento_id)
+    if contexto is None:
+        return jsonify(ok=False, error="Impedimento não encontrado."), 404
+    cliente_id, objetivo_nome = contexto
+    data = request.get_json(force=True) or {}
+    dados, erro = _validar_impedimento(data, exigir_categoria_responsabilidade=False)
+    if erro:
+        return jsonify(ok=False, error=erro), 400
+    try:
+        impedimento = impedimentos_sql.atualizar_impedimento(impedimento_id, dados)
+    except impedimentos_sql.RegistroNaoEncontradoError:
+        return jsonify(ok=False, error="Impedimento não encontrado."), 404
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    registrar_acao(
+        acao="editar", entidade_tipo="impedimento", entidade_id=impedimento_id,
+        entidade_nome=f"{impedimento['categoria']} ({objetivo_nome})",
+        titulo="Impedimento atualizado", cliente_id=cliente_id,
+        idcentral=cliente.get("idcentral", "") if cliente else "",
+        cliente_nome=cliente.get("cliente", "") if cliente else "",
+    )
+    return jsonify(ok=True, impedimento=impedimento)
+
+
+@app.route("/api/impedimentos/<int:impedimento_id>/resolver", methods=["PUT"])
+def api_resolver_impedimento(impedimento_id):
+    if not _posso_operar():
+        return jsonify(ok=False, error="Perfil de visualização não pode resolver impedimentos."), 403
+    contexto = impedimentos_sql.buscar_contexto(impedimento_id)
+    if contexto is None:
+        return jsonify(ok=False, error="Impedimento não encontrado."), 404
+    cliente_id, objetivo_nome = contexto
+    data = request.get_json(force=True) or {}
+    data_resolucao = str(data.get("data_resolucao") or "").strip()
+    if data_resolucao and not re.match(r"^\d{4}-\d{2}-\d{2}$", data_resolucao):
+        return jsonify(ok=False, error="Data de resolução inválida."), 400
+    try:
+        impedimento = impedimentos_sql.resolver_impedimento(impedimento_id, data_resolucao or None)
+    except impedimentos_sql.RegistroNaoEncontradoError:
+        return jsonify(ok=False, error="Impedimento não encontrado."), 404
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    registrar_acao(
+        acao="editar", entidade_tipo="impedimento", entidade_id=impedimento_id,
+        entidade_nome=f"{impedimento['categoria']} ({objetivo_nome})",
+        titulo="Impedimento resolvido", cliente_id=cliente_id,
+        idcentral=cliente.get("idcentral", "") if cliente else "",
+        cliente_nome=cliente.get("cliente", "") if cliente else "",
+    )
+    _registrar_evento_automatico_cliente(
+        cliente_id, f"Impedimento resolvido: {impedimento['categoria']} ({objetivo_nome})",
+    )
+    return jsonify(ok=True, impedimento=impedimento)
+
+
+@app.route("/api/impedimentos/<int:impedimento_id>/reabrir", methods=["PUT"])
+def api_reabrir_impedimento(impedimento_id):
+    if not _posso_operar():
+        return jsonify(ok=False, error="Perfil de visualização não pode reabrir impedimentos."), 403
+    contexto = impedimentos_sql.buscar_contexto(impedimento_id)
+    if contexto is None:
+        return jsonify(ok=False, error="Impedimento não encontrado."), 404
+    cliente_id, objetivo_nome = contexto
+    try:
+        impedimento = impedimentos_sql.reabrir_impedimento(impedimento_id)
+    except impedimentos_sql.RegistroNaoEncontradoError:
+        return jsonify(ok=False, error="Impedimento não encontrado."), 404
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    registrar_acao(
+        acao="editar", entidade_tipo="impedimento", entidade_id=impedimento_id,
+        entidade_nome=f"{impedimento['categoria']} ({objetivo_nome})",
+        titulo="Impedimento reaberto", cliente_id=cliente_id,
+        idcentral=cliente.get("idcentral", "") if cliente else "",
+        cliente_nome=cliente.get("cliente", "") if cliente else "",
+    )
+    return jsonify(ok=True, impedimento=impedimento)
+
+
+@app.route("/api/clientes/<int:cliente_id>/diagnostico-prontidao", methods=["GET", "PUT"])
+def api_diagnostico_prontidao(cliente_id):
+    """Diagnóstico de prontidão (seção 7 do contexto de negócio) — avaliação
+    das condições iniciais do cliente, pra antecipar problemas nos primeiros
+    30 dias. Não é checklist de tarefas; cada campo é True/False/null (null
+    = não avaliado ainda, diferente de "não possui")."""
+    cliente = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not cliente:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    if request.method == "GET":
+        return jsonify(ok=True, diagnostico=diagnostico_sql.buscar(cliente_id))
+    if not _posso_operar():
+        return jsonify(ok=False, error="Perfil de visualização não pode alterar o diagnóstico de prontidão."), 403
+    data = request.get_json(force=True) or {}
+    if not isinstance(data, dict):
+        return jsonify(ok=False, error="Informe os dados do diagnóstico."), 400
+    dados = {}
+    for campo in diagnostico_sql.CAMPOS:
+        if campo in data:
+            valor = data.get(campo)
+            if valor is not None and not isinstance(valor, bool):
+                return jsonify(ok=False, error=f"O campo \"{campo}\" precisa ser verdadeiro, falso ou vazio."), 400
+            dados[campo] = valor
+    if "observacoes" in data:
+        observacoes = str(data.get("observacoes") or "").strip()
+        if len(observacoes) > 2000:
+            return jsonify(ok=False, error="Observações excederam o tamanho máximo."), 400
+        dados["observacoes"] = observacoes
+    usuario_nome = session.get("app_usuario_responsavel") or session.get("app_usuario_nome", "")
+    try:
+        diagnostico = diagnostico_sql.salvar(cliente_id, dados, usuario_nome=usuario_nome)
+    except diagnostico_sql.RegistroNaoEncontradoError:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    registrar_acao(
+        acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
+        entidade_nome=cliente.get("cliente", ""),
+        titulo="Diagnóstico de prontidão atualizado",
+        cliente_id=cliente_id, idcentral=cliente.get("idcentral", ""),
+        cliente_nome=cliente.get("cliente", ""),
+    )
+    return jsonify(ok=True, diagnostico=diagnostico)
 
 
 @app.route("/api/clientes/<int:cliente_id>/implantado", methods=["PUT"])
@@ -4476,6 +4672,43 @@ def dashboard_implantacao_indicadores():
     return jsonify(**_carregar_dashboard_implantacao(data_de, data_ate))
 
 
+@app.route("/api/dashboard-implantacao/impedimentos")
+def dashboard_implantacao_impedimentos_filtrados():
+    """Drill-down dos blocos "Por responsabilidade"/"Maiores categorias" de
+    Impedimentos e gargalos: clicar abre a lista de registros que batem."""
+    responsabilidade = (request.args.get("responsabilidade") or "").strip() or None
+    categoria = (request.args.get("categoria") or "").strip() or None
+    if responsabilidade and responsabilidade not in impedimentos_sql.RESPONSABILIDADES:
+        return jsonify(ok=False, error="Responsabilidade inválida."), 400
+    return jsonify(ok=True, impedimentos=impedimentos_sql.listar_por_filtro(responsabilidade, categoria))
+
+
+@app.route("/api/dashboard-implantacao/objetivos-atrasados")
+def dashboard_implantacao_objetivos_atrasados():
+    return jsonify(ok=True, objetivos=objetivos_sql.listar_objetivos_atrasados())
+
+
+@app.route("/api/dashboard-implantacao/sem-objetivo")
+def dashboard_implantacao_sem_objetivo():
+    return jsonify(ok=True, clientes=objetivos_sql.listar_clientes_sem_objetivo_especifico())
+
+
+@app.route("/api/dashboard-implantacao/concluidos-por-objetivos")
+def dashboard_implantacao_concluidos_por_objetivos():
+    data_de, data_ate = _periodo_dashboard_implantacao()
+    return jsonify(ok=True, clientes=objetivos_sql.listar_clientes_concluidos_por_objetivos(data_de, data_ate))
+
+
+@app.route("/api/dashboard-implantacao/objetivo-clientes")
+def dashboard_implantacao_objetivo_clientes():
+    """Drill-down do ranking "objetivos mais recorrentes"/"maior tempo":
+    clicar num objetivo abre a lista de clientes que o usam."""
+    nome = (request.args.get("nome") or "").strip()
+    if not nome:
+        return jsonify(ok=False, error="Informe o nome do objetivo."), 400
+    return jsonify(ok=True, clientes=objetivos_sql.clientes_por_objetivo_nome(nome))
+
+
 def _carregar_dashboard_implantacao(data_de=None, data_ate=None):
     total_implantacao, implantacao_ativos = clientes_sql.contar_clientes_implantacao()
     por_etapa, _ = clientes_sql.contar_por_etapa_implantacao(IMPLANTACAO_ETAPAS, IMPLANTACAO_ETAPA_PADRAO)
@@ -4483,6 +4716,8 @@ def _carregar_dashboard_implantacao(data_de=None, data_ate=None):
     implantacoes_iniciadas_periodo = clientes_sql.contar_clientes_implantacao_iniciados(data_de, data_ate)
     tempo_medio_dias, tempo_medio_amostra = clientes_sql.tempo_medio_implantacao()
     objetivos = objetivos_sql.estatisticas_dashboard_implantacao(data_de, data_ate)
+    impedimentos = impedimentos_sql.estatisticas_dashboard_impedimentos()
+    ativacao = objetivos_sql.estatisticas_dashboard_ativacao()
 
     return dict(
         ok=True,
@@ -4501,6 +4736,8 @@ def _carregar_dashboard_implantacao(data_de=None, data_ate=None):
         por_etapa=por_etapa,
         clientes_atrasados=clientes_atrasados,
         **objetivos,
+        impedimentos=impedimentos,
+        ativacao=ativacao,
     )
 
 

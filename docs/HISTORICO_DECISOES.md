@@ -24,6 +24,194 @@ conferir a coleção nova funcionando antes de remover a antiga, e
 `limpar_migracao_orfa.py` para remover, só depois de confirmado, os
 registros de migração sem vínculo com nenhum cliente.
 
+## Objetivo universal "IMPLANTAÇÃO" obrigatório (2026-11-10)
+
+Contexto: plano de ampliação da área de Implantação (impedimentos, jornada
+de ativação de 30 dias, diagnóstico de prontidão, novos indicadores do
+Dashboard — ver seções seguintes e `docs/DOCUMENTACAO_FUNCIONAL.md`).
+
+Decisão: existe um `ObjetivoTemplate` fixo chamado "IMPLANTAÇÃO"
+(`universal=True`, seed da migração `44240710c2b8`) que é copiado
+automaticamente para todo cliente novo com `tem_implantacao=True`, nos 3
+pontos de criação de cliente (cadastro manual, sync da planilha de CS,
+importação em lote) — ponto único em `clientes_sql.criar_cliente`, chamando
+`objetivos_sql.criar_objetivo_universal_para_cliente`. Esse template não
+pode ser excluído (`TemplateUniversalProtegidoError`) nem o objetivo
+resultante pode ser removido da ficha do cliente — só editado (nome, itens,
+prazo), igual a qualquer template normal.
+
+Decisões explícitas confirmadas com a usuária:
+- **Revisão (mesmo dia, 2026-11-10):** a decisão original era só criar o
+  objetivo universal em clientes novos, sem rodar retroativamente nos já
+  cadastrados. A usuária viu a tela de Objetivos vazia num cliente antigo e
+  pediu que o objetivo universal **sempre** apareça, pra todo cliente de
+  Implantação. Em vez de uma migração em lote, o backfill é preguiçoso: `GET
+  /api/clientes/<id>/objetivos-implantacao-detalhados` chama
+  `objetivos_sql.criar_objetivo_universal_para_cliente` (idempotente) antes
+  de listar — garante o objetivo na primeira vez que a ficha de qualquer
+  cliente antigo é aberta, sem precisar varrer a base inteira de uma vez.
+- **Não altera a regra oficial de "implantado"**, que continua sendo pelos
+  marcos (`Cliente.etapa`/`concluido_em`). O objetivo universal fica fora da
+  futura regra de "todos os objetivos específicos concluídos" (`universal`
+  marca exatamente isso).
+- A migração `44240710c2b8` foi aplicada diretamente em produção (Render) —
+  confirmado com a usuária depois do fato (ver observação de processo: a
+  migração deveria ter sido testada antes contra um banco local, mas o
+  `DATABASE_URL` do `.env` já apontava pra produção na hora do teste).
+- **Nome do objetivo** (mesmo dia): o label exibido é "Implantação" (não
+  "IMPLANTAÇÃO" em caixa alta) — migração de dado `7f6aa5a7a29f` renomeia o
+  template seed e os objetivos já copiados (`universal=True`, nunca compara
+  por nome no código).
+- **Backfill em lote** (mesmo dia, revisão da decisão "só clientes novos"
+  acima): rodado uma vez via `objetivos_sql.backfill_objetivo_universal_todos_clientes()`
+  pra cobrir os 190 clientes de Implantação existentes antes dessa mudança,
+  além do backfill preguiçoso que já cobre qualquer cliente futuro que passe
+  batido.
+- **Ordem**: o objetivo universal sempre aparece primeiro na Ficha,
+  independente do valor de `ordem` guardado — `listar_objetivos` ordena por
+  `universal DESC, ordem, id` (não dá pra confiar só em `ordem=0` porque
+  "Salvar objetivos" reatribui `ordem` pela posição que o front mandou,
+  sem tratamento especial pro universal).
+
+## Impedimentos de objetivo (Fase 2 do plano de ampliação, 2026-11-10)
+
+Nova entidade `ClienteObjetivoImpedimento` (tabela `cliente_objetivo_impedimentos`,
+migração `b4fe5b856939`) — categoria (lista fixa por responsabilidade:
+cliente/Systemsat/terceiro, ver `impedimentos_sql.CATEGORIAS`), datas de
+início/resolução, status, impacto e próxima ação. Nunca excluído — só
+editado ou resolvido/reaberto —, pra nunca apagar o atraso do histórico
+(regra explícita do contexto de negócio da Implantação).
+
+O prazo do objetivo (`ClienteObjetivo.prazo_dias`) nunca é sobrescrito; o
+"prazo ajustado" é sempre calculado na hora (`objetivos_sql._objetivo_dict`),
+igual já acontecia com a data prevista de conclusão — mesmo padrão de "nunca
+guardar o que pode ser calculado e fica desatualizado" já usado no resto do
+módulo de Objetivos. Intervalos de impedimento que se sobrepõem no tempo são
+mesclados antes de somar (`impedimentos_sql.dias_impedimento_objetivo`) pra
+não descontar o mesmo dia duas vezes, conforme pedido explícito.
+
+## Jornada de ativação de 30 dias (Fase 3 do plano de ampliação, 2026-11-10)
+
+Nova tabela `cliente_ativacao` (migração `93d5a1185682`), 1:1 com `Cliente`.
+Decisão confirmada com a usuária no planejamento original: é um controle de
+dados **separado** do funil de marcos existente (`Cliente.etapa`/
+`marcos_*`), não uma evolução dele — os dois convivem sem se misturar, igual
+já acontece entre "implantado pelos marcos" e "implantado por objetivos"
+(ver decisão acima). O relógio dos 30 dias usa sempre `Cliente.data_entrada`
+e nunca é pausado por impedimento (regra explícita do contexto de negócio),
+diferente do prazo ajustado dos objetivos.
+
+**Revisão de UI (mesmo dia, 2026-11-10):** a primeira versão mostrava isso
+num painel próprio, separado dos Objetivos, no topo da aba Implantação. A
+usuária não gostou — pediu pra ficar dentro do objetivo universal
+"Implantação", sempre visível (não atrás de toggle), com esse card
+visualmente destacado dos demais objetivos.
+
+**Segunda revisão, removendo o controle por completo (mesmo dia):** a
+usuária foi além e pediu pra as métricas virarem sub-atividades com data do
+próprio checklist do objetivo universal, em vez de um controle de dados
+separado. Mapeamento pedido:
+- "Orientar sobre o primeiro acesso" (item já existia) = primeiro acesso.
+- "Iniciou os treinamentos" (renomeado de "Realizar treinamento inicial") =
+  primeiro treinamento.
+- "Finalizou esteira de treinamentos" (item novo) = capacitação concluída.
+- "Primeiro valor percebido" (item novo) = primeiro valor.
+
+Confirmado explicitamente que NÃO entram em lugar nenhum: "Ativação
+operacional" e "Primeiro vencimento" (quando precisar, é sempre
+`data_entrada + 30 dias`, calculado na hora — nunca um campo), "situação de
+ativação", "motivo de não ter iniciado" (vira impedimento quando for exceção
+real) e "próxima ação" (é a próxima sub-atividade pendente do checklist).
+
+Resultado: `cliente_ativacao` foi dropada (migração `24e683c0ce3a`, tabela
+nunca teve linha real — conferido antes de remover), `ativacao_sql.py` foi
+deletado, e as rotas/UI correspondentes removidas. O controle de atraso
+dessas sub-atividades passa a ser só impedimentos (Fase 2), igual qualquer
+outro objetivo específico.
+
+## Dashboard: objetivo universal fora do ranking + bloco de impedimentos (Fase 5, 2026-11-11)
+
+Pedido explícito da usuária: o objetivo universal "Implantação" não deve
+competir no ranking de "objetivos mais usados" nem nas médias de tempo dos
+objetivos específicos — é estruturalmente diferente (régua obrigatória, não
+um projeto contratado). `objetivos_sql.estatisticas_dashboard_implantacao`
+agora separa o laço em duas contagens: específicos (ranking, tempo, "todos
+concluídos") e universal (métrica própria: total/concluídos/atrasados).
+Efeito colateral correto: `clientes_sem_objetivo` passou a significar "sem
+objetivo ESPECÍFICO" (antes, com o backfill do universal, teria ido pra
+zero sempre — o que não fazia sentido pra regra de negócio).
+
+Pedido também: métricas de impedimento no Dashboard —
+`impedimentos_sql.estatisticas_dashboard_impedimentos` calcula dias de
+atraso ATIVO por cliente (soma, por cliente, dos dias mesclados de cada
+objetivo com impedimento em aberto — reaproveita `dias_impedimento_objetivo`
+já existente da Fase 2), ranking por responsabilidade/categoria e tempo
+médio de resolução dos já resolvidos. Fica num bloco novo "Impedimentos e
+gargalos" no Dashboard de Implantação, com a lista de clientes clicável
+(abre a ficha).
+
+## Dashboard de ativação/churn recalculado em cima do checklist (2026-11-11)
+
+Com `cliente_ativacao` removida, o bloco "Ativação e prevenção de churn" do
+Dashboard de Implantação (seção 8.4 do contexto de negócio) precisou ser
+recalculado: `objetivos_sql.estatisticas_dashboard_ativacao` usa a
+sub-atividade "Primeiro valor percebido" do objetivo universal
+(`ClienteObjetivoItem.concluido_em`) como marco, e `Cliente.data_entrada +
+30 dias` (sempre calculado na hora) como vencimento — taxa de ativação,
+tempo médio até o primeiro valor e lista de clientes perto do vencimento
+sem valor percebido ainda (risco de churn).
+
+## Diagnóstico de prontidão (Fase 4 do plano de ampliação, 2026-11-12)
+
+Nova tabela `cliente_diagnostico_prontidao` (migração `3c1f3fccee31`), 1:1
+com `Cliente` — diferente do checklist do objetivo universal (que virou
+sub-atividades com data), aqui NÃO virou checklist de tarefas: é uma
+fotografia das condições iniciais do cliente num dado momento (possui
+equipamento? chip? operação definida?), sem data de "quando foi feito" —
+não faz sentido como sub-atividade. Campos booleanos nullable (`None` =
+"não avaliado ainda", distinto de `False` = "não possui" — importante pra
+classificação não tratar falta de dado como negativo). Vive dentro do card
+do objetivo universal na Ficha, mesmo padrão de painel expansível dos
+impedimentos.
+
+**Nota + UX revisado (mesmo dia):** pedido pra gerar uma nota (0-10) junto da
+classificação — apoio pro CS num eventual churn, provando que a fragilidade
+já estava visível desde a entrada (`diagnostico_sql._nota`, proporção de
+"Sim" entre as perguntas respondidas). Também revisado o UX: o botão do
+painel carrega a nota/classificação assim que a ficha abre (sem precisar
+clicar), e o formulário recolhe de novo sozinho depois de "Salvar" — antes
+ficava aberto com as 6 perguntas + observações até a usuária fechar na mão,
+poluindo o card do objetivo universal.
+
+**Virou painel independente (mesmo dia):** pedido pra tirar o diagnóstico de
+dentro do card do objetivo "Implantação" — agora é um painel próprio na aba
+Implantação (`construirPainelDiagnosticoProntidao`), entre as informações
+gerais e os Objetivos. O card de informações gerais do topo também passou a
+mostrar a nota+classificação num campo "Score de implantação", substituindo
+"Última ação" ali (que continua existindo só na timeline completa).
+
+## Drill-down de impedimentos por responsabilidade/categoria (Fase 6, 2026-11-12)
+
+Último item pendente do plano original de interatividade do Dashboard:
+clicar numa linha de "Por responsabilidade" ou "Maiores categorias" do
+bloco "Impedimentos e gargalos" abre modal com os registros (`impedimentos_sql.
+listar_por_filtro`, rota `/api/dashboard-implantacao/impedimentos`), igual
+já existia pro ranking de objetivos e pra lista de clientes mais atrasados.
+**Revisão da Fase 6 (mesmo dia):** na revisão, faltavam 3 tiles do topo sem
+drill-down ("Objetivos atrasados", "Clientes sem objetivo cadastrado",
+"Implantações concluídas (por objetivos)") e o tile "Implantações
+concluídas (marcos)" também não abria nada. Fechados com
+`objetivos_sql.listar_objetivos_atrasados`/`listar_clientes_sem_objetivo_especifico`/
+`listar_clientes_concluidos_por_objetivos` (3 rotas novas) + reaproveitando
+o modal "Clientes implantados" (`abrirModalImplantados`) já existente pro
+tile de marcos — só precisou alimentar `implantacaoClientesCache` também a
+partir do loader do Dashboard de Implantação, que antes fazia sua própria
+consulta de clientes sem atualizar esse cache compartilhado.
+
+Com isso, os 6 pontos do plano original de ampliação da Implantação estão
+todos entregues (com os ajustes de rota combinados ao longo do caminho,
+documentados nas entradas anteriores).
+
 ## Conclusão do Objetivo de Implantação virou independente das sub-atividades
 
 Antes: um objetivo com sub-atividades era considerado concluído automaticamente

@@ -1914,6 +1914,13 @@ let objetivosImplantacaoRascunho = [];
 let objetivosImplantacaoAlterado = false;
 let objetivosImplantacaoSalvando = false;
 const objetivosImplantacaoEmEdicao = new Set();
+// Objetivos com o painel de impedimentos expandido na tela (sobrevive ao
+// re-render do cartão, ex. ao marcar sub-atividade) — cache local por
+// objetivo.id das listas já carregadas da API, pra não refazer a requisição
+// a cada re-render enquanto o painel estiver aberto.
+const objetivosImpedimentosAbertos = new Set();
+const objetivosImpedimentosCache = new Map();
+const RESPONSABILIDADE_ROTULOS = { cliente: "Cliente", systemsat: "Systemsat", terceiro: "Terceiro" };
 let objetivosTemplatesCache = null;
 let objetivosTemplatesRequisicao = null;
 const overlayAdicionarObjetivo = el("overlay-objetivo-adicionar");
@@ -19383,6 +19390,13 @@ function renderizarTemplatesObjetivosAdmin(templates) {
     cabecalho.className = "objetivo-template-card-cabecalho";
     const nome = document.createElement("strong");
     nome.textContent = template.nome;
+    if (template.universal) {
+      const universalChip = document.createElement("span");
+      universalChip.className = "objetivo-template-prazo-chip";
+      universalChip.title = "Copiado automaticamente para todo cliente novo de Implantação — não pode ser excluído.";
+      universalChip.textContent = "Objetivo universal";
+      nome.appendChild(universalChip);
+    }
     if (template.prazo_dias) {
       const prazoChip = document.createElement("span");
       prazoChip.className = "objetivo-template-prazo-chip";
@@ -19395,27 +19409,30 @@ function renderizarTemplatesObjetivosAdmin(templates) {
     editar.className = "btn-secondary";
     editar.textContent = "Editar";
     editar.addEventListener("click", (event) => editarTemplateObjetivo(template, event.currentTarget));
-    const excluir = document.createElement("button");
-    excluir.type = "button";
-    excluir.className = "btn-secondary";
-    excluir.textContent = "Excluir";
-    excluir.addEventListener("click", async () => {
-      if (!confirm(`Excluir o template "${template.nome}"? Os objetivos já usados nas fichas dos clientes não serão alterados.`)) return;
-      try {
-        const response = await fetch(`/api/objetivos-templates/${template.id}`, { method: "DELETE" });
-        const data = await parseJsonResponse(response);
-        if (!data.ok) return mostrarMensagemTemplatesObjetivos(data.error || "Falha ao excluir template.", true);
-        // Atualiza a lista local em vez de buscar tudo de novo no servidor —
-        // evita o "Carregando templates..." e o round-trip extra a cada ação.
-        objetivosTemplatesCache = (objetivosTemplatesCache || []).filter((t) => t.id !== template.id);
-        if (objetivoTemplateEditandoId === template.id) limparFormObjetivoTemplate();
-        renderizarTemplatesObjetivosAdmin(objetivosTemplatesCache);
-        mostrarMensagemTemplatesObjetivos("Template excluído.");
-      } catch (error) {
-        mostrarMensagemTemplatesObjetivos(String(error), true);
-      }
-    });
-    acoes.append(editar, excluir);
+    acoes.appendChild(editar);
+    if (!template.universal) {
+      const excluir = document.createElement("button");
+      excluir.type = "button";
+      excluir.className = "btn-secondary";
+      excluir.textContent = "Excluir";
+      excluir.addEventListener("click", async () => {
+        if (!confirm(`Excluir o template "${template.nome}"? Os objetivos já usados nas fichas dos clientes não serão alterados.`)) return;
+        try {
+          const response = await fetch(`/api/objetivos-templates/${template.id}`, { method: "DELETE" });
+          const data = await parseJsonResponse(response);
+          if (!data.ok) return mostrarMensagemTemplatesObjetivos(data.error || "Falha ao excluir template.", true);
+          // Atualiza a lista local em vez de buscar tudo de novo no servidor —
+          // evita o "Carregando templates..." e o round-trip extra a cada ação.
+          objetivosTemplatesCache = (objetivosTemplatesCache || []).filter((t) => t.id !== template.id);
+          if (objetivoTemplateEditandoId === template.id) limparFormObjetivoTemplate();
+          renderizarTemplatesObjetivosAdmin(objetivosTemplatesCache);
+          mostrarMensagemTemplatesObjetivos("Template excluído.");
+        } catch (error) {
+          mostrarMensagemTemplatesObjetivos(String(error), true);
+        }
+      });
+      acoes.appendChild(excluir);
+    }
     cabecalho.append(nome, acoes);
     card.appendChild(cabecalho);
     const lista = document.createElement("ol");
@@ -21194,7 +21211,6 @@ function podeSairDaAbaFicha() {
 });
 
 el("card-ir-implantacao").addEventListener("click", () => irParaTela("implantacao"));
-el("btn-di-ir-controle").addEventListener("click", () => irParaTela("implantacao"));
 el("card-ir-migracao").addEventListener("click", () => irParaTela("migracao"));
 el("card-ir-ferramentas").addEventListener("click", () => irParaTela("ferramentas"));
 
@@ -21267,7 +21283,8 @@ function diRenderRanking(container, lista, vazioTexto, mostrarTempo) {
   const maiorTempo = mostrarTempo ? Math.max(...lista.map((item) => item.tempo_medio_dias || 0), 1) : 0;
   lista.forEach((item, indice) => {
     const linha = document.createElement("div");
-    linha.className = "di-ranking-linha";
+    linha.className = "di-ranking-linha di-ranking-linha-clicavel";
+    linha.addEventListener("click", () => abrirModalObjetivoClientes(item.nome));
 
     const posicao = document.createElement("span");
     posicao.className = "di-ranking-posicao";
@@ -21319,6 +21336,410 @@ function diRenderRanking(container, lista, vazioTexto, mostrarTempo) {
     linha.append(posicao, corpo, valorWrap);
     container.appendChild(linha);
   });
+}
+
+// --- MODAL "CLIENTES POR OBJETIVO" (drill-down do ranking do Dashboard de Implantação) ---
+const overlayObjetivoClientes = el("overlay-objetivo-clientes");
+const objetivoClientesTitulo = el("objetivo-clientes-titulo");
+const objetivoClientesLista = el("objetivo-clientes-lista");
+
+async function abrirModalObjetivoClientes(nome) {
+  objetivoClientesTitulo.textContent = `Clientes com o objetivo "${nome}"`;
+  objetivoClientesLista.innerHTML = "<p class=\"placeholder\">Carregando...</p>";
+  overlayObjetivoClientes.classList.remove("hidden");
+  try {
+    const r = await fetch(`/api/dashboard-implantacao/objetivo-clientes?nome=${encodeURIComponent(nome)}`);
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      objetivoClientesLista.innerHTML = "";
+      const erro = document.createElement("p");
+      erro.className = "placeholder";
+      erro.textContent = data.error || "Falha ao carregar clientes.";
+      objetivoClientesLista.appendChild(erro);
+      return;
+    }
+    renderizarListaObjetivoClientes(data.clientes || []);
+  } catch (error) {
+    objetivoClientesLista.innerHTML = "";
+    const erro = document.createElement("p");
+    erro.className = "placeholder";
+    erro.textContent = String(error);
+    objetivoClientesLista.appendChild(erro);
+  }
+}
+
+function renderizarListaObjetivoClientes(clientes) {
+  objetivoClientesLista.innerHTML = "";
+  if (!clientes.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhum cliente com esse objetivo.";
+    objetivoClientesLista.appendChild(vazio);
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "tabela-saida tabela-implantados";
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  ["IdCentral", "Cliente", "Status", "Concluído em"].forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  clientes.forEach((c) => {
+    const tr = document.createElement("tr");
+    tr.className = "tabela-implantados-linha";
+    const status = c.feito ? "Concluído" : (c.atrasado ? "Atrasado" : "Em andamento");
+    const dataBR = c.concluido_em ? (formatarDataBRSimples(c.concluido_em) || c.concluido_em) : "-";
+    [c.idcentral || "-", c.cliente_nome || "(sem nome)", status, dataBR].forEach((valor) => {
+      const td = document.createElement("td");
+      td.textContent = valor;
+      tr.appendChild(td);
+    });
+    tr.addEventListener("click", () => {
+      overlayObjetivoClientes.classList.add("hidden");
+      irParaFicha(c.idcentral);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  objetivoClientesLista.appendChild(table);
+}
+
+el("objetivo-clientes-fechar").addEventListener("click", () => overlayObjetivoClientes.classList.add("hidden"));
+
+// Tabela genérica reaproveitada pelos drill-downs dos tiles do topo do
+// Dashboard de Implantação (objetivos atrasados / sem objetivo / concluídos
+// por objetivos) — cada coluna é [chave_ou_funcao, título]; clicar na linha
+// abre a ficha (precisa de `idcentral` na linha).
+function renderizarTabelaDrillDownGenerica(container, colunas, linhas) {
+  container.innerHTML = "";
+  if (!linhas.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhum registro encontrado.";
+    container.appendChild(vazio);
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "tabela-saida tabela-implantados";
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  colunas.forEach(([, titulo]) => {
+    const th = document.createElement("th");
+    th.textContent = titulo;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  linhas.forEach((linha) => {
+    const tr = document.createElement("tr");
+    tr.className = "tabela-implantados-linha";
+    colunas.forEach(([chave]) => {
+      const td = document.createElement("td");
+      const valor = typeof chave === "function" ? chave(linha) : linha[chave];
+      td.textContent = valor === null || valor === undefined || valor === "" ? "-" : valor;
+      tr.appendChild(td);
+    });
+    tr.addEventListener("click", () => {
+      overlayObjetivoClientes.classList.add("hidden");
+      irParaFicha(linha.idcentral);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+async function abrirModalDrillDownGenerico(titulo, url, colunas, chaveResposta) {
+  objetivoClientesTitulo.textContent = titulo;
+  objetivoClientesLista.innerHTML = "<p class=\"placeholder\">Carregando...</p>";
+  overlayObjetivoClientes.classList.remove("hidden");
+  try {
+    const r = await fetch(url);
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      objetivoClientesLista.innerHTML = "";
+      const erro = document.createElement("p");
+      erro.className = "placeholder";
+      erro.textContent = data.error || "Falha ao carregar.";
+      objetivoClientesLista.appendChild(erro);
+      return;
+    }
+    renderizarTabelaDrillDownGenerica(objetivoClientesLista, colunas, data[chaveResposta] || []);
+  } catch (error) {
+    objetivoClientesLista.innerHTML = "";
+    const erro = document.createElement("p");
+    erro.className = "placeholder";
+    erro.textContent = String(error);
+    objetivoClientesLista.appendChild(erro);
+  }
+}
+
+function abrirModalObjetivosAtrasados() {
+  abrirModalDrillDownGenerico(
+    "Objetivos atrasados",
+    "/api/dashboard-implantacao/objetivos-atrasados",
+    [
+      ["idcentral", "IdCentral"], ["cliente_nome", "Cliente"], ["objetivo_nome", "Objetivo"],
+      [(l) => formatarDataBRSimples(l.prazo_previsto) || l.prazo_previsto, "Prazo previsto"],
+      [(l) => `${l.dias_atraso} dia${l.dias_atraso === 1 ? "" : "s"}`, "Atraso"],
+    ],
+    "objetivos",
+  );
+}
+
+function abrirModalClientesSemObjetivo() {
+  abrirModalDrillDownGenerico(
+    "Clientes sem objetivo específico cadastrado",
+    "/api/dashboard-implantacao/sem-objetivo",
+    [
+      ["idcentral", "IdCentral"], ["cliente_nome", "Cliente"],
+      [(l) => formatarDataBRSimples(l.data_entrada) || l.data_entrada, "Entrada em Implantação"],
+    ],
+    "clientes",
+  );
+}
+
+function abrirModalConcluidosPorObjetivos() {
+  const params = new URLSearchParams();
+  if (diPeriodoSelecionado.de) params.set("de", diPeriodoSelecionado.de);
+  if (diPeriodoSelecionado.ate) params.set("ate", diPeriodoSelecionado.ate);
+  abrirModalDrillDownGenerico(
+    "Implantações concluídas (por objetivos)",
+    `/api/dashboard-implantacao/concluidos-por-objetivos?${params.toString()}`,
+    [
+      ["idcentral", "IdCentral"], ["cliente_nome", "Cliente"], ["total_objetivos", "Objetivos"],
+      [(l) => formatarDataBRSimples(l.concluido_em) || l.concluido_em, "Concluído em"],
+    ],
+    "clientes",
+  );
+}
+
+[
+  ["tile-di-objetivos-atrasados", abrirModalObjetivosAtrasados],
+  ["tile-di-sem-objetivo", abrirModalClientesSemObjetivo],
+  ["tile-di-concluidas-objetivos", abrirModalConcluidosPorObjetivos],
+  ["tile-di-concluidos", () => { if (implantacaoClientesCache.length) abrirModalImplantados(); }],
+].forEach(([id, abrir]) => {
+  const tile = el(id)?.closest(".stat-tile");
+  if (!tile) return;
+  tile.classList.add("stat-tile-clicavel");
+  tile.addEventListener("click", abrir);
+});
+
+const RESPONSABILIDADE_IMPEDIMENTO_ROTULOS = { cliente: "Cliente", systemsat: "Systemsat", terceiro: "Terceiro" };
+
+function diRenderImpedimentosDashboard(impedimentos) {
+  el("di-impedimentos-ativos").textContent = impedimentos.total_ativos ?? 0;
+  el("di-impedimentos-tempo-medio").textContent = impedimentos.tempo_medio_resolucao_dias != null
+    ? `${impedimentos.tempo_medio_resolucao_dias} dias` : "–";
+
+  const porResp = el("di-impedimentos-responsabilidade");
+  porResp.innerHTML = "";
+  const respEntradas = Object.entries(impedimentos.por_responsabilidade || {});
+  const maiorResp = Math.max(...respEntradas.map(([, v]) => v.total), 1);
+  if (!respEntradas.some(([, v]) => v.total > 0)) {
+    const vazio = document.createElement("div");
+    vazio.className = "di-ranking-vazio";
+    vazio.textContent = "Nenhum impedimento registrado ainda.";
+    porResp.appendChild(vazio);
+  } else {
+    respEntradas.forEach(([resp, valores]) => {
+      const linha = document.createElement("div");
+      linha.className = "di-ranking-linha di-ranking-linha-simples di-ranking-linha-clicavel";
+      linha.addEventListener("click", () => abrirModalImpedimentosFiltrados({ responsabilidade: resp }, RESPONSABILIDADE_IMPEDIMENTO_ROTULOS[resp] || resp));
+      const nome = document.createElement("span");
+      nome.className = "di-ranking-nome";
+      nome.textContent = RESPONSABILIDADE_IMPEDIMENTO_ROTULOS[resp] || resp;
+      const barraWrap = document.createElement("span");
+      barraWrap.className = "di-ranking-barra";
+      const barraFill = document.createElement("span");
+      barraFill.className = "di-ranking-barra-fill";
+      barraFill.style.width = `${(valores.total / maiorResp) * 100}%`;
+      barraWrap.appendChild(barraFill);
+      const valor = document.createElement("span");
+      valor.className = "di-ranking-valor";
+      valor.textContent = `${valores.total} (${valores.ativos} ativo${valores.ativos === 1 ? "" : "s"})`;
+      linha.append(nome, barraWrap, valor);
+      porResp.appendChild(linha);
+    });
+  }
+
+  const porCategoria = el("di-impedimentos-categorias");
+  porCategoria.innerHTML = "";
+  const categorias = impedimentos.ranking_categorias || [];
+  if (!categorias.length) {
+    const vazio = document.createElement("div");
+    vazio.className = "di-ranking-vazio";
+    vazio.textContent = "Nenhum impedimento registrado ainda.";
+    porCategoria.appendChild(vazio);
+  } else {
+    const maiorCategoria = Math.max(...categorias.map((c) => c.total), 1);
+    categorias.forEach((cat, indice) => {
+      const linha = document.createElement("div");
+      linha.className = "di-ranking-linha di-ranking-linha-simples di-ranking-linha-clicavel";
+      const rotuloCat = `${cat.categoria} (${RESPONSABILIDADE_IMPEDIMENTO_ROTULOS[cat.responsabilidade] || cat.responsabilidade})`;
+      linha.addEventListener("click", () => abrirModalImpedimentosFiltrados({ responsabilidade: cat.responsabilidade, categoria: cat.categoria }, rotuloCat));
+      const nome = document.createElement("span");
+      nome.className = "di-ranking-nome";
+      nome.textContent = `#${indice + 1} ${cat.categoria} (${RESPONSABILIDADE_IMPEDIMENTO_ROTULOS[cat.responsabilidade] || cat.responsabilidade})`;
+      const barraWrap = document.createElement("span");
+      barraWrap.className = "di-ranking-barra";
+      const barraFill = document.createElement("span");
+      barraFill.className = "di-ranking-barra-fill";
+      barraFill.style.width = `${(cat.total / maiorCategoria) * 100}%`;
+      barraWrap.appendChild(barraFill);
+      const valor = document.createElement("span");
+      valor.className = "di-ranking-valor";
+      valor.textContent = `${cat.total}`;
+      linha.append(nome, barraWrap, valor);
+      porCategoria.appendChild(linha);
+    });
+  }
+
+  const listaClientes = el("di-impedimentos-clientes");
+  listaClientes.innerHTML = "";
+  const clientesAtrasados = impedimentos.clientes_mais_atrasados || [];
+  if (!clientesAtrasados.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhum cliente com impedimento ativo no momento.";
+    listaClientes.appendChild(vazio);
+    return;
+  }
+  const lista = document.createElement("div");
+  lista.className = "lista-atrasados";
+  clientesAtrasados.forEach((c) => {
+    const item = document.createElement("div");
+    item.className = "lista-atrasados-item";
+    item.addEventListener("click", () => irParaFicha(c.idcentral));
+    const nome = document.createElement("span");
+    nome.className = "lista-atrasados-nome";
+    nome.textContent = c.cliente_nome || c.idcentral || "(sem nome)";
+    const dias = document.createElement("span");
+    dias.className = "lista-atrasados-dias";
+    dias.textContent = `${c.dias} dia${c.dias === 1 ? "" : "s"} de impedimento`;
+    item.append(nome, dias);
+    lista.appendChild(item);
+  });
+  listaClientes.appendChild(lista);
+}
+
+// --- MODAL "IMPEDIMENTOS FILTRADOS" (drill-down de responsabilidade/categoria) ---
+const overlayImpedimentosLista = el("overlay-impedimentos-lista");
+const impedimentosListaTitulo = el("impedimentos-lista-titulo");
+const impedimentosListaCorpo = el("impedimentos-lista-corpo");
+
+async function abrirModalImpedimentosFiltrados(filtro, rotulo) {
+  impedimentosListaTitulo.textContent = `Impedimentos — ${rotulo}`;
+  impedimentosListaCorpo.innerHTML = "<p class=\"placeholder\">Carregando...</p>";
+  overlayImpedimentosLista.classList.remove("hidden");
+  try {
+    const params = new URLSearchParams();
+    if (filtro.responsabilidade) params.set("responsabilidade", filtro.responsabilidade);
+    if (filtro.categoria) params.set("categoria", filtro.categoria);
+    const r = await fetch(`/api/dashboard-implantacao/impedimentos?${params.toString()}`);
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      impedimentosListaCorpo.innerHTML = "";
+      const erro = document.createElement("p");
+      erro.className = "placeholder";
+      erro.textContent = data.error || "Falha ao carregar impedimentos.";
+      impedimentosListaCorpo.appendChild(erro);
+      return;
+    }
+    renderizarListaImpedimentosFiltrados(data.impedimentos || []);
+  } catch (error) {
+    impedimentosListaCorpo.innerHTML = "";
+    const erro = document.createElement("p");
+    erro.className = "placeholder";
+    erro.textContent = String(error);
+    impedimentosListaCorpo.appendChild(erro);
+  }
+}
+
+function renderizarListaImpedimentosFiltrados(impedimentos) {
+  impedimentosListaCorpo.innerHTML = "";
+  if (!impedimentos.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhum impedimento encontrado.";
+    impedimentosListaCorpo.appendChild(vazio);
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "tabela-saida tabela-implantados";
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  ["IdCentral", "Cliente", "Objetivo", "Categoria", "Status", "Início"].forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  impedimentos.forEach((imp) => {
+    const tr = document.createElement("tr");
+    tr.className = "tabela-implantados-linha";
+    const inicio = imp.data_inicio ? (formatarDataBRSimples(imp.data_inicio) || imp.data_inicio) : "-";
+    const status = imp.status === "resolvido" ? "Resolvido" : "Ativo";
+    [imp.idcentral || "-", imp.cliente_nome || "(sem nome)", imp.objetivo_nome || "-", imp.categoria, status, inicio].forEach((valor) => {
+      const td = document.createElement("td");
+      td.textContent = valor;
+      tr.appendChild(td);
+    });
+    tr.addEventListener("click", () => {
+      overlayImpedimentosLista.classList.add("hidden");
+      irParaFicha(imp.idcentral);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  impedimentosListaCorpo.appendChild(table);
+}
+
+el("impedimentos-lista-fechar").addEventListener("click", () => overlayImpedimentosLista.classList.add("hidden"));
+
+function diRenderAtivacaoDashboard(ativacao) {
+  el("di-ativacao-com-valor").textContent = `${ativacao.clientes_com_primeiro_valor ?? 0} de ${ativacao.total_clientes ?? 0}`;
+  el("di-ativacao-taxa").textContent = `${ativacao.taxa_ativacao_pct ?? 0}%`;
+  el("di-ativacao-tempo-medio").textContent = ativacao.tempo_medio_primeiro_valor_dias != null
+    ? `${ativacao.tempo_medio_primeiro_valor_dias} dias` : "–";
+
+  const container = el("di-ativacao-risco-clientes");
+  container.innerHTML = "";
+  const risco = ativacao.clientes_proximos_vencimento_sem_valor || [];
+  if (!risco.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhum cliente perto do vencimento sem ter percebido valor.";
+    container.appendChild(vazio);
+    return;
+  }
+  const lista = document.createElement("div");
+  lista.className = "lista-atrasados";
+  risco.forEach((c) => {
+    const item = document.createElement("div");
+    item.className = "lista-atrasados-item";
+    item.addEventListener("click", () => irParaFicha(c.idcentral));
+    const nome = document.createElement("span");
+    nome.className = "lista-atrasados-nome";
+    nome.textContent = c.cliente_nome || c.idcentral || "(sem nome)";
+    const dias = document.createElement("span");
+    dias.className = "lista-atrasados-dias";
+    dias.textContent = c.dias_para_vencimento < 0
+      ? `Vencido há ${Math.abs(c.dias_para_vencimento)} dia${Math.abs(c.dias_para_vencimento) === 1 ? "" : "s"}`
+      : `Vence em ${c.dias_para_vencimento} dia${c.dias_para_vencimento === 1 ? "" : "s"}`;
+    item.append(nome, dias);
+    lista.appendChild(item);
+  });
+  container.appendChild(lista);
 }
 
 const DI_FAIXAS_ENVELHECIMENTO = [
@@ -21419,6 +21840,11 @@ async function carregarDashboardImplantacao() {
 
     diRenderRanking(el("di-ranking-objetivos"), data.ranking_objetivos, "Nenhum objetivo cadastrado nos clientes de Implantação ainda.");
     diRenderRanking(el("di-ranking-maior-tempo"), data.objetivos_maior_tempo, "Ainda não há objetivos com tempo de conclusão suficiente pra calcular.", true);
+    el("di-universal-concluidos").textContent = `${data.universal_concluidos ?? 0} de ${data.universal_total ?? 0}`;
+    el("di-universal-atrasados").textContent = data.universal_atrasados ?? 0;
+
+    diRenderImpedimentosDashboard(data.impedimentos || {});
+    diRenderAtivacaoDashboard(data.ativacao || {});
 
     // Bloco de clientes — reaproveita as funções já usadas no Dashboard
     // geral (clientesComMarcoAtrasado/renderDashboardParados/
@@ -21426,6 +21852,11 @@ async function carregarDashboardImplantacao() {
     // tile de atraso específico desta tela.
     const rClientes = await fetch("/api/clientes");
     const dataClientes = await parseJsonResponse(rClientes);
+    // Também alimenta o cache compartilhado (implantacaoClientesCache) —
+    // o drill-down do tile "Implantações concluídas (marcos)" reaproveita o
+    // modal "Implantados" existente, que depende desse cache estar populado
+    // mesmo que a usuária não tenha passado pela tela de lista antes.
+    if (dataClientes.ok) implantacaoClientesCache = dataClientes.clientes || [];
     const clientesImplantacao = dataClientes.ok
       ? (dataClientes.clientes || []).filter((c) => c.tem_implantacao !== false)
       : [];
@@ -24955,7 +25386,19 @@ function construirFichaImplantacao(implantacao, migracao) {
   grid.appendChild(criarInfoItem("Implantado", implantacao.implantado
     ? `Sim${implantacao.implantado_em ? `, desde ${formatarDataBRSimples(implantacao.implantado_em)}` : ""}` : "Não"));
   grid.appendChild(criarInfoItem("Responsável", implantacao.csm));
-  grid.appendChild(criarInfoItem("Última ação", implantacao.ultima_acao));
+  const itemScore = criarInfoItem("Score de implantação", "Carregando...");
+  grid.appendChild(itemScore);
+  fetch(`/api/clientes/${implantacao.id}/diagnostico-prontidao`)
+    .then(parseJsonResponse)
+    .then((data) => {
+      const valor = itemScore.querySelector(".info-item-valor");
+      if (!valor) return;
+      valor.textContent = data.ok ? textoResumoDiagnostico(data.diagnostico) : "-";
+    })
+    .catch(() => {
+      const valor = itemScore.querySelector(".info-item-valor");
+      if (valor) valor.textContent = "-";
+    });
   sec.appendChild(grid);
 
   const acoes = document.createElement("div");
@@ -24974,6 +25417,7 @@ function construirFichaImplantacao(implantacao, migracao) {
   sec.appendChild(acoes);
 
   wrap.appendChild(sec);
+  wrap.appendChild(construirPainelDiagnosticoProntidao());
   wrap.appendChild(construirPainelObjetivosImplantacao());
   return wrap;
 }
@@ -25161,7 +25605,7 @@ function construirCartaoObjetivo(item, podeEditar) {
     const objetivo = document.createElement("article");
     const objetivoId = String(item.id);
     const editando = objetivosImplantacaoEmEdicao.has(objetivoId);
-    objetivo.className = `ficha-objetivo${objetivoImplantacaoFeito(item) ? " feito" : ""}${editando ? " editando" : ""}`;
+    objetivo.className = `ficha-objetivo${item.universal ? " universal" : ""}${objetivoImplantacaoFeito(item) ? " feito" : ""}${editando ? " editando" : ""}`;
     objetivo.dataset.objetivoId = String(item.id);
     const cabecalho = document.createElement("div");
     cabecalho.className = "ficha-objetivo-cabecalho";
@@ -25185,6 +25629,13 @@ function construirCartaoObjetivo(item, podeEditar) {
       nome.textContent = item.nome;
     }
     cabecalho.appendChild(nome);
+    if (item.universal) {
+      const universalChip = document.createElement("span");
+      universalChip.className = "objetivo-template-prazo-chip";
+      universalChip.title = "Objetivo obrigatório de todo cliente de Implantação — não pode ser excluído.";
+      universalChip.textContent = "Universal";
+      cabecalho.appendChild(universalChip);
+    }
     if (podeEditar && !editando) {
       const botaoEditar = document.createElement("button");
       botaoEditar.type = "button";
@@ -25268,6 +25719,13 @@ function construirCartaoObjetivo(item, podeEditar) {
     prazoLabel.append(document.createTextNode("Prazo (dias)"), prazoInput);
 
     controle.append(concluidoLabel, prazoLabel);
+    if (item.prazo_dias && item.dias_impedimento > 0) {
+      const prazoAjustadoChip = document.createElement("span");
+      prazoAjustadoChip.className = "ficha-objetivo-prazo-ajustado-chip";
+      prazoAjustadoChip.title = `Prazo original: ${item.prazo_dias} dia(s) — ${item.dias_impedimento} dia(s) em impedimento.`;
+      prazoAjustadoChip.textContent = `Prazo ajustado: ${item.prazo_ajustado_dias} dia${item.prazo_ajustado_dias === 1 ? "" : "s"}`;
+      controle.appendChild(prazoAjustadoChip);
+    }
 
     const itens = item.itens || [];
     const concluidos = itens.filter((subatividade) => subatividade.feito).length;
@@ -25300,6 +25758,15 @@ function construirCartaoObjetivo(item, podeEditar) {
         checkbox.setAttribute("aria-label", `Marcar "${subatividade.texto}" como ${checkbox.checked ? "pendente" : "concluída"}`);
         checkbox.addEventListener("change", () => {
           subatividade.feito = checkbox.checked;
+          if (checkbox.checked && !subatividade.concluido_em) {
+            subatividade.concluido_em = new Date().toISOString().slice(0, 10);
+          } else if (!checkbox.checked) {
+            subatividade.concluido_em = "";
+          }
+          linha.classList.toggle("feito", checkbox.checked);
+          data.textContent = subatividade.feito && subatividade.concluido_em
+            ? (formatarDataBRSimples(subatividade.concluido_em) || subatividade.concluido_em)
+            : "";
           atualizarProgressoVisualCartaoObjetivo(item, objetivo);
           marcarObjetivosImplantacaoAlterados();
           atualizarResumoVisualObjetivosImplantacao();
@@ -25323,6 +25790,11 @@ function construirCartaoObjetivo(item, podeEditar) {
           texto.className = "ficha-objetivo-subatividade-texto";
           texto.textContent = subatividade.texto;
         }
+        const data = document.createElement("span");
+        data.className = "ficha-objetivo-subatividade-data";
+        data.textContent = subatividade.feito && subatividade.concluido_em
+          ? (formatarDataBRSimples(subatividade.concluido_em) || subatividade.concluido_em)
+          : "";
         const cima = document.createElement("button");
         cima.type = "button";
         cima.className = "btn-secondary ficha-objetivo-edicao";
@@ -25356,7 +25828,7 @@ function construirCartaoObjetivo(item, podeEditar) {
           marcarObjetivosImplantacaoAlterados();
           substituirCartaoObjetivoImplantacao(item);
         });
-        linha.append(checkbox, texto, cima, baixo, removerItem);
+        linha.append(checkbox, texto, data, cima, baixo, removerItem);
         subLista.appendChild(linha);
       });
       objetivo.appendChild(subLista);
@@ -25365,6 +25837,10 @@ function construirCartaoObjetivo(item, podeEditar) {
       vazio.className = "placeholder ficha-objetivo-sem-subatividades ficha-objetivo-edicao";
       vazio.textContent = "Sem sub-atividades cadastradas.";
       objetivo.appendChild(vazio);
+    }
+
+    if (!objetivoImplantacaoFeito(item)) {
+      objetivo.appendChild(construirPainelImpedimentosObjetivo(item, podeEditar));
     }
 
     if (podeEditar && editando) {
@@ -25393,26 +25869,29 @@ function construirCartaoObjetivo(item, podeEditar) {
 
       const acoesEdicao = document.createElement("div");
       acoesEdicao.className = "ficha-objetivo-acoes-edicao";
-      const excluirObjetivo = document.createElement("button");
-      excluirObjetivo.type = "button";
-      excluirObjetivo.className = "btn-secondary ficha-objetivo-excluir";
-      excluirObjetivo.textContent = "Excluir objetivo";
-      excluirObjetivo.addEventListener("click", () => {
-        if (!confirm(`Excluir o objetivo "${item.nome}" e todas as suas sub-atividades?`)) return;
-        objetivosImplantacaoEmEdicao.delete(objetivoId);
-        const eraUltimo = objetivosImplantacaoRascunho.length === 1;
-        objetivosImplantacaoRascunho = objetivosImplantacaoRascunho.filter((outro) => outro.id !== item.id);
-        marcarObjetivosImplantacaoAlterados();
-        if (eraUltimo) { atualizarPainelObjetivosImplantacao(); return; }
-        objetivo.remove();
-        atualizarResumoVisualObjetivosImplantacao();
-      });
+      if (!item.universal) {
+        const excluirObjetivo = document.createElement("button");
+        excluirObjetivo.type = "button";
+        excluirObjetivo.className = "btn-secondary ficha-objetivo-excluir";
+        excluirObjetivo.textContent = "Excluir objetivo";
+        excluirObjetivo.addEventListener("click", () => {
+          if (!confirm(`Excluir o objetivo "${item.nome}" e todas as suas sub-atividades?`)) return;
+          objetivosImplantacaoEmEdicao.delete(objetivoId);
+          const eraUltimo = objetivosImplantacaoRascunho.length === 1;
+          objetivosImplantacaoRascunho = objetivosImplantacaoRascunho.filter((outro) => outro.id !== item.id);
+          marcarObjetivosImplantacaoAlterados();
+          if (eraUltimo) { atualizarPainelObjetivosImplantacao(); return; }
+          objetivo.remove();
+          atualizarResumoVisualObjetivosImplantacao();
+        });
+        acoesEdicao.appendChild(excluirObjetivo);
+      }
       const salvarEdicao = document.createElement("button");
       salvarEdicao.type = "button";
       salvarEdicao.className = "btn-primary ficha-objetivo-salvar-edicao";
       salvarEdicao.textContent = "Salvar";
       salvarEdicao.addEventListener("click", () => salvarObjetivosImplantacao(objetivoId));
-      acoesEdicao.append(excluirObjetivo, salvarEdicao);
+      acoesEdicao.appendChild(salvarEdicao);
       objetivo.appendChild(acoesEdicao);
     }
     return objetivo;
@@ -25423,6 +25902,408 @@ function construirCartaoObjetivo(item, podeEditar) {
 // itens abaixo são só um checklist de apoio, nunca determinam `feito`.
 function objetivoImplantacaoFeito(item) {
   return item.feito === true;
+}
+
+const DIAGNOSTICO_PRONTIDAO_PERGUNTAS = [
+  ["possui_equipamentos", "Possui equipamentos?"],
+  ["possui_chips", "Possui chips/SIM cards?"],
+  ["possui_operacao_definida", "Possui operação definida?"],
+  ["possui_clientes_proprios", "Possui clientes para iniciar?"],
+  ["equipe_disponivel_treinamento", "Possui equipe disponível para treinamento?"],
+  ["estrutura_para_operar", "Já possui estrutura para começar a operar?"],
+];
+const DIAGNOSTICO_PRONTIDAO_CLASSIFICACOES = {
+  pronto: "Pronto para iniciar",
+  parcial: "Parcialmente preparado",
+  nao_preparado: "Não preparado para iniciar",
+  nao_avaliado: "Não avaliado",
+};
+
+function textoResumoDiagnostico(diagnostico) {
+  const rotulo = DIAGNOSTICO_PRONTIDAO_CLASSIFICACOES[diagnostico.classificacao] || diagnostico.classificacao;
+  return diagnostico.nota != null ? `Nota ${diagnostico.nota.toFixed(1)}/10 — ${rotulo}` : rotulo;
+}
+
+function construirPainelDiagnosticoProntidao() {
+  const podeEditar = USUARIO_PERFIL_ATUAL !== "visualizacao";
+  const secao = document.createElement("section");
+  secao.className = "ficha-painel ficha-diagnostico-secao";
+  const titulo = document.createElement("h3");
+  titulo.textContent = "Diagnóstico de prontidão";
+  secao.appendChild(titulo);
+
+  const cabecalho = document.createElement("button");
+  cabecalho.type = "button";
+  cabecalho.className = "btn-secondary ficha-objetivo-impedimentos-toggle";
+  cabecalho.disabled = true;
+  cabecalho.append(document.createTextNode("Ver/editar"));
+  const resumoChip = document.createElement("span");
+  resumoChip.className = "ficha-diagnostico-classificacao";
+  resumoChip.textContent = "Carregando...";
+  cabecalho.appendChild(resumoChip);
+  cabecalho.setAttribute("aria-expanded", "false");
+
+  // Corpo colapsado por padrão e recolhido de novo depois de salvar — o
+  // resumo (nota + classificação) no botão já basta pra leitura rápida, sem
+  // deixar o card do objetivo universal poluído de informação (pedido
+  // explícito da usuária).
+  const corpo = document.createElement("div");
+  corpo.className = "ficha-diagnostico-corpo";
+  corpo.hidden = true;
+
+  cabecalho.addEventListener("click", () => {
+    if (cabecalho.disabled) return;
+    const abrir = corpo.hidden;
+    corpo.hidden = !abrir;
+    cabecalho.setAttribute("aria-expanded", abrir ? "true" : "false");
+  });
+
+  secao.append(cabecalho, corpo);
+
+  const cliente = objetivosImplantacaoCliente;
+  if (cliente) {
+    fetch(`/api/clientes/${cliente.id}/diagnostico-prontidao`)
+      .then(parseJsonResponse)
+      .then((data) => {
+        cabecalho.disabled = false;
+        if (!data.ok) {
+          resumoChip.textContent = data.error || "Falha ao carregar";
+          return;
+        }
+        resumoChip.className = `ficha-diagnostico-classificacao ficha-diagnostico-classificacao-${data.diagnostico.classificacao}`;
+        resumoChip.textContent = textoResumoDiagnostico(data.diagnostico);
+        corpo.appendChild(construirFormDiagnosticoProntidao(cliente.id, data.diagnostico, podeEditar, resumoChip, corpo, cabecalho));
+      })
+      .catch((error) => {
+        cabecalho.disabled = false;
+        resumoChip.textContent = String(error);
+      });
+  }
+
+  return secao;
+}
+
+function construirFormDiagnosticoProntidao(clienteId, diagnostico, podeEditar, resumoChip, corpo, cabecalho) {
+  const form = document.createElement("div");
+  form.className = "ficha-diagnostico-form";
+
+  const selects = {};
+  DIAGNOSTICO_PRONTIDAO_PERGUNTAS.forEach(([campo, pergunta]) => {
+    const label = document.createElement("label");
+    label.className = "ficha-diagnostico-campo";
+    label.appendChild(document.createTextNode(pergunta));
+    const select = document.createElement("select");
+    select.disabled = !podeEditar;
+    [["", "Não avaliado"], ["true", "Sim"], ["false", "Não"]].forEach(([valor, texto]) => {
+      const opcao = document.createElement("option");
+      opcao.value = valor;
+      opcao.textContent = texto;
+      select.appendChild(opcao);
+    });
+    const atual = diagnostico[campo];
+    select.value = atual === true ? "true" : atual === false ? "false" : "";
+    selects[campo] = select;
+    label.appendChild(select);
+    form.appendChild(label);
+  });
+
+  const observacoesLabel = document.createElement("label");
+  observacoesLabel.className = "ficha-diagnostico-campo ficha-diagnostico-campo-largo";
+  observacoesLabel.appendChild(document.createTextNode("Observações"));
+  const observacoesInput = document.createElement("textarea");
+  observacoesInput.maxLength = 2000;
+  observacoesInput.rows = 2;
+  observacoesInput.disabled = !podeEditar;
+  observacoesInput.value = diagnostico.observacoes || "";
+  observacoesLabel.appendChild(observacoesInput);
+  form.appendChild(observacoesLabel);
+
+  if (podeEditar) {
+    const salvar = document.createElement("button");
+    salvar.type = "button";
+    salvar.className = "btn-primary";
+    salvar.textContent = "Salvar diagnóstico";
+    salvar.addEventListener("click", async () => {
+      salvar.disabled = true;
+      try {
+        const corpo = { observacoes: observacoesInput.value.trim() };
+        DIAGNOSTICO_PRONTIDAO_PERGUNTAS.forEach(([campo]) => {
+          const valor = selects[campo].value;
+          corpo[campo] = valor === "" ? null : valor === "true";
+        });
+        const response = await fetch(`/api/clientes/${clienteId}/diagnostico-prontidao`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(corpo),
+        });
+        const data = await parseJsonResponse(response);
+        if (!data.ok) { alert(data.error || "Falha ao salvar o diagnóstico."); return; }
+        resumoChip.className = `ficha-diagnostico-classificacao ficha-diagnostico-classificacao-${data.diagnostico.classificacao}`;
+        resumoChip.textContent = textoResumoDiagnostico(data.diagnostico);
+        // Recolhe de novo depois de salvar — evita o card do objetivo
+        // universal ficar com o formulário inteiro aberto pra sempre.
+        corpo.hidden = true;
+        cabecalho.setAttribute("aria-expanded", "false");
+      } finally {
+        salvar.disabled = false;
+      }
+    });
+    form.appendChild(salvar);
+  }
+
+  return form;
+}
+
+function construirPainelImpedimentosObjetivo(item, podeEditar) {
+  const painel = document.createElement("div");
+  painel.className = "ficha-objetivo-impedimentos";
+
+  const aberto = objetivosImpedimentosAbertos.has(String(item.id));
+  const cabecalho = document.createElement("button");
+  cabecalho.type = "button";
+  cabecalho.className = "btn-secondary ficha-objetivo-impedimentos-toggle";
+  cabecalho.setAttribute("aria-expanded", aberto ? "true" : "false");
+  cabecalho.textContent = item.impedimentos_ativos
+    ? `Impedimentos (${item.impedimentos_ativos} ativo${item.impedimentos_ativos === 1 ? "" : "s"})`
+    : "Impedimentos";
+
+  const corpo = document.createElement("div");
+  corpo.className = "ficha-objetivo-impedimentos-corpo";
+  corpo.hidden = !aberto;
+
+  cabecalho.addEventListener("click", async () => {
+    const abrir = corpo.hidden;
+    corpo.hidden = !abrir;
+    cabecalho.setAttribute("aria-expanded", abrir ? "true" : "false");
+    if (abrir) {
+      objetivosImpedimentosAbertos.add(String(item.id));
+      await renderizarCorpoImpedimentosObjetivo(item, corpo, podeEditar);
+    } else {
+      objetivosImpedimentosAbertos.delete(String(item.id));
+    }
+  });
+
+  painel.append(cabecalho, corpo);
+  if (aberto) renderizarCorpoImpedimentosObjetivo(item, corpo, podeEditar);
+  return painel;
+}
+
+async function renderizarCorpoImpedimentosObjetivo(item, corpo, podeEditar) {
+  corpo.replaceChildren();
+  const carregando = document.createElement("p");
+  carregando.className = "placeholder";
+  carregando.textContent = "Carregando impedimentos...";
+  corpo.appendChild(carregando);
+
+  const cliente = objetivosImplantacaoCliente;
+  if (!cliente) return;
+  let impedimentos;
+  try {
+    const response = await fetch(`/api/clientes/${cliente.id}/objetivos/${item.id}/impedimentos`);
+    const data = await parseJsonResponse(response);
+    if (!data.ok) throw new Error(data.error || "Falha ao carregar impedimentos.");
+    impedimentos = data.impedimentos;
+    objetivosImpedimentosCache.set(String(item.id), impedimentos);
+  } catch (error) {
+    corpo.replaceChildren();
+    const erro = document.createElement("p");
+    erro.className = "placeholder";
+    erro.textContent = String(error.message || error);
+    corpo.appendChild(erro);
+    return;
+  }
+
+  corpo.replaceChildren();
+  if (!impedimentos.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "placeholder";
+    vazio.textContent = "Nenhum impedimento registrado.";
+    corpo.appendChild(vazio);
+  } else {
+    const lista = document.createElement("div");
+    lista.className = "ficha-objetivo-impedimentos-lista";
+    impedimentos.forEach((impedimento) => lista.appendChild(construirLinhaImpedimento(impedimento, item, corpo, podeEditar)));
+    corpo.appendChild(lista);
+  }
+
+  if (podeEditar) {
+    corpo.appendChild(construirFormNovoImpedimento(item, corpo));
+  }
+}
+
+function construirLinhaImpedimento(impedimento, item, corpo, podeEditar) {
+  const linha = document.createElement("article");
+  linha.className = `ficha-impedimento${impedimento.status === "resolvido" ? " resolvido" : ""}`;
+
+  const cabecalho = document.createElement("div");
+  cabecalho.className = "ficha-impedimento-cabecalho";
+  const titulo = document.createElement("strong");
+  titulo.textContent = `${impedimento.categoria} — ${RESPONSABILIDADE_ROTULOS[impedimento.responsabilidade] || impedimento.responsabilidade}`;
+  const statusChip = document.createElement("span");
+  statusChip.className = `ficha-impedimento-status ${impedimento.status}`;
+  statusChip.textContent = impedimento.status === "resolvido" ? "Resolvido" : "Ativo";
+  cabecalho.append(titulo, statusChip);
+  linha.appendChild(cabecalho);
+
+  const datas = document.createElement("p");
+  datas.className = "ficha-impedimento-datas";
+  const inicio = impedimento.data_inicio ? (formatarDataBRSimples(impedimento.data_inicio) || impedimento.data_inicio) : "—";
+  const fim = impedimento.data_resolucao ? (formatarDataBRSimples(impedimento.data_resolucao) || impedimento.data_resolucao) : "em aberto";
+  datas.textContent = `De ${inicio} até ${fim}`;
+  linha.appendChild(datas);
+
+  if (impedimento.descricao) {
+    const descricao = document.createElement("p");
+    descricao.textContent = impedimento.descricao;
+    linha.appendChild(descricao);
+  }
+  if (impedimento.proxima_acao) {
+    const proximaAcao = document.createElement("p");
+    proximaAcao.className = "ficha-impedimento-proxima-acao";
+    proximaAcao.textContent = `Próxima ação: ${impedimento.proxima_acao}`;
+    linha.appendChild(proximaAcao);
+  }
+
+  if (podeEditar) {
+    const acoes = document.createElement("div");
+    acoes.className = "ficha-impedimento-acoes";
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = "btn-secondary";
+    const resolvendo = impedimento.status !== "resolvido";
+    botao.textContent = resolvendo ? "Marcar como resolvido" : "Reabrir";
+    botao.addEventListener("click", async () => {
+      botao.disabled = true;
+      try {
+        const url = resolvendo ? `/api/impedimentos/${impedimento.id}/resolver` : `/api/impedimentos/${impedimento.id}/reabrir`;
+        const response = await fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const data = await parseJsonResponse(response);
+        if (!data.ok) { alert(data.error || "Falha ao atualizar impedimento."); return; }
+        objetivosImpedimentosCache.delete(String(item.id));
+        await atualizarObjetivosImplantacaoAposImpedimento(item.id);
+      } finally {
+        botao.disabled = false;
+      }
+    });
+    acoes.appendChild(botao);
+    linha.appendChild(acoes);
+  }
+
+  return linha;
+}
+
+function construirFormNovoImpedimento(item, corpo) {
+  const form = document.createElement("form");
+  form.className = "marco-extra-form ficha-impedimento-form";
+
+  const responsabilidadeSelect = document.createElement("select");
+  responsabilidadeSelect.setAttribute("aria-label", "Responsabilidade do impedimento");
+  [["", "Responsabilidade..."], ["cliente", "Cliente"], ["systemsat", "Systemsat"], ["terceiro", "Terceiro"]]
+    .forEach(([valor, texto]) => {
+      const opcao = document.createElement("option");
+      opcao.value = valor;
+      opcao.textContent = texto;
+      responsabilidadeSelect.appendChild(opcao);
+    });
+
+  const categoriaSelect = document.createElement("select");
+  categoriaSelect.setAttribute("aria-label", "Categoria do impedimento");
+  categoriaSelect.disabled = true;
+  const opcaoCategoriaPadrao = document.createElement("option");
+  opcaoCategoriaPadrao.value = "";
+  opcaoCategoriaPadrao.textContent = "Categoria...";
+  categoriaSelect.appendChild(opcaoCategoriaPadrao);
+
+  responsabilidadeSelect.addEventListener("change", async () => {
+    categoriaSelect.replaceChildren(opcaoCategoriaPadrao);
+    categoriaSelect.disabled = !responsabilidadeSelect.value;
+    if (!responsabilidadeSelect.value) return;
+    const categorias = await obterCategoriasImpedimento();
+    (categorias[responsabilidadeSelect.value] || []).forEach((categoria) => {
+      const opcao = document.createElement("option");
+      opcao.value = categoria;
+      opcao.textContent = categoria;
+      categoriaSelect.appendChild(opcao);
+    });
+  });
+
+  const descricaoInput = document.createElement("input");
+  descricaoInput.type = "text";
+  descricaoInput.maxLength = 2000;
+  descricaoInput.placeholder = "Descrição do impedimento...";
+  descricaoInput.setAttribute("aria-label", "Descrição do impedimento");
+
+  const dataInicioInput = document.createElement("input");
+  dataInicioInput.type = "date";
+  dataInicioInput.setAttribute("aria-label", "Data de início do impedimento");
+
+  const adicionar = document.createElement("button");
+  adicionar.type = "submit";
+  adicionar.className = "btn-adicionar-inline";
+  adicionar.textContent = "Registrar impedimento";
+
+  form.append(responsabilidadeSelect, categoriaSelect, descricaoInput, dataInicioInput, adicionar);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!responsabilidadeSelect.value || !categoriaSelect.value) {
+      alert("Selecione a responsabilidade e a categoria do impedimento.");
+      return;
+    }
+    const cliente = objetivosImplantacaoCliente;
+    if (!cliente) return;
+    adicionar.disabled = true;
+    try {
+      const response = await fetch(`/api/clientes/${cliente.id}/objetivos/${item.id}/impedimentos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          responsabilidade: responsabilidadeSelect.value,
+          categoria: categoriaSelect.value,
+          descricao: descricaoInput.value.trim(),
+          data_inicio: dataInicioInput.value || "",
+        }),
+      });
+      const data = await parseJsonResponse(response);
+      if (!data.ok) { alert(data.error || "Falha ao registrar impedimento."); return; }
+      objetivosImpedimentosCache.delete(String(item.id));
+      await atualizarObjetivosImplantacaoAposImpedimento(item.id);
+    } finally {
+      adicionar.disabled = false;
+    }
+  });
+  return form;
+}
+
+let _categoriasImpedimentoCache = null;
+async function obterCategoriasImpedimento() {
+  if (_categoriasImpedimentoCache) return _categoriasImpedimentoCache;
+  const response = await fetch("/api/impedimentos/categorias");
+  const data = await parseJsonResponse(response);
+  _categoriasImpedimentoCache = data.ok ? data.categorias : {};
+  return _categoriasImpedimentoCache;
+}
+
+// Depois de criar/resolver/reabrir um impedimento, recarrega os objetivos do
+// servidor (prazo_ajustado_dias/impedimentos_ativos mudaram) e redesenha só
+// o cartão afetado, preservando o painel de impedimentos aberto.
+async function atualizarObjetivosImplantacaoAposImpedimento(objetivoId) {
+  const cliente = objetivosImplantacaoCliente;
+  if (!cliente) return;
+  try {
+    const response = await fetch(`/api/clientes/${cliente.id}/objetivos-implantacao-detalhados`);
+    const data = await parseJsonResponse(response);
+    if (!data.ok) return;
+    objetivosImplantacaoRascunho = data.objetivos;
+    const atualizado = objetivosImplantacaoRascunho.find((obj) => String(obj.id) === String(objetivoId));
+    if (atualizado) substituirCartaoObjetivoImplantacao(atualizado);
+    atualizarResumoVisualObjetivosImplantacao();
+  } catch (error) {
+    // Silencioso — a próxima abertura da ficha/painel traz o estado certo.
+  }
 }
 
 function calcularResumoProgressoObjetivosImplantacao() {

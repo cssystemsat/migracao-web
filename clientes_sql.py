@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from sqlalchemy import func
 
+import objetivos_sql
 from db_sql import obter_sessao, obter_sessao_leitura
 from models import Cliente, Usuario
 
@@ -172,7 +173,16 @@ def criar_cliente(campos):
         _aplicar_campos(novo, {k: v for k, v in campos.items() if k not in ("idcentral",)})
         sessao.add(novo)
         sessao.flush()  # popula novo.id (serial) antes de montar o dict
-        return _cliente_para_dict(novo)
+        resultado = _cliente_para_dict(novo)
+        tem_implantacao = novo.tem_implantacao
+    # Fora do `with` (já comitado) — cliente novo todo cliente de Implantação
+    # recebe automaticamente o objetivo universal "IMPLANTAÇÃO" (ver plano
+    # aprovado no histórico de decisões). Chamada única aqui cobre os 3 pontos
+    # de criação de cliente (cadastro manual, sync de planilha de CS e
+    # importação em lote), sem duplicar a lógica em cada um.
+    if tem_implantacao:
+        objetivos_sql.criar_objetivo_universal_para_cliente(resultado["id"])
+    return resultado
 
 
 def atualizar_cliente(cliente_id, campos):
