@@ -3826,7 +3826,7 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-subabas { display: flex; gap: 16px; overflow-x: auto; border-bottom: none; margin: 0 0 11px; scrollbar-width: none; -ms-overflow-style: none; }
 .ficha-subabas::-webkit-scrollbar { display: none; }
 .ficha-subaba { width: auto; margin: 0 0 -1px; padding: 4px 0 8px; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--cinza-700); font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; cursor: pointer; }
-.ficha-subaba:hover { color: var(--cinza-900); }
+.ficha-subaba:hover { background: none; color: var(--cinza-900); border-bottom-color: var(--cinza-300); }
 .ficha-subaba.ativo { color: var(--azul-escuro); font-weight: 600; border-bottom-color: var(--azul-escuro); }
 .ficha-historico-item { padding: 7px 0; border-bottom: 1px solid var(--cinza-200); font-size: 0.88rem; }
 

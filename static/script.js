@@ -14431,6 +14431,7 @@ const QUEBRA_STRING_PERFIS = {
     "possivelRastreador", "tipoPacote", "idImei", "telefone", "comando",
     "data", "hora", "gpsFixo", "satelites", "latitude", "longitude", "velocidade", "curso", "lbs",
     "ignicao", "corteOleo", "alarme", "statusExtra", "bateria", "sinalGsm", "odometro", "tipoUpload",
+    "tensaoPrincipal", "tensaoBateria", "horimetro",
   ],
   E3: [
     "possivelRastreador", "tipoPacote", "idImei", "telefone", "comando",
@@ -14533,6 +14534,7 @@ const GT06_TIPO_PACOTE = {
   "22": "Localização UTC (CRX3)",
   "26": "Alarme UTC (CRX3)",
   "28": "LBS múltiplas bases (estendido, CRX3)",
+  "32": "Localização UTC + tensão/horímetro (N2/N4 Nonus, estendido)",
   "80": "Comando do servidor",
   "8A": "Checagem de horário",
   "94": "Transmissão de informação",
@@ -14746,6 +14748,21 @@ function gt06PreencherLocalizacaoExtra22(campos, bytes, base) {
   }
 }
 
+// Campos extras da localização estendida N2/N4 (0x32, Nonus), depois do bloco LBS: ACC, modo de
+// envio, reenvio em tempo real, quilometragem (sempre presente, ao contrário do 0x22) e, só nesse
+// protocolo, tensão de alimentação principal, tensão da bateria interna e soma de minutos com ACC
+// ligado (horímetro).
+function gt06PreencherLocalizacaoExtra32(campos, bytes, base) {
+  gt06Campo(campos, bytes, "accStatus", base, 1, (b) => (hexParaInt(b) ? "ACC alto" : "ACC baixo"));
+  gt06Campo(campos, bytes, "tipoUpload", base + 1, 1, (b) => GT06_TIPO_UPLOAD[b] || `Desconhecido (0x${b})`);
+  gt06Campo(campos, bytes, "reenvioTempoReal", base + 2, 1, (b) => (hexParaInt(b) ? "Reenvio" : "Tempo real"));
+  gt06Campo(campos, bytes, "odometro", base + 3, 4, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} km`);
+  // Tensão principal: valor hex / 100 (duas casas). Tensão da bateria: valor hex / 10 (uma casa).
+  gt06Campo(campos, bytes, "tensaoPrincipal", base + 7, 2, (bruto) => `${(hexParaInt(bruto) / 100).toFixed(2)} V`);
+  gt06Campo(campos, bytes, "tensaoBateria", base + 9, 1, (bruto) => `${(hexParaInt(bruto) / 10).toFixed(1)} V`);
+  gt06Campo(campos, bytes, "horimetro", base + 10, 3, (bruto) => `${(hexParaInt(bruto) / 60).toFixed(2)} h (${hexParaInt(bruto)} min)`);
+}
+
 // LBS múltiplas bases (0x28, CRX3): célula principal + até 6 vizinhas + timing advance.
 function gt06PreencherLbsMultiBase(campos, bytes, base) {
   gt06Campo(campos, bytes, "mcc", base, 2, (b) => `MCC ${hexParaInt(b)}`);
@@ -14815,15 +14832,15 @@ function parseGT06(bytes) {
   const cabecalhoLongo = bytes[0] === "79" && bytes[1] === "79";
   const protocoloIdx = cabecalhoLongo ? 4 : 3;
   const base = protocoloIdx + 1;
+  const protocolo = bytes[protocoloIdx];
   const campos = {
     possivelRastreador: {
       bruto: bytes.slice(0, 2).join(""),
-      final: "GT06 (Concox, J16 e compatíveis)",
+      final: protocolo === "32" ? "GT06 (Nonus N2/N4 e compatíveis)" : "GT06 (Concox, J16 e compatíveis)",
       inicioByte: 0,
       fimByte: 2,
     },
   };
-  const protocolo = bytes[protocoloIdx];
   if (bytes.length > protocoloIdx) {
     campos.tipoPacote = {
       bruto: protocolo,
@@ -14871,6 +14888,11 @@ function parseGT06(bytes) {
       gt06PreencherGps(campos, bytes, base);
       gt06PreencherLbs(campos, bytes, base + 18);
       gt06PreencherLocalizacaoExtra22(campos, bytes, base + 26);
+      break;
+    case "32":
+      gt06PreencherGps(campos, bytes, base);
+      gt06PreencherLbs(campos, bytes, base + 18);
+      gt06PreencherLocalizacaoExtra32(campos, bytes, base + 26);
       break;
     case "21":
       gt06PreencherRespostaCRX3(campos, bytes, base);

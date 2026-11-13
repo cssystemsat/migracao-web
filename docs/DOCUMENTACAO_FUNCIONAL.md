@@ -366,6 +366,11 @@ desligado + movimento também dispara um alarme de vibração (0x16),
 como indício de furto. "Modo sleep" é ACC desligado + parado (economia
 de GPRS). Ou seja, a ausência de 0x12 durante longos períodos não é
 necessariamente falha de comunicação.
+O "Padrão GT06" também cobre a localização estendida 0x32 dos rastreadores
+Nonus N2/N4 (mesmo pacote 78 78 + CRC-ITU do GT06/Concox, com o mesmo bloco
+GPS+LBS do 0x22 e os mesmos campos ACC/modo de envio/reenvio/odômetro, mas
+com três campos a mais no fim: tensão principal, tensão da bateria interna
+e soma de minutos com ACC ligado — exibido como horímetro).
 A cada novo protocolo adicionado, atualizar também a lista "Equipamentos
 disponíveis" em `templates/index.html` (modal do Quebra-String).
 Inclui também o protocolo AVL da Teltonika (famílias FMB9XX/FMB130/FMM130/
