@@ -1,0 +1,9 @@
+[
+  {
+    "id": 1,
+    "migracao_id": 4,
+    "modelo": "j16",
+    "porta": "11111",
+    "comando_template": "SERVER,0,200.152.62.20,{porta},0#"
+  }
+]

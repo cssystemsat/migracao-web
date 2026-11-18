@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "post_id": 2,
+    "texto": "ah não",
+    "autor_id": "ofvM6j0DbgGlewLbFEo2",
+    "autor_nome": "Duda",
+    "criado_em": "2026-10-26T20:53:50.135817"
+  },
+  {
+    "id": 2,
+    "post_id": 3,
+    "texto": "teste",
+    "autor_id": "h3iZsFphkJMh9WRC7OU8",
+    "autor_nome": "jpsotelino",
+    "criado_em": "2026-11-06T19:10:16.908090"
+  }
+]

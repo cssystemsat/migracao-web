@@ -1,0 +1,68 @@
+[
+  {
+    "id": 1,
+    "texto": "teste",
+    "autor_id": "ofvM6j0DbgGlewLbFEo2",
+    "autor_nome": "Duda",
+    "cliente_id": null,
+    "cliente_nome": "",
+    "criado_em": "2026-10-14T18:53:08.548828",
+    "comentarios_total": 0,
+    "tipo": ""
+  },
+  {
+    "id": 2,
+    "texto": "amanhã daily em pé",
+    "autor_id": "ofvM6j0DbgGlewLbFEo2",
+    "autor_nome": "Duda",
+    "cliente_id": null,
+    "cliente_nome": "",
+    "criado_em": "2026-10-26T20:25:21.199246",
+    "comentarios_total": 1,
+    "tipo": ""
+  },
+  {
+    "id": 4,
+    "texto": "Gente a pesquisa de clima chegou!!! Bora engajar",
+    "autor_id": "79c8625f8e0548d5b64362700a69051a",
+    "autor_nome": "jeff",
+    "cliente_id": null,
+    "cliente_nome": "",
+    "criado_em": "2026-10-29T20:29:36.468056",
+    "comentarios_total": 0,
+    "tipo": ""
+  },
+  {
+    "id": 5,
+    "texto": "oi gente",
+    "autor_id": "h3iZsFphkJMh9WRC7OU8",
+    "autor_nome": "jpsotelino",
+    "cliente_id": null,
+    "cliente_nome": "",
+    "criado_em": "2026-11-06T19:09:58.824432",
+    "comentarios_total": 0,
+    "tipo": ""
+  },
+  {
+    "id": 3,
+    "texto": "luiz se vc pagar o claude para gente vou poder fazer mais coisas aqui ;)",
+    "autor_id": "ofvM6j0DbgGlewLbFEo2",
+    "autor_nome": "Duda",
+    "cliente_id": null,
+    "cliente_nome": "",
+    "criado_em": "2026-10-26T20:55:06.212985",
+    "comentarios_total": 1,
+    "tipo": ""
+  },
+  {
+    "id": 6,
+    "texto": "🎉 Hoje é aniversário de Super João Systemsat! A equipe deseja um feliz aniversário!",
+    "autor_id": "sasha-robo",
+    "autor_nome": "Sasha Robô",
+    "cliente_id": null,
+    "cliente_nome": "",
+    "criado_em": "2026-11-06T19:28:15.195070",
+    "comentarios_total": 0,
+    "tipo": "aniversario"
+  }
+]

@@ -1,0 +1,130 @@
+[
+  {
+    "id": 1,
+    "log_auditoria_id": 1,
+    "campo": "idcentral",
+    "rotulo": "IdCentral",
+    "valor_de": "897",
+    "valor_para": "SSX_SUMARESAT"
+  },
+  {
+    "id": 2,
+    "log_auditoria_id": 1,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": "897"
+  },
+  {
+    "id": 3,
+    "log_auditoria_id": 2,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": "987"
+  },
+  {
+    "id": 4,
+    "log_auditoria_id": 3,
+    "campo": "idcentral",
+    "rotulo": "IdCentral",
+    "valor_de": "1081",
+    "valor_para": "SSX_LEDANI"
+  },
+  {
+    "id": 5,
+    "log_auditoria_id": 3,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": "1081"
+  },
+  {
+    "id": 6,
+    "log_auditoria_id": 10,
+    "campo": "idcentral",
+    "rotulo": "IdCentral",
+    "valor_de": "997",
+    "valor_para": "SSX_RSATCAR"
+  },
+  {
+    "id": 7,
+    "log_auditoria_id": 10,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": "997"
+  },
+  {
+    "id": 8,
+    "log_auditoria_id": 17,
+    "campo": "decisor_cidade",
+    "rotulo": "Cidade do decisor",
+    "valor_de": "Blumenal",
+    "valor_para": ""
+  },
+  {
+    "id": 9,
+    "log_auditoria_id": 17,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": "1093"
+  },
+  {
+    "id": 10,
+    "log_auditoria_id": 19,
+    "campo": "csm",
+    "rotulo": "CSM",
+    "valor_de": "",
+    "valor_para": "Duda"
+  },
+  {
+    "id": 11,
+    "log_auditoria_id": 26,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": ""
+  },
+  {
+    "id": 12,
+    "log_auditoria_id": 27,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": "1084"
+  },
+  {
+    "id": 13,
+    "log_auditoria_id": 29,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": "973"
+  },
+  {
+    "id": 14,
+    "log_auditoria_id": 31,
+    "campo": "idcentral",
+    "rotulo": "IdCentral",
+    "valor_de": "1049",
+    "valor_para": "SSX_HGTRACKER"
+  },
+  {
+    "id": 15,
+    "log_auditoria_id": 31,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": "1049"
+  },
+  {
+    "id": 16,
+    "log_auditoria_id": 82,
+    "campo": "codigo_idcentral",
+    "rotulo": "Código IdCentral",
+    "valor_de": "",
+    "valor_para": ""
+  }
+]

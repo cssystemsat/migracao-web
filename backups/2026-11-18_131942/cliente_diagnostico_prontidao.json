@@ -1,0 +1,14 @@
+[
+  {
+    "cliente_id": 163,
+    "possui_equipamentos": false,
+    "possui_chips": false,
+    "possui_operacao_definida": false,
+    "possui_clientes_proprios": false,
+    "equipe_disponivel_treinamento": false,
+    "estrutura_para_operar": false,
+    "observacoes": "",
+    "atualizado_em": "2026-11-12T14:30:06.826658+00:00",
+    "atualizado_por": "Duda"
+  }
+]

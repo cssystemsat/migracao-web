@@ -1,0 +1,74 @@
+[
+  {
+    "id": 1,
+    "template_id": 1,
+    "texto": "Apontar camera",
+    "ordem": 0
+  },
+  {
+    "id": 2,
+    "template_id": 9,
+    "texto": "Realizar reunião inicial",
+    "ordem": 0
+  },
+  {
+    "id": 3,
+    "template_id": 9,
+    "texto": "Apresentar a plataforma",
+    "ordem": 1
+  },
+  {
+    "id": 4,
+    "template_id": 9,
+    "texto": "Orientar sobre o primeiro acesso",
+    "ordem": 2
+  },
+  {
+    "id": 5,
+    "template_id": 9,
+    "texto": "Apontar o primeiro rastreador",
+    "ordem": 3
+  },
+  {
+    "id": 6,
+    "template_id": 9,
+    "texto": "Demonstrar o funcionamento básico",
+    "ordem": 4
+  },
+  {
+    "id": 8,
+    "template_id": 9,
+    "texto": "Orientar sobre acesso à Universidade Systemsat",
+    "ordem": 6
+  },
+  {
+    "id": 9,
+    "template_id": 9,
+    "texto": "Validar se o cliente conseguiu utilizar os recursos básicos",
+    "ordem": 7
+  },
+  {
+    "id": 10,
+    "template_id": 9,
+    "texto": "Alinhar os próximos passos da operação",
+    "ordem": 8
+  },
+  {
+    "id": 7,
+    "template_id": 9,
+    "texto": "Iniciou os treinamentos",
+    "ordem": 5
+  },
+  {
+    "id": 11,
+    "template_id": 9,
+    "texto": "Finalizou esteira de treinamentos",
+    "ordem": 9
+  },
+  {
+    "id": 12,
+    "template_id": 9,
+    "texto": "Primeiro valor percebido",
+    "ordem": 10
+  }
+]

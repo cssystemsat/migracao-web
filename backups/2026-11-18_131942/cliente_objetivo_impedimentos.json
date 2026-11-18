@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "cliente_objetivo_id": 8,
+    "categoria": "Indisponibilidade para treinamento",
+    "responsabilidade": "cliente",
+    "descricao": "",
+    "data_inicio": "2026-11-11",
+    "data_resolucao": "2026-11-10",
+    "status": "resolvido",
+    "impacto": "",
+    "proxima_acao": "",
+    "responsavel": "",
+    "criado_em": "2026-11-10T19:47:44.879805+00:00",
+    "atualizado_em": "2026-11-10T19:48:16.326552+00:00"
+  },
+  {
+    "id": 2,
+    "cliente_objetivo_id": 102,
+    "categoria": "Falta de informações",
+    "responsabilidade": "cliente",
+    "descricao": "",
+    "data_inicio": "2026-11-09",
+    "data_resolucao": "",
+    "status": "ativo",
+    "impacto": "",
+    "proxima_acao": "",
+    "responsavel": "",
+    "criado_em": "2026-11-10T19:49:33.862992+00:00",
+    "atualizado_em": "2026-11-10T19:49:33.863002+00:00"
+  }
+]

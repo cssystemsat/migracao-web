@@ -1,0 +1,26 @@
+[
+  {
+    "id": 4,
+    "nome": "Rede Can",
+    "prazo_dias": null,
+    "universal": false,
+    "criado_em": "2026-11-05T18:48:21.764865+00:00",
+    "atualizado_em": "2026-11-05T18:48:21.764875+00:00"
+  },
+  {
+    "id": 1,
+    "nome": "Videotelemetria",
+    "prazo_dias": 15,
+    "universal": false,
+    "criado_em": "2026-11-03T20:22:19.060221+00:00",
+    "atualizado_em": "2026-11-05T20:14:43.609441+00:00"
+  },
+  {
+    "id": 9,
+    "nome": "Implantação",
+    "prazo_dias": null,
+    "universal": true,
+    "criado_em": "2026-11-10T14:23:30.771188+00:00",
+    "atualizado_em": "2026-11-10T14:23:30.771188+00:00"
+  }
+]
