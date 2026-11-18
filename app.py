@@ -1700,12 +1700,6 @@ def excluir_modelo_comando(comando_id):
 
 
 # --- CLIENTES EM IMPLANTAÇÃO (menu "Implantação") ---
-# Cadastro simples e independente do resto do app: acompanha clientes que estão
-# entrando na base (data de entrada, objetivo, valor do contrato, CSM responsável).
-# Cada cliente tem uma subcoleção "eventos" (a linha do tempo por setor); a
-# "última ação" exibida na listagem é sempre calculada a partir dela, nunca
-# digitada — é só o acontecimento mais recente entre os 4 setores.
-IMPLANTACAO_CLIENTES_COLLECTION = "implantacao_clientes"
 # "NPS" segue o mesmo racional de "Suporte": setor normal (aparece no filtro
 # e é selecionável num acontecimento manual), mas na prática é atribuído
 # automaticamente aos eventos sintéticos de avaliação da Wootric — ver
@@ -1810,28 +1804,6 @@ def _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual, 
     return concluidos
 
 
-def _dados_implantacao_cliente(data):
-    cliente = str(data.get("cliente", "")).strip()
-    if not cliente:
-        return None
-    try:
-        valor_contrato = float(data.get("valor_contrato") or 0)
-    except (TypeError, ValueError):
-        valor_contrato = 0
-    etapa = str(data.get("etapa", "")).strip()
-    if etapa not in IMPLANTACAO_ETAPAS:
-        etapa = IMPLANTACAO_ETAPA_PADRAO
-    return {
-        "idcentral": str(data.get("idcentral", "")).strip(),
-        "cliente": cliente,
-        "data_entrada": str(data.get("data_entrada", "")).strip(),
-        "objetivo": str(data.get("objetivo", "")).strip(),
-        "valor_contrato": valor_contrato,
-        "csm": str(data.get("csm", "")).strip(),
-        "etapa": etapa,
-    }
-
-
 def _dados_implantacao_evento(data):
     setor = str(data.get("setor", "")).strip()
     titulo = str(data.get("titulo", "")).strip()
@@ -1885,142 +1857,6 @@ def _sincronizar_eventos_marcos(cliente_id, marcos_concluidos, implantacao_concl
     )
 
 
-def _recalcular_ultima_acao_implantacao(cliente_id):
-    """Denormaliza o acontecimento mais recente (entre os 4 setores) direto no
-    doc do cliente, pra a listagem não precisar de uma consulta extra à
-    subcoleção "eventos" por cliente (era o gargalo do carregamento da tela).
-    Chamado sempre que um evento é criado/editado/excluído."""
-    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
-    ultimo = list(
-        doc_ref.collection("eventos")
-        .order_by("data", direction=firestore.Query.DESCENDING)
-        .limit(1)
-        .stream()
-    )
-    if ultimo:
-        ev = ultimo[0].to_dict()
-        doc_ref.update({
-            "ultima_acao": f"[{ev.get('setor')}] {ev.get('titulo')}",
-            "ultima_acao_data": ev.get("data") or "",
-        })
-    else:
-        doc_ref.update({"ultima_acao": "", "ultima_acao_data": ""})
-
-
-@app.route("/api/implantacao/clientes", methods=["GET"])
-def listar_implantacao_clientes():
-    docs = list(db.collection(IMPLANTACAO_CLIENTES_COLLECTION).stream())
-    lista = []
-    for d in docs:
-        cliente = dict(d.to_dict(), id=d.id)
-        cliente.setdefault("etapa", IMPLANTACAO_ETAPA_PADRAO)
-        # ultima_acao/ultima_acao_data são denormalizados no doc (ver
-        # _recalcular_ultima_acao_implantacao) — evita 1 consulta extra por
-        # cliente aqui, que era o gargalo do carregamento desta tela.
-        cliente.setdefault("ultima_acao", "")
-        cliente.setdefault("ultima_acao_data", "")
-        lista.append(cliente)
-
-    # Mais recente primeiro; "" (sem eventos ainda) sempre por último.
-    lista.sort(key=lambda c: c["ultima_acao_data"], reverse=True)
-    return jsonify(ok=True, clientes=lista)
-
-
-@app.route("/api/implantacao/clientes", methods=["POST"])
-def criar_implantacao_cliente():
-    data = request.get_json(force=True) or {}
-    dados = _dados_implantacao_cliente(data)
-    if dados is None:
-        return jsonify(ok=False, error="Informe o nome do cliente."), 400
-    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document()
-    doc_ref.set(dados)
-    return jsonify(ok=True, cliente=dict(dados, id=doc_ref.id))
-
-
-@app.route("/api/implantacao/clientes/<cliente_id>", methods=["PUT"])
-def editar_implantacao_cliente(cliente_id):
-    data = request.get_json(force=True) or {}
-    dados = _dados_implantacao_cliente(data)
-    if dados is None:
-        return jsonify(ok=False, error="Informe o nome do cliente."), 400
-    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
-    doc_atual = doc_ref.get()
-    if not doc_atual.exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    doc_atual_dict = doc_atual.to_dict() or {}
-    if not _sou_admin():
-        # IdCentral é a chave que liga Implantação e Migração — só admin altera
-        # um valor já existente (edição). Ignora silenciosamente, mantém o resto.
-        dados["idcentral"] = doc_atual_dict.get("idcentral", "")
-    # dados (do formulário) não inclui ultima_acao/ultima_acao_data — como este
-    # set() substitui o doc inteiro, precisa carregar esses dois campos adiante
-    # explicitamente pra não apagar o denormalizado por _recalcular_ultima_acao_implantacao.
-    dados["ultima_acao"] = doc_atual_dict.get("ultima_acao", "")
-    dados["ultima_acao_data"] = doc_atual_dict.get("ultima_acao_data", "")
-    doc_ref.set(dados)
-    return jsonify(ok=True, cliente=dict(dados, id=cliente_id))
-
-
-@app.route("/api/implantacao/clientes/<cliente_id>", methods=["DELETE"])
-def excluir_implantacao_cliente(cliente_id):
-    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
-    if not doc_ref.get().exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    for ev in doc_ref.collection("eventos").stream():
-        ev.reference.delete()
-    doc_ref.delete()
-    return jsonify(ok=True)
-
-
-@app.route("/api/implantacao/clientes/<cliente_id>/eventos", methods=["GET"])
-def listar_implantacao_eventos(cliente_id):
-    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
-    if not doc_ref.get().exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    docs = doc_ref.collection("eventos").stream()
-    lista = [dict(d.to_dict(), id=d.id) for d in docs]
-    return jsonify(ok=True, eventos=lista)
-
-
-@app.route("/api/implantacao/clientes/<cliente_id>/eventos", methods=["POST"])
-def criar_implantacao_evento(cliente_id):
-    doc_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id)
-    if not doc_ref.get().exists:
-        return jsonify(ok=False, error="Cliente não encontrado."), 404
-    data = request.get_json(force=True) or {}
-    dados = _dados_implantacao_evento(data)
-    if dados is None:
-        return jsonify(ok=False, error="Informe o setor e o título."), 400
-    evento_ref = doc_ref.collection("eventos").document()
-    evento_ref.set(dados)
-    _recalcular_ultima_acao_implantacao(cliente_id)
-    return jsonify(ok=True, evento=dict(dados, id=evento_ref.id))
-
-
-@app.route("/api/implantacao/clientes/<cliente_id>/eventos/<evento_id>", methods=["PUT"])
-def editar_implantacao_evento(cliente_id, evento_id):
-    data = request.get_json(force=True) or {}
-    dados = _dados_implantacao_evento(data)
-    if dados is None:
-        return jsonify(ok=False, error="Informe o setor e o título."), 400
-    evento_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id).collection("eventos").document(evento_id)
-    if not evento_ref.get().exists:
-        return jsonify(ok=False, error="Acontecimento não encontrado."), 404
-    evento_ref.set(dados)
-    _recalcular_ultima_acao_implantacao(cliente_id)
-    return jsonify(ok=True, evento=dict(dados, id=evento_id))
-
-
-@app.route("/api/implantacao/clientes/<cliente_id>/eventos/<evento_id>", methods=["DELETE"])
-def excluir_implantacao_evento(cliente_id, evento_id):
-    evento_ref = db.collection(IMPLANTACAO_CLIENTES_COLLECTION).document(cliente_id).collection("eventos").document(evento_id)
-    if not evento_ref.get().exists:
-        return jsonify(ok=False, error="Acontecimento não encontrado."), 404
-    evento_ref.delete()
-    _recalcular_ultima_acao_implantacao(cliente_id)
-    return jsonify(ok=True)
-
-
 # Etapas oficiais do Kanban interno de uma tentativa de migração (mesmo racional
 # das etapas de Implantação acima) — usado tanto pela coleção antiga quanto pela
 # tentativa nova (definido aqui, antes das duas, pra não dar NameError em nenhuma).
@@ -2032,8 +1868,6 @@ MIGRACAO_ETAPA_PADRAO = "analise"
 # Cada cliente tem um "estagio" (Implantação -> Onboarding -> Ongoing,
 # sequencial, um só por vez). Migração NÃO é um estágio — é uma condição
 # paralela com histórico de tentativas (ver "migracoes_sql.py").
-# "implantacao_clientes" (Firestore, legado) continua rodando à parte — não
-# foi migrado nesta rodada (ver docs/HISTORICO_DECISOES.md).
 ESTAGIOS_CLIENTE = ["implantacao", "onboarding", "ongoing"]
 ESTAGIO_CLIENTE_PADRAO = "implantacao"
 
@@ -2883,7 +2717,7 @@ def api_diagnostico_prontidao(cliente_id):
     registrar_acao(
         acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
         entidade_nome=cliente.get("cliente", ""),
-        titulo="Diagnóstico de prontidão atualizado",
+        titulo="Diagnóstico de Implantação atualizado",
         cliente_id=cliente_id, idcentral=cliente.get("idcentral", ""),
         cliente_nome=cliente.get("cliente", ""),
     )

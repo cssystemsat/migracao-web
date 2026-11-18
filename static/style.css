@@ -219,7 +219,7 @@ button {
   color: var(--branco);
   transition: background 0.15s ease, opacity 0.15s ease;
 }
-button:hover:not(:disabled) { background: var(--azul-escuro); }
+button:hover:not(:disabled) { background: var(--cinza-200); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .btn-secondary {
@@ -3063,15 +3063,17 @@ button.kmarcos-stat:hover:not(:disabled) { background: var(--cinza-100); opacity
    padding) — senão sobraria uma moldura cinza em volta dele. */
 #ficha-cliente-cabecalho { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); padding: 16px 24px; margin: -11px -11px 16px; }
 :root[data-theme="dark"] #ficha-cliente-cabecalho { background: var(--painel); }
-.ficha-header { display: flex; align-items: center; justify-content: space-between; gap: 13px; flex-wrap: wrap; margin-bottom: 14px; }
-/* Nome+IdCentral e as tags de diagnóstico, lado a lado na mesma linha
-   (quebra só se não couber) — não empilhados um embaixo do outro. */
-.ficha-header-info { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; row-gap: 8px; min-width: 0; }
+.ficha-header { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+/* Topo: título + IdCentral alinhados com os botões de edição/adicionar, na
+   mesma linha (quebra só se não couber). */
+.ficha-header-topo { display: flex; align-items: center; justify-content: space-between; gap: 13px; flex-wrap: wrap; min-width: 0; }
 .ficha-header h2 { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.6px; color: var(--cinza-900); }
-/* Nome do cliente + IdCentral + tag "Migração" (só quando tem) na mesma linha. */
+/* Nome do cliente + IdCentral na mesma linha. */
 .ficha-header-titulo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ficha-header-idcentral { font-family: "Consolas", monospace; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--cinza-700); background: var(--cinza-100); padding: 2px 8px; border-radius: 4px; }
-.ficha-header-info .ficha-tags-resumo { margin: 0; }
+/* Linha de badges/tags abaixo do título (Migração + tags de diagnóstico). */
+.ficha-header-badges { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; row-gap: 8px; }
+.ficha-header-badges .ficha-tags-resumo { margin: 0; }
 
 .ficha-header-acoes { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .ficha-engrenagem {
@@ -3094,6 +3096,8 @@ button.kmarcos-stat:hover:not(:disabled) { background: var(--cinza-100); opacity
 .ficha-header-nova-tarefa:hover:not(:disabled), .ficha-painel-tarefas .minha-conta-tarefas-topo .btn-primary:hover:not(:disabled) {
   background: #004ac6;
 }
+.ficha-header-nova-tarefa-wrap { position: relative; }
+.ficha-header-nova-tarefa-menu { left: 0; right: auto; min-width: 100%; white-space: nowrap; }
 
 .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 11px; margin: 13px 0; }
 /* Mesma "família" visual do .stat-tile (cantos mais arredondados, sombra
@@ -3102,6 +3106,15 @@ button.kmarcos-stat:hover:not(:disabled) { background: var(--cinza-100); opacity
 .info-item { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 11px; }
 .info-item-label { font-size: 11px; line-height: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cinza-500); margin-bottom: 3px; }
 .info-item-valor { font-size: 15px; line-height: 20px; font-weight: 600; }
+/* Card "Status" da Implantação — barra colorida à esquerda igual ao
+   .stat-tile, pra sinalizar de longe: azul = Iniciar, amarelo = Em
+   andamento, vermelho = Atrasado, verde = Concluído (com a data embaixo). */
+.info-item-status { border-left: 3px solid transparent; padding-left: 9px; }
+.info-item-status-azul { border-left-color: var(--azul); }
+.info-item-status-amarelo { border-left-color: var(--amarelo); }
+.info-item-status-vermelho { border-left-color: var(--vermelho); }
+.info-item-status-verde { border-left-color: var(--verde); }
+.info-item-subtitulo { font-size: 11px; line-height: 14px; color: var(--cinza-500); margin-top: 2px; }
 
 .stepper-legenda { margin: -10px 0 16px; font-size: 0.85rem; text-align: center; }
 .stepper-legenda.ok { color: var(--verde-escuro); }
@@ -3826,7 +3839,7 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-subabas { display: flex; gap: 16px; overflow-x: auto; border-bottom: none; margin: 0 0 11px; scrollbar-width: none; -ms-overflow-style: none; }
 .ficha-subabas::-webkit-scrollbar { display: none; }
 .ficha-subaba { width: auto; margin: 0 0 -1px; padding: 4px 0 8px; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--cinza-700); font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; cursor: pointer; }
-.ficha-subaba:hover { background: none; color: var(--cinza-900); border-bottom-color: var(--cinza-300); }
+.ficha-subaba:hover:not(:disabled) { background: none; color: var(--cinza-900); border-bottom-color: var(--cinza-300); }
 .ficha-subaba.ativo { color: var(--azul-escuro); font-weight: 600; border-bottom-color: var(--azul-escuro); }
 .ficha-historico-item { padding: 7px 0; border-bottom: 1px solid var(--cinza-200); font-size: 0.88rem; }
 
@@ -4264,13 +4277,15 @@ input:disabled, select:disabled, input.input-travado {
 :root[data-theme="dark"] .ficha-chat-lista { background: var(--cinza-100); }
 .ficha-chat-lista > .placeholder, .ficha-chat-lista > .ficha-historico-vazio { margin: auto; }
 
-/* Enquanto a sub-aba Detalhado está ativa, o painel inteiro da Ficha trava
-   na altura da tela e só o container dos acontecimentos rola — sem isso a
-   página inteira também rolava (max-height: 68vh do chat virava um segundo
-   scroll) e o botão "Adicionar acontecimento" ficava solto no fim do
-   conteúdo em vez de travado embaixo. As outras abas da Ficha (Visão
-   Geral, Marcos, Timeline etc.) não ganham essa classe e continuam
-   rolando a página normalmente. */
+/* Enquanto uma sub-aba de lista do Histórico está ativa (Detalhado, CS,
+   Comercial, Suporte, Treinamento, Financeiro, NPS — todas usam
+   .ficha-chat-lista), o painel inteiro da Ficha trava na altura da tela e
+   só o container dos acontecimentos rola — sem isso a página inteira
+   também rolava (max-height: 68vh do chat virava um segundo scroll) e o
+   botão "Adicionar acontecimento" ficava solto no fim do conteúdo em vez
+   de travado embaixo. As outras abas da Ficha (Visão Geral, Marcos,
+   Timeline etc.) não ganham essa classe e continuam rolando a página
+   normalmente — Timeline é um board de colunas, não uma lista. */
 #tela-ficha-cliente.ficha-historico-detalhado-ativo {
   display: flex;
   flex-direction: column;
@@ -4327,7 +4342,7 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-chat-rail-ponto { position: absolute; left: 50%; top: 14px; transform: translate(-50%, -50%); width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--painel); box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.1); z-index: 1; }
 
 .ficha-chat-mensagem { flex: 1; min-width: 0; background: var(--painel); border: 1px solid #e5e7eb; border-radius: calc(var(--radius) + 2px); padding: 11px 13px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05); }
-.ficha-chat-mensagem.sintetico { border-style: dashed; background: transparent; box-shadow: none; }
+.ficha-chat-mensagem.sintetico { border-style: dashed; background: var(--painel); box-shadow: none; }
 .ficha-chat-mensagem-topo { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 5px; font-size: 0.7rem; color: var(--cinza-500); }
 .ficha-chat-mensagem-setor { padding: 2px 6px; border-radius: 999px; background: var(--cinza-100); color: var(--cinza-700); font-weight: 600; border: 1px solid var(--cinza-200); }
 .ficha-chat-mensagem-tag { padding: 2px 6px; border-radius: 999px; font-weight: 700; }

@@ -33,7 +33,7 @@ async function parseJsonResponse(resp) {
     return JSON.parse(texto);
   } catch (err) {
     if (!resp.ok) {
-      throw new Error("O servidor demorou para responder (pode estar 'acordando' no plano gratuito). Tente novamente em alguns segundos.");
+      throw new Error("O servidor demorou para responder. Tente novamente em alguns segundos.");
     }
     throw new Error("Resposta inesperada do servidor.");
   }
@@ -2693,6 +2693,7 @@ const overlayImplantacaoEvento = el("overlay-implantacao-evento");
 const formImplantacaoEvento = el("form-implantacao-evento");
 const implantacaoEventoModalTitulo = el("implantacao-evento-modal-titulo");
 const inputImplantacaoEventoTitulo = el("implantacao-evento-titulo");
+const inputImplantacaoEventoSetor = el("implantacao-evento-setor");
 const inputImplantacaoEventoTag = el("implantacao-evento-tag");
 const inputImplantacaoEventoDescricao = el("implantacao-evento-descricao");
 const inputImplantacaoEventoData = el("implantacao-evento-data");
@@ -2702,7 +2703,6 @@ const btnSalvarImplantacaoEvento = el("btn-salvar-implantacao-evento");
 let implantacaoTimelineClienteAtual = null;
 let implantacaoTimelineEventosCache = [];
 let implantacaoEventoEditandoId = null;
-let implantacaoEventoSetorAtual = null;
 
 async function abrirTimelineImplantacao(cliente) {
   implantacaoTimelineClienteAtual = cliente;
@@ -2845,8 +2845,8 @@ function renderTimelineSetores() {
 
 function abrirModalImplantacaoEvento(setor, evento) {
   implantacaoEventoEditandoId = evento ? evento.id : null;
-  implantacaoEventoSetorAtual = setor;
-  implantacaoEventoModalTitulo.textContent = evento ? `Editar acontecimento — ${setor}` : `Adicionar acontecimento — ${setor}`;
+  implantacaoEventoModalTitulo.textContent = evento ? "Editar acontecimento" : "Adicionar acontecimento";
+  inputImplantacaoEventoSetor.value = evento ? evento.setor : setor;
   inputImplantacaoEventoTitulo.value = evento ? evento.titulo : "";
   inputImplantacaoEventoTag.value = evento ? evento.tag || "" : "";
   inputImplantacaoEventoDescricao.value = evento ? evento.descricao || "" : "";
@@ -2861,9 +2861,9 @@ el("implantacao-evento-modal-fechar").addEventListener("click", () => overlayImp
 
 formImplantacaoEvento.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!implantacaoTimelineClienteAtual || !implantacaoEventoSetorAtual) return;
+  if (!implantacaoTimelineClienteAtual || !inputImplantacaoEventoSetor.value) return;
   const payload = {
-    setor: implantacaoEventoSetorAtual,
+    setor: inputImplantacaoEventoSetor.value,
     titulo: inputImplantacaoEventoTitulo.value.trim(),
     tag: inputImplantacaoEventoTag.value,
     descricao: inputImplantacaoEventoDescricao.value.trim(),
@@ -20069,7 +20069,9 @@ function definirGrupoSidebar(nome, expandido, persistir) {
 }
 
 Object.entries(SIDEBAR_GRUPOS).forEach(([nome, grupo]) => {
-  definirGrupoSidebar(nome, localStorage.getItem(`sidebar_group_${nome}`) !== "collapsed", false);
+  // Padrão agora é retraído — só fica expandido se o usuário já abriu antes
+  // (persistido) ou se tiver aberto nesta sessão.
+  definirGrupoSidebar(nome, localStorage.getItem(`sidebar_group_${nome}`) === "expanded", false);
   grupo.botao.addEventListener("click", () => {
     if (sidebarEl.classList.contains("recolhida")) {
       aplicarEstadoSidebar(false);
@@ -22702,16 +22704,17 @@ function fichaWootricAtuaisValidas(clienteId) {
   return fichaWootricAtual;
 }
 
-// Chips de diagnóstico (Implantado/Momento/Persona/Flag/Atrasado) — ficam no
+// Chips de diagnóstico (Momento/Persona/Flag/Atrasado) — ficam no
 // cabeçalho (persistente entre as sub-abas da Ficha, igual ao mockup), não
 // só na Visão Geral. Todas são da jornada de Implantação — não fazem
 // sentido pra um cliente que só tem Migração. "Marco atual" não vira tag
 // aqui: o card de Progresso já mostra isso com muito mais clareza (stepper).
+// "Implantado" também não — virou o card de Status na aba Implantação
+// (construirInfoItemStatusImplantacao), não é mais badge/tag em lugar nenhum.
 function construirFichaTagsResumo(implantacao) {
   if (!implantacao || implantacao.tem_implantacao === false) return null;
   const tags = document.createElement("div");
   tags.className = "ficha-tags-resumo";
-  if (implantacao.implantado) tags.appendChild(criarTagResumo("Implantado", "tag-implantado"));
   if (implantacao.momento) {
     const classeMomento = FICHA_MOMENTOS_CRITICOS.includes(implantacao.momento) ? "tag-momento-critico" : "tag-momento";
     const tagMomento = criarTagResumo(implantacao.momento, classeMomento);
@@ -22740,16 +22743,77 @@ function construirFichaTagsResumo(implantacao) {
   return tags.children.length ? tags : null;
 }
 
+// Botão "Nova Tarefa" do cabeçalho da Ficha (aparece em todas as abas) virou
+// um dropdown: mesma cor/posição de sempre, com seta pra baixo, abrindo duas
+// opções — Nova tarefa (modal de tarefa) e Registrar evento (abre a mesma
+// Linha do tempo de Implantação usada em abrirTimelineImplantacao, pra não
+// duplicar a lógica de acontecimentos por setor).
+function construirFichaNovaTarefaDropdown(implantacao) {
+  const wrap = document.createElement("div");
+  wrap.className = "ficha-header-nova-tarefa-wrap";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn-primary ficha-header-nova-tarefa";
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg><span>Adicionar</span><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="ficha-header-nova-tarefa-seta"><path d="M6 9l6 6 6-6"></path></svg>';
+
+  const menu = document.createElement("div");
+  menu.className = "app-menu-dropdown ficha-header-nova-tarefa-menu hidden";
+
+  const itemTarefa = document.createElement("button");
+  itemTarefa.type = "button";
+  itemTarefa.className = "app-menu-item";
+  itemTarefa.textContent = "Nova tarefa";
+  itemTarefa.addEventListener("click", () => {
+    menu.classList.add("hidden");
+    abrirModalTarefa({
+      clienteId: implantacao.id,
+      aoSalvar: () => mostrarFichaAba(fichaAbaAtual),
+    });
+  });
+
+  const itemEvento = document.createElement("button");
+  itemEvento.type = "button";
+  itemEvento.className = "app-menu-item";
+  itemEvento.textContent = "Registrar evento";
+  itemEvento.addEventListener("click", () => {
+    menu.classList.add("hidden");
+    // Reaproveita o mesmo modal "Adicionar acontecimento" da Linha do tempo
+    // (abrirModalImplantacaoEvento) — o evento criado aqui cai direto no
+    // histórico/timeline do cliente, sem precisar abrir a timeline inteira.
+    implantacaoTimelineClienteAtual = implantacao;
+    abrirModalImplantacaoEvento("Implantação", null);
+  });
+
+  menu.appendChild(itemTarefa);
+  menu.appendChild(itemEvento);
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!menu.classList.contains("hidden") && !wrap.contains(e.target)) {
+      menu.classList.add("hidden");
+    }
+  });
+
+  wrap.appendChild(btn);
+  wrap.appendChild(menu);
+  return wrap;
+}
+
 function construirFichaHeader(implantacao, migracao, comEngrenagem) {
   const header = document.createElement("div");
   header.className = "ficha-header";
 
-  // Nome+IdCentral e as tags ficam lado a lado na mesma linha (quebrando só
-  // se não couber), não empilhados — "info" é a linha inteira.
-  const info = document.createElement("div");
-  info.className = "ficha-header-info";
-  // Nome + tag "Migração" na mesma linha. Sem migração, não mostra tag
-  // nenhuma (implantação é o padrão, não precisa de rótulo).
+  // Topo: título + IdCentral alinhados com os botões de edição/adicionar,
+  // tudo na mesma linha (quebra só se não couber). As tags/badges vão numa
+  // linha própria, abaixo, ocupando a largura toda do cabeçalho.
+  const topo = document.createElement("div");
+  topo.className = "ficha-header-topo";
+
+  // Nome + IdCentral na mesma linha.
   const linhaTitulo = document.createElement("div");
   linhaTitulo.className = "ficha-header-titulo";
   const titulo = document.createElement("h2");
@@ -22762,34 +22826,32 @@ function construirFichaHeader(implantacao, migracao, comEngrenagem) {
     badgeId.textContent = `IdCentral: ${idcentral}`;
     linhaTitulo.appendChild(badgeId);
   }
-  if (migracao) {
-    const badge = document.createElement("span");
-    badge.className = "badge-tipo com-migracao";
-    badge.textContent = "Migração";
-    linhaTitulo.appendChild(badge);
-  }
-  info.appendChild(linhaTitulo);
-  const tags = construirFichaTagsResumo(implantacao);
-  if (tags) info.appendChild(tags);
-  header.appendChild(info);
+  topo.appendChild(linhaTitulo);
 
   if (comEngrenagem) {
     const acoes = document.createElement("div");
     acoes.className = "ficha-header-acoes";
     acoes.appendChild(construirFichaEngrenagem(implantacao, migracao));
     if (implantacao) {
-      const btnTarefa = document.createElement("button");
-      btnTarefa.type = "button";
-      btnTarefa.className = "btn-primary ficha-header-nova-tarefa";
-      btnTarefa.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg><span>Nova Tarefa</span>';
-      btnTarefa.addEventListener("click", () => abrirModalTarefa({
-        clienteId: implantacao.id,
-        aoSalvar: () => mostrarFichaAba(fichaAbaAtual),
-      }));
-      acoes.appendChild(btnTarefa);
+      acoes.appendChild(construirFichaNovaTarefaDropdown(implantacao));
     }
-    header.appendChild(acoes);
+    topo.appendChild(acoes);
   }
+  header.appendChild(topo);
+
+  // Tags/badges (Migração, Momento, Persona, Flag, Atraso) ficam todas numa
+  // linha só, abaixo da linha título+botões.
+  const linhaBadges = document.createElement("div");
+  linhaBadges.className = "ficha-header-badges";
+  if (migracao) {
+    const badge = document.createElement("span");
+    badge.className = "badge-tipo com-migracao";
+    badge.textContent = "Migração";
+    linhaBadges.appendChild(badge);
+  }
+  const tags = construirFichaTagsResumo(implantacao);
+  if (tags) linhaBadges.appendChild(tags);
+  if (linhaBadges.children.length) header.appendChild(linhaBadges);
 
   return header;
 }
@@ -22917,6 +22979,48 @@ function criarInfoItem(label, valor) {
   v.textContent = valor === null || valor === undefined || valor === "" ? "-" : String(valor);
   item.appendChild(l);
   item.appendChild(v);
+  return item;
+}
+
+// Status da Implantação (substitui o antigo card "Implantado: Sim/Não") —
+// 4 estados com sinalização colorida (barra à esquerda do card, igual aos
+// stat-tiles do Dashboard): Iniciar (azul, nenhum marco concluído ainda),
+// Em andamento (amarelo), Atrasado (vermelho, prazo do marco atual vencido)
+// e Concluído (verde, com a data de conclusão como subtítulo).
+// "Concluído" depende só do switch manual `implantado` (fonte oficial de
+// "cliente implantado" em todo o sistema, ver HISTORICO_DECISOES.md) — NÃO
+// usa `etapa === "concluido"` sozinho: os 5 marcos podem bater sem a equipe
+// ter confirmado o switch (ver app.py, prompt no marco 3), e usar etapa
+// aqui mostrava "Concluído" indevido (caso do cliente Focus).
+function statusImplantacaoCard(implantacao) {
+  if (implantacao.implantado) {
+    return { label: "Concluído", cor: "verde" };
+  }
+  if (implantacaoAtrasada(implantacao)) {
+    return { label: "Atrasado", cor: "vermelho" };
+  }
+  const temProgresso = Array.isArray(implantacao.marcos_concluidos) && implantacao.marcos_concluidos.length > 0;
+  return temProgresso ? { label: "Em andamento", cor: "amarelo" } : { label: "Iniciar", cor: "azul" };
+}
+
+function criarInfoItemStatusImplantacao(implantacao) {
+  const status = statusImplantacaoCard(implantacao);
+  const item = document.createElement("div");
+  item.className = `info-item info-item-status info-item-status-${status.cor}`;
+  const l = document.createElement("div");
+  l.className = "info-item-label";
+  l.textContent = "Status de Implantação";
+  const v = document.createElement("div");
+  v.className = "info-item-valor";
+  v.textContent = status.label;
+  item.appendChild(l);
+  item.appendChild(v);
+  if (status.label === "Concluído" && implantacao.implantado_em) {
+    const sub = document.createElement("div");
+    sub.className = "info-item-subtitulo";
+    sub.textContent = `desde ${formatarDataBRSimples(implantacao.implantado_em)}`;
+    item.appendChild(sub);
+  }
   return item;
 }
 
@@ -25181,9 +25285,6 @@ function renderFichaHistoricoSuporte(card, implantacao, eventosManuais, erroEven
     return card;
   }
 
-  const h = document.createElement("h3");
-  h.textContent = `Histórico do Suporte (${eventos.length})`;
-  card.appendChild(h);
   const lista = document.createElement("div");
   lista.className = "ficha-chat-lista";
   card.appendChild(lista);
@@ -25202,7 +25303,7 @@ async function carregarFichaHistoricoSuporte(implantacao, card) {
 
 function construirFichaHistoricoSuporte(implantacao) {
   const card = document.createElement("div");
-  card.className = "ficha-painel";
+  card.className = "ficha-painel ficha-detalhado-card";
   if (!implantacao) {
     card.appendChild(construirFichaHistoricoVazio(
       "Sem Implantação", "Esse cliente não tem Implantação — não há histórico de Suporte pra mostrar."
@@ -25230,13 +25331,12 @@ function renderFichaHistoricoSetor(card, eventosTodos, setores, nomeArea = setor
     card.appendChild(construirFichaHistoricoVazio("Nada por aqui ainda", `Esse cliente não tem acontecimento registrado em ${nomeArea}.`));
     return;
   }
-  const h = document.createElement("h3");
-  h.textContent = `${nomeArea} (${eventosDoSetor.length})`;
-  card.appendChild(h);
   const lista = document.createElement("div");
   lista.className = "ficha-chat-lista";
-  eventosDoSetor.forEach((ev) => lista.appendChild(construirFichaChatItem(ev)));
   card.appendChild(lista);
+  // renderFichaChat já rola pro final (acontecimento mais recente) depois de
+  // montar — mesmo comportamento do Detalhado/Suporte, padronizado aqui.
+  renderFichaChat(lista, eventosDoSetor);
 }
 
 function anexarAvisoErroWootric(card, implantacao) {
@@ -25260,7 +25360,7 @@ async function carregarFichaHistoricoSetor(implantacao, setores, card, nomeArea 
 
 function construirFichaHistoricoSetor(implantacao, setores, nomeArea = setores[0], incluirWootric = false, eventosExtras = []) {
   const card = document.createElement("div");
-  card.className = "ficha-painel";
+  card.className = "ficha-painel ficha-detalhado-card";
   if (!implantacao) {
     card.appendChild(construirFichaHistoricoVazio(
       "Sem Implantação", "Esse cliente não tem Implantação — não há acontecimentos pra mostrar."
@@ -25402,11 +25502,10 @@ function construirFichaImplantacao(implantacao, migracao) {
   sec.className = "ficha-secao";
   const grid = document.createElement("div");
   grid.className = "info-grid";
+  grid.appendChild(criarInfoItemStatusImplantacao(implantacao));
   grid.appendChild(criarInfoItem("IdCentral", implantacao.idcentral));
   grid.appendChild(criarInfoItem("Etapa", implantacao.etapa === "concluido"
     ? IMPLANTACAO_ETAPA_LABELS.concluido : nomeCompletoMarco(implantacao.etapa)));
-  grid.appendChild(criarInfoItem("Implantado", implantacao.implantado
-    ? `Sim${implantacao.implantado_em ? `, desde ${formatarDataBRSimples(implantacao.implantado_em)}` : ""}` : "Não"));
   grid.appendChild(criarInfoItem("Responsável", implantacao.csm));
   const itemScore = criarInfoItem("Score de implantação", "Carregando...");
   grid.appendChild(itemScore);
@@ -25425,11 +25524,6 @@ function construirFichaImplantacao(implantacao, migracao) {
 
   const acoes = document.createElement("div");
   acoes.className = "ficha-acoes";
-  const btn = document.createElement("button");
-  btn.className = "btn-secondary";
-  btn.textContent = "Ver linha do tempo completa";
-  btn.addEventListener("click", () => abrirTimelineImplantacao(implantacao));
-  acoes.appendChild(btn);
 
   const btnEmail = document.createElement("button");
   btnEmail.className = "btn-secondary";
@@ -25951,7 +26045,7 @@ function construirPainelDiagnosticoProntidao() {
   const secao = document.createElement("section");
   secao.className = "ficha-painel ficha-diagnostico-secao";
   const titulo = document.createElement("h3");
-  titulo.textContent = "Diagnóstico de prontidão";
+  titulo.textContent = "Diagnóstico de Implantação";
   secao.appendChild(titulo);
 
   const cabecalho = document.createElement("button");
@@ -27142,10 +27236,16 @@ function mostrarFichaAba(aba, opcoes = {}) {
 
   const corpo = el("ficha-cliente-corpo");
   corpo.innerHTML = "";
-  // Só a sub-aba Detalhado (chat de acontecimentos) precisa travar a altura
-  // do painel na tela toda — as outras abas continuam rolando a página
-  // normalmente. Ver regras em "Aba Detalhado (Histórico)" no style.css.
-  el("tela-ficha-cliente").classList.toggle("ficha-historico-detalhado-ativo", aba === "historico" && fichaHistoricoAreaAtual === "detalhado");
+  // Toda sub-aba do Histórico que é uma lista de acontecimentos (Detalhado,
+  // CS, Comercial, Suporte, Treinamento, Financeiro, NPS) trava a altura do
+  // painel na tela toda e só o container da lista rola — padronizado, senão
+  // a página também rolava (max-height do chat virava um segundo scroll).
+  // Timeline é um board de colunas, com scroll próprio, não entra aqui.
+  // Ver regras em "Aba Detalhado (Histórico)" no style.css.
+  el("tela-ficha-cliente").classList.toggle(
+    "ficha-historico-detalhado-ativo",
+    aba === "historico" && fichaHistoricoAreaAtual !== "timeline",
+  );
   if (!fichaClienteAtual) return;
   const { idcentral, implantacao, migracao, migracoes, credencial_configurada, credencial_login, documentos } = fichaClienteAtual;
   if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login, fichaSubAbaAtual, documentos));

@@ -47,12 +47,12 @@
         <span class="sidebar-item-texto">Feed</span>
       </button>
       <div class="sidebar-grupo">
-        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-implantacao" data-sidebar-group="implantacao" aria-controls="sidebar-subnav-implantacao" aria-expanded="true" title="Expandir ou recolher Implantação">
+        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-implantacao" data-sidebar-group="implantacao" aria-controls="sidebar-subnav-implantacao" aria-expanded="false" title="Expandir ou recolher Implantação">
           <span class="material-symbols-outlined sidebar-item-icone">tune</span>
           <span class="sidebar-item-texto">Implantação</span>
           <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
         </button>
-        <div class="sidebar-subnav" id="sidebar-subnav-implantacao" role="group" aria-label="Páginas de Implantação">
+        <div class="sidebar-subnav hidden" id="sidebar-subnav-implantacao" role="group" aria-label="Páginas de Implantação">
           <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-dashboard-implantacao" title="Dashboard de Implantação">
             <span class="material-symbols-outlined sidebar-item-icone">monitoring</span>
             <span class="sidebar-item-texto">Dashboard de Implantação</span>
@@ -64,12 +64,12 @@
         </div>
       </div>
       <div class="sidebar-grupo">
-        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-migracao" data-sidebar-group="migracao" aria-controls="sidebar-subnav-migracao" aria-expanded="true" title="Expandir ou recolher Migração">
+        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-migracao" data-sidebar-group="migracao" aria-controls="sidebar-subnav-migracao" aria-expanded="false" title="Expandir ou recolher Migração">
           <span class="material-symbols-outlined sidebar-item-icone">sync_alt</span>
           <span class="sidebar-item-texto">Migração</span>
           <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
         </button>
-        <div class="sidebar-subnav" id="sidebar-subnav-migracao" role="group" aria-label="Páginas de Migração">
+        <div class="sidebar-subnav hidden" id="sidebar-subnav-migracao" role="group" aria-label="Páginas de Migração">
           <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-migracao" title="Controle de Migração">
             <span class="material-symbols-outlined sidebar-item-icone">swap_horiz</span>
             <span class="sidebar-item-texto">Controle de Migração</span>
@@ -77,12 +77,12 @@
         </div>
       </div>
       <div class="sidebar-grupo">
-        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-ferramentas" data-sidebar-group="ferramentas" aria-controls="sidebar-subnav-ferramentas" aria-expanded="true" title="Expandir ou recolher Ferramentas Auxiliares">
+        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-ferramentas" data-sidebar-group="ferramentas" aria-controls="sidebar-subnav-ferramentas" aria-expanded="false" title="Expandir ou recolher Ferramentas Auxiliares">
           <span class="material-symbols-outlined sidebar-item-icone">build_circle</span>
           <span class="sidebar-item-texto">Ferramentas Auxiliares</span>
           <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
         </button>
-        <div class="sidebar-subnav" id="sidebar-subnav-ferramentas" role="group" aria-label="Páginas de Ferramentas Auxiliares">
+        <div class="sidebar-subnav hidden" id="sidebar-subnav-ferramentas" role="group" aria-label="Páginas de Ferramentas Auxiliares">
           <button type="button" class="sidebar-item sidebar-subitem" id="nav-tool-ferramentas" title="Visão geral das Ferramentas Auxiliares">
             <span class="material-symbols-outlined sidebar-item-icone">apps</span>
             <span class="sidebar-item-texto">Ferramentas Auxiliares</span>
@@ -2683,6 +2683,18 @@
           <label class="campo-migracao">
             <span>Título</span>
             <input type="text" id="implantacao-evento-titulo" required>
+          </label>
+          <label class="campo-migracao">
+            <span>Setor</span>
+            <select id="implantacao-evento-setor">
+              <option value="Implantação">Implantação</option>
+              <option value="Migração">Migração</option>
+              <option value="Suporte">Suporte</option>
+              <option value="Comercial">Comercial</option>
+              <option value="Treinamento">Treinamento</option>
+              <option value="Financeiro">Financeiro</option>
+              <option value="NPS">NPS</option>
+            </select>
           </label>
           <label class="campo-migracao">
             <span>Tag</span>

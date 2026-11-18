@@ -24,6 +24,16 @@ conferir a coleção nova funcionando antes de remover a antiga, e
 `limpar_migracao_orfa.py` para remover, só depois de confirmado, os
 registros de migração sem vínculo com nenhum cliente.
 
+Remoção do código morto (2026-11-18): as rotas `/api/implantacao/clientes...`
+e a coleção Firestore `implantacao_clientes` ficaram no `app.py` por mais
+tempo, sem nenhuma tela chamando-as (confirmado por busca em `script.js`/
+`index.html`) — pararam de receber cliente novo desde a virada pra Postgres,
+mas o código não tinha sido removido. Removidas as 9 rotas e as funções
+auxiliares exclusivas delas (`_dados_implantacao_cliente`,
+`_recalcular_ultima_acao_implantacao`); os dados antigos continuam no
+Firestore, só o código foi apagado. `_dados_implantacao_evento` foi mantida
+por ser compartilhada com o sistema novo (`/api/clientes/<id>/eventos`).
+
 ## Objetivo universal "IMPLANTAÇÃO" obrigatório (2026-11-10)
 
 Contexto: plano de ampliação da área de Implantação (impedimentos, jornada
