@@ -43,6 +43,7 @@ def _cliente_para_dict(c):
         "tem_implantacao": c.tem_implantacao,
         "data_entrada": c.data_entrada,
         "objetivo": c.objetivo,
+        "descricao_implantacao": c.descricao_implantacao,
         "valor_contrato": float(c.valor_contrato),
         "responsavel_usuario_id": c.responsavel_usuario_id,
         "csm": c.csm_nome,

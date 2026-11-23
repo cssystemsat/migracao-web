@@ -19680,31 +19680,54 @@ async function carregarMinhaConta() {
 
 // Painel de Tarefas do hub "Minha Conta" mostra só pendentes — concluídas
 // ficam atrás do botão "Ver tarefas concluídas" (histórico à parte).
+// Divide em "Minhas tarefas" (sou responsável) e "Tarefas delegadas" (criei
+// pra outra pessoa executar), pra facilitar o monitoramento do que foi
+// delegado sem misturar com o que eu mesmo preciso fazer.
 async function carregarMinhasTarefas() {
   const container = el("minha-conta-tarefas-lista");
+  const containerDelegadas = el("minha-conta-tarefas-delegadas-lista");
   container.innerHTML = '<p class="placeholder">Carregando...</p>';
+  containerDelegadas.innerHTML = '<p class="placeholder">Carregando...</p>';
   try {
-    const r = await fetch("/api/tarefas?apenas_minhas=1");
+    const r = await fetch("/api/tarefas?minhas_e_criadas=1");
     const data = await parseJsonResponse(r);
     container.innerHTML = "";
+    containerDelegadas.innerHTML = "";
     if (!data.ok) {
       const p = document.createElement("p");
       p.className = "placeholder";
       p.textContent = `Erro: ${data.error || "falha ao carregar tarefas"}`;
       container.appendChild(p);
       el("minha-conta-tarefas-contagem").textContent = "0";
+      el("minha-conta-tarefas-minhas-contagem").textContent = "0";
+      el("minha-conta-tarefas-delegadas-contagem").textContent = "0";
       return;
     }
     const pendentes = (data.tarefas || []).filter((t) => !t.concluida);
-    el("minha-conta-tarefas-contagem").textContent = String(pendentes.length);
-    container.appendChild(construirListaTarefas(pendentes, {
+    const minhas = pendentes.filter((t) => t.responsavel_id === USUARIO_ID_ATUAL);
+    const delegadas = pendentes.filter((t) =>
+      t.criado_por === USUARIO_ID_ATUAL && t.responsavel_id !== USUARIO_ID_ATUAL);
+
+    el("minha-conta-tarefas-contagem").textContent = String(minhas.length + delegadas.length);
+    el("minha-conta-tarefas-minhas-contagem").textContent = String(minhas.length);
+    el("minha-conta-tarefas-delegadas-contagem").textContent = String(delegadas.length);
+
+    container.appendChild(construirListaTarefas(minhas, {
       mostrarCliente: true,
+      compacta: true,
+      aoMudar: carregarMinhasTarefas,
+      aoClicar: (t) => abrirDetalhesTarefa(t, carregarMinhasTarefas),
+    }));
+    containerDelegadas.appendChild(construirListaTarefas(delegadas, {
+      mostrarCliente: true,
+      mostrarResponsavel: true,
       compacta: true,
       aoMudar: carregarMinhasTarefas,
       aoClicar: (t) => abrirDetalhesTarefa(t, carregarMinhasTarefas),
     }));
   } catch (err) {
     container.innerHTML = "";
+    containerDelegadas.innerHTML = "";
   }
 }
 
@@ -25533,9 +25556,60 @@ function construirFichaImplantacao(implantacao, migracao) {
   sec.appendChild(acoes);
 
   wrap.appendChild(sec);
+  wrap.appendChild(construirFichaDescricaoImplantacaoCard(implantacao));
   wrap.appendChild(construirPainelDiagnosticoProntidao());
   wrap.appendChild(construirPainelObjetivosImplantacao());
   return wrap;
+}
+
+// Texto livre da aba Implantação — o que está sendo implantado para esse
+// cliente. Fica salvo por endpoint dedicado (PUT .../descricao-implantacao),
+// separado do formulário geral, pra não ser apagado numa edição comum.
+function construirFichaDescricaoImplantacaoCard(implantacao) {
+  const podeEditar = USUARIO_PERFIL_ATUAL !== "visualizacao";
+  const card = document.createElement("section");
+  card.className = "ficha-painel ficha-descricao-implantacao";
+  const h = document.createElement("h3");
+  h.textContent = "Descrição da implantação";
+  card.appendChild(h);
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "ficha-descricao-implantacao-textarea";
+  textarea.rows = 4;
+  textarea.maxLength = 4000;
+  textarea.disabled = !podeEditar;
+  textarea.placeholder = "Descreva o que está sendo implantado para esse cliente...";
+  textarea.value = implantacao.descricao_implantacao || "";
+  card.appendChild(textarea);
+
+  if (podeEditar) {
+    const salvar = document.createElement("button");
+    salvar.type = "button";
+    salvar.className = "btn-secondary ficha-descricao-implantacao-salvar";
+    salvar.textContent = "Salvar";
+    salvar.addEventListener("click", async () => {
+      salvar.disabled = true;
+      try {
+        const r = await fetch(`/api/clientes/${implantacao.id}/descricao-implantacao`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ descricao_implantacao: textarea.value.trim() }),
+        });
+        const data = await parseJsonResponse(r);
+        if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
+        implantacao.descricao_implantacao = data.descricao_implantacao;
+        const noCache = implantacaoClientesCache.find((c) => c.id === implantacao.id);
+        if (noCache) noCache.descricao_implantacao = data.descricao_implantacao;
+      } catch (err) {
+        alert(`Erro ao salvar: ${String(err)}`);
+      } finally {
+        salvar.disabled = false;
+      }
+    });
+    card.appendChild(salvar);
+  }
+
+  return card;
 }
 
 function construirPainelObjetivosImplantacao() {

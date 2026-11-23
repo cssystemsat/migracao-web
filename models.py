@@ -187,6 +187,7 @@ class Cliente(Base):
 
     data_entrada: Mapped[str] = mapped_column(default="")
     objetivo: Mapped[str] = mapped_column(Text, default="")
+    descricao_implantacao: Mapped[str] = mapped_column(Text, default="")
     valor_contrato: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
 
     responsavel_usuario_id: Mapped[str | None] = mapped_column(

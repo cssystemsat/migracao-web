@@ -2571,6 +2571,16 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
 }
 .minha-conta-painel-tarefas .btn-primary { width: auto; padding: 5px 11px; margin-top: 0; font-size: 0.85rem; }
 .minha-conta-tarefas-lista { margin-top: 3px; }
+.minha-conta-tarefas-secao { margin-bottom: 14px; }
+.minha-conta-tarefas-secao h4 {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--cinza-700);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .minha-conta-link-concluidas {
   display: block;
   width: 100%;
@@ -3819,6 +3829,23 @@ input:disabled, select:disabled, input.input-travado {
 .ficha-painel:last-child { margin-bottom: 0; }
 .ficha-painel > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 15px; line-height: 20px; font-weight: 600; }
 .ficha-painel .info-item-valor { font-weight: 500; }
+.ficha-descricao-implantacao-textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  box-sizing: border-box;
+}
+.ficha-descricao-implantacao-salvar {
+  display: block;
+  width: auto;
+  margin: 0 0 0 auto;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}
 
 /* Ícone do título de "Atenção" — círculo rosa no mesmo espírito dos ícones
    dos cards de contato/alerta, só pra ancorar visualmente o card mais

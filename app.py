@@ -1968,6 +1968,7 @@ def _dados_cliente(data):
         "tem_implantacao": bool(data.get("tem_implantacao", True)),
         "data_entrada": str(data.get("data_entrada", "")).strip(),
         "objetivo": str(data.get("objetivo", "")).strip(),
+        "descricao_implantacao": str(data.get("descricao_implantacao", "")).strip(),
         "valor_contrato": valor_contrato,
         "csm": str(data.get("csm", "")).strip(),
         "etapa": etapa,
@@ -2069,6 +2070,11 @@ def editar_cliente(cliente_id):
     # edição comum (nome, objetivo...) resetaria o progresso pro Marco 1.
     dados["etapa"] = atual["etapa"]
     dados["marcos_concluidos"] = atual["marcos_concluidos"]
+    # Descrição da implantação só muda pelo endpoint dedicado (PUT
+    # .../descricao-implantacao, na aba Implantação da Ficha) — o formulário
+    # geral não manda esse campo, então sem isso qualquer edição comum
+    # apagaria o texto.
+    dados["descricao_implantacao"] = atual["descricao_implantacao"]
     mudancas = diff_campos(atual, dados, ROTULOS_CLIENTE)
     try:
         cliente = clientes_sql.atualizar_cliente(cliente_id, dados)
@@ -2207,6 +2213,27 @@ def salvar_marcos_cliente(cliente_id):
         concluido_por=campos.get("concluido_por", doc_atual_dict.get("concluido_por", "")),
         marcos_concluidos_em=concluidos_em, marcos_atualizado_em=hoje,
     )
+
+
+@app.route("/api/clientes/<int:cliente_id>/descricao-implantacao", methods=["PUT"])
+def salvar_descricao_implantacao_cliente(cliente_id):
+    """Texto livre da aba Implantação da Ficha — descreve o que está sendo
+    implantado para esse cliente. Separado do formulário geral (ver
+    editar_cliente) pra não ser sobrescrito por uma edição comum."""
+    data = request.get_json(force=True) or {}
+    descricao = str(data.get("descricao_implantacao", "")).strip()[:4000]
+    doc_atual_dict = clientes_sql.buscar_cliente_por_id(cliente_id)
+    if not doc_atual_dict:
+        return jsonify(ok=False, error="Cliente não encontrado."), 404
+    clientes_sql.atualizar_cliente(cliente_id, {"descricao_implantacao": descricao})
+    registrar_acao(
+        acao="editar", entidade_tipo="cliente", entidade_id=cliente_id,
+        entidade_nome=doc_atual_dict.get("cliente", ""),
+        titulo="Descrição da implantação atualizada",
+        cliente_id=cliente_id, idcentral=doc_atual_dict.get("idcentral", ""),
+        cliente_nome=doc_atual_dict.get("cliente", ""),
+    )
+    return jsonify(ok=True, descricao_implantacao=descricao)
 
 
 @app.route("/api/clientes/<int:cliente_id>/motivo-atraso", methods=["PUT"])
