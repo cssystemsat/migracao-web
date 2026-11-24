@@ -413,7 +413,25 @@ tenta GT06/Concox primeiro nesse formato de pacote).
 
 Mural interno de comunicados da equipe: posts, curtidas e comentários.
 Serve para avisos e alinhamentos que não cabem numa tarefa nem num cliente
-específico.
+específico. Publicação e comentário podem marcar outro usuário com `@`
+(autocomplete) — quem é marcado recebe notificação (ver "Notificações").
+
+## Notificações (sininho)
+
+Sem pop-up/toast — só um contador de não lidas no sininho da topbar; a
+lista completa aparece ao abrir o painel, e cada notificação é marcada como
+lida ao ser clicada (ou todas de uma vez, pelo botão "Marcar todas como
+lidas"). Gera notificação quando:
+
+- Alguém cria uma tarefa pra você (responsável).
+- Uma tarefa sua (responsável) está a 3 dias, a 1 dia, no dia do
+  vencimento, ou já passou do prazo sem estar concluída.
+- Um cliente seu (responsável/CSM) responde uma avaliação de NPS (Wootric).
+- Alguém te marca com `@` numa publicação ou comentário do Feed.
+- Alguém comenta ou curte uma publicação sua no Feed.
+
+Quem gera o evento nunca recebe notificação do próprio evento (ex.: criar
+tarefa pra si mesmo, curtir o próprio post).
 
 ## Minha conta / Gerenciar usuários
 

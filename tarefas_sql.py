@@ -48,6 +48,16 @@ def listar_minhas_e_criadas(usuario_id):
         return [_tarefa_para_dict(t) for t in tarefas]
 
 
+def listar_nao_concluidas():
+    """Usado pelo job de notificação de prazo (ver app.py) — varre todas as
+    tarefas abertas pra achar as que estão perto do vencimento ou atrasadas.
+    Tabela de tarefas é pequena (uso interno da equipe), não precisa de filtro
+    de data no SQL."""
+    with obter_sessao() as sessao:
+        tarefas = sessao.query(Tarefa).filter(Tarefa.concluida.is_(False)).all()
+        return [_tarefa_para_dict(t) for t in tarefas]
+
+
 def buscar_tarefa(tarefa_id):
     with obter_sessao() as sessao:
         t = sessao.get(Tarefa, tarefa_id)

@@ -50,7 +50,9 @@ def upsert_respostas(respostas):
     `wootric_api._normalizar_resposta` (wootric_id, idcentral, score, texto,
     email, criado_em_wootric). Ignora as sem idcentral (não dá pra achar o
     cliente — fica só fora da tabela, não é erro). Devolve
-    (novas, atualizadas, sem_idcentral).
+    (novas, atualizadas, sem_idcentral, novas_respostas) — a lista de
+    respostas novas serve pra quem chama notificar o CSM do cliente (ver
+    sincronizar_avaliacoes_wootric em app.py).
 
     Busca os existentes de uma vez só (1 SELECT com IN, não 1 por resposta)
     — na primeira sincronização (tabela vazia, até 1500 respostas de carga
@@ -59,10 +61,11 @@ def upsert_respostas(respostas):
     com_idcentral = [r for r in respostas if r["idcentral"]]
     sem_idcentral = len(respostas) - len(com_idcentral)
     if not com_idcentral:
-        return 0, 0, sem_idcentral
+        return 0, 0, sem_idcentral, []
 
     agora = datetime.now(timezone.utc)
     novas = atualizadas = 0
+    novas_respostas = []
     with obter_sessao() as sessao:
         ids = [r["wootric_id"] for r in com_idcentral]
         existentes = {
@@ -90,4 +93,5 @@ def upsert_respostas(respostas):
                     sincronizado_em=agora,
                 ))
                 novas += 1
-    return novas, atualizadas, sem_idcentral
+                novas_respostas.append(r)
+    return novas, atualizadas, sem_idcentral, novas_respostas

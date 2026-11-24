@@ -601,6 +601,7 @@ def estatisticas_dashboard_implantacao(data_de=None, data_ate=None):
     universal_total = 0
     universal_concluidos = 0
     universal_atrasados = 0
+    tempos_universal = []  # dias, só objetivo universal com concluido_em válido
 
     for objetivo in objetivos:
         criado_em = objetivo.criado_em.date() if objetivo.criado_em else None
@@ -612,6 +613,10 @@ def estatisticas_dashboard_implantacao(data_de=None, data_ate=None):
             universal_total += 1
             if objetivo.feito:
                 universal_concluidos += 1
+                if concluido_em and criado_em:
+                    dias = (concluido_em - criado_em).days
+                    if dias >= 0:
+                        tempos_universal.append(dias)
             if atrasado:
                 universal_atrasados += 1
             continue
@@ -712,6 +717,7 @@ def estatisticas_dashboard_implantacao(data_de=None, data_ate=None):
         "universal_total": universal_total,
         "universal_concluidos": universal_concluidos,
         "universal_atrasados": universal_atrasados,
+        "universal_tempo_medio_dias": round(sum(tempos_universal) / len(tempos_universal)) if tempos_universal else None,
     }
 
 

@@ -43,6 +43,7 @@ import feed_sql
 import impedimentos_sql
 import migracoes_sql
 import municipios_sql
+import notificacoes_sql
 import objetivos_sql
 import planilha_migracao
 import ssx_veiculos_sync
@@ -3395,7 +3396,14 @@ def sincronizar_avaliacoes_wootric():
     ultima = wootric_sql.data_mais_recente()
     cursor = (ultima.timestamp() - 300) if ultima else None
     respostas = wootric_api.buscar_respostas_desde(cursor)
-    novas, atualizadas, sem_idcentral = wootric_sql.upsert_respostas(respostas)
+    novas, atualizadas, sem_idcentral, novas_respostas = wootric_sql.upsert_respostas(respostas)
+    for resposta in novas_respostas:
+        cliente = clientes_sql.buscar_cliente_por_idcentral_wootric(resposta["idcentral"])
+        if cliente and cliente.get("responsavel_usuario_id"):
+            _notificar(
+                cliente["responsavel_usuario_id"], "nps",
+                entidade_tipo="cliente", entidade_id=cliente["id"],
+            )
     return {"buscadas": len(respostas), "novas": novas, "atualizadas": atualizadas, "sem_idcentral": sem_idcentral}
 
 
@@ -3441,6 +3449,118 @@ def listar_avaliacoes_wootric_cliente(cliente_id):
     _disparar_sync_wootric_em_segundo_plano()
     avaliacoes = wootric_sql.listar_por_idcentral(idcentral_busca)
     return jsonify(ok=True, avaliacoes=avaliacoes)
+
+
+# --- NOTIFICAÇÕES (sininho) ---
+# Sem pop-up de propósito (decisão do usuário) — só acumula no contador de
+# não lidas até a pessoa abrir o painel. `notificacoes_sql.criar_notificacao`
+# já ignora notificar quem gerou o próprio evento (ver lá), então os pontos
+# de disparo abaixo não precisam checar isso de novo.
+NOTIFICACAO_TEXTOS = {
+    "tarefa_criada": lambda n: f"{n} criou uma tarefa pra você",
+    "tarefa_prazo_3d": lambda n: "Uma tarefa sua vence em 3 dias",
+    "tarefa_prazo_1d": lambda n: "Uma tarefa sua vence em 1 dia",
+    "tarefa_prazo_hoje": lambda n: "Uma tarefa sua vence hoje",
+    "tarefa_atrasada": lambda n: "Uma tarefa sua está atrasada",
+    "nps": lambda n: "Seu cliente respondeu uma avaliação de NPS",
+    "mencao": lambda n: f"{n} te marcou numa publicação do Feed",
+    "comentario": lambda n: f"{n} comentou na sua publicação",
+    "curtida": lambda n: f"{n} curtiu sua publicação",
+}
+
+
+def _notificar(usuario_id, tipo, entidade_tipo="", entidade_id=None, origem_usuario_id=None, origem_usuario_nome=""):
+    texto = NOTIFICACAO_TEXTOS[tipo](origem_usuario_nome)
+    notificacoes_sql.criar_notificacao(
+        usuario_id, tipo, texto, entidade_tipo=entidade_tipo, entidade_id=entidade_id,
+        origem_usuario_id=origem_usuario_id, origem_usuario_nome=origem_usuario_nome,
+    )
+
+
+# Job de prazo de tarefa — mesmo padrão de throttle/thread de
+# _disparar_sync_wootric_em_segundo_plano (não bloqueia quem abriu a tela,
+# dispara a thread e devolve na hora; erro só atrasa pra próxima tentativa).
+_PRAZO_TAREFAS_INTERVALO_SEGUNDOS = 3600  # 1h — prazo é em dias, não precisa checar mais rápido
+_prazo_tarefas_estado = {"ultima_vez": 0.0, "em_andamento": False}
+_prazo_tarefas_lock = threading.Lock()
+
+_PRAZO_TAREFAS_LIMIARES = [
+    (3, "tarefa_prazo_3d"),
+    (1, "tarefa_prazo_1d"),
+    (0, "tarefa_prazo_hoje"),
+]
+
+
+def verificar_prazos_tarefas():
+    """Varre tarefas abertas e notifica o responsável quando o prazo está a
+    3 dias, 1 dia, no mesmo dia, ou já passou (atrasada). `ja_existe` evita
+    duplicar a cada vez que o job roda (ver docstring de models.Notificacao)."""
+    hoje = datetime.now(FUSO_BR).date()
+    for tarefa in tarefas_sql.listar_nao_concluidas():
+        if not _data_valida(tarefa["data_limite"]):
+            continue
+        prazo = datetime.strptime(tarefa["data_limite"], "%Y-%m-%d").date()
+        dias_restantes = (prazo - hoje).days
+        responsavel_id = tarefa["responsavel_id"]
+
+        if dias_restantes < 0:
+            tipo = "tarefa_atrasada"
+        else:
+            tipo = next((t for limite, t in _PRAZO_TAREFAS_LIMIARES if dias_restantes == limite), None)
+        if not tipo:
+            continue
+        if notificacoes_sql.ja_existe(responsavel_id, tipo, "tarefa", tarefa["id"]):
+            continue
+        _notificar(responsavel_id, tipo, entidade_tipo="tarefa", entidade_id=tarefa["id"])
+
+
+def _disparar_verificacao_prazos_em_segundo_plano():
+    def _rodar():
+        try:
+            verificar_prazos_tarefas()
+        finally:
+            with _prazo_tarefas_lock:
+                _prazo_tarefas_estado["em_andamento"] = False
+                _prazo_tarefas_estado["ultima_vez"] = time.time()
+
+    with _prazo_tarefas_lock:
+        if _prazo_tarefas_estado["em_andamento"]:
+            return
+        if time.time() - _prazo_tarefas_estado["ultima_vez"] < _PRAZO_TAREFAS_INTERVALO_SEGUNDOS:
+            return
+        _prazo_tarefas_estado["em_andamento"] = True
+    threading.Thread(target=_rodar, daemon=True).start()
+
+
+@app.route("/api/notificacoes", methods=["GET"])
+def listar_notificacoes():
+    usuario_id = session.get("app_usuario_id", "")
+    if not usuario_id:
+        return jsonify(ok=False, error="Não autenticado."), 401
+    _disparar_verificacao_prazos_em_segundo_plano()
+    somente_nao_lidas = request.args.get("somente_nao_lidas") == "1"
+    limite = min(max(int(request.args.get("limite", notificacoes_sql.NOTIFICACOES_PAGINA) or 0), 1), 100)
+    notificacoes = notificacoes_sql.listar(usuario_id, limite=limite, somente_nao_lidas=somente_nao_lidas)
+    total_nao_lidas = notificacoes_sql.contar_nao_lidas(usuario_id)
+    return jsonify(ok=True, notificacoes=notificacoes, total_nao_lidas=total_nao_lidas)
+
+
+@app.route("/api/notificacoes/<int:notificacao_id>/ler", methods=["POST"])
+def marcar_notificacao_lida(notificacao_id):
+    usuario_id = session.get("app_usuario_id", "")
+    if not usuario_id:
+        return jsonify(ok=False, error="Não autenticado."), 401
+    notificacoes_sql.marcar_lida(notificacao_id, usuario_id)
+    return jsonify(ok=True)
+
+
+@app.route("/api/notificacoes/ler-todas", methods=["POST"])
+def marcar_notificacoes_lidas():
+    usuario_id = session.get("app_usuario_id", "")
+    if not usuario_id:
+        return jsonify(ok=False, error="Não autenticado."), 401
+    notificacoes_sql.marcar_todas_lidas(usuario_id)
+    return jsonify(ok=True)
 
 
 # --- TAREFAS (vinculadas a um cliente, atribuídas a um usuário do app) ---
@@ -3548,6 +3668,10 @@ def criar_tarefa():
         entidade_nome=tarefa["titulo"], titulo="Tarefa criada",
         cliente_id=tarefa["cliente_id"] or None, idcentral=tarefa["idcentral"],
         cliente_nome=tarefa["cliente_nome"], tipo_historico="tarefa", tarefa_id=tarefa["id"],
+    )
+    _notificar(
+        tarefa["responsavel_id"], "tarefa_criada", entidade_tipo="tarefa", entidade_id=tarefa["id"],
+        origem_usuario_id=tarefa["criado_por"], origem_usuario_nome=tarefa["criado_por_nome"],
     )
     return jsonify(ok=True, tarefa=tarefa)
 
@@ -8405,6 +8529,23 @@ def _feed_texto_valido(data):
     return texto if texto and len(texto) <= FEED_TEXTO_MAX else None
 
 
+def _feed_notificar_mencionados(data, entidade_id, origem_usuario_id, origem_usuario_nome):
+    """`mencionados` vem do autocomplete do @ no Feed (lista de ids de
+    usuário escolhidos ao digitar, não um parse do texto livre — ver
+    static/script.js, attachMentionAutocomplete). Ids inválidos ou repetidos
+    são só ignorados, nunca erro — a publicação não deve falhar por isso."""
+    ids = data.get("mencionados") or []
+    if not isinstance(ids, list):
+        return
+    for usuario_id in dict.fromkeys(str(i).strip() for i in ids if str(i).strip()):
+        if not usuarios_sql.buscar_usuario_por_id(usuario_id):
+            continue
+        _notificar(
+            usuario_id, "mencao", entidade_tipo="post", entidade_id=entidade_id,
+            origem_usuario_id=origem_usuario_id, origem_usuario_nome=origem_usuario_nome,
+        )
+
+
 #  "autor_id" fixo (não é o id de nenhum Usuario real) — o post sai como
 # publicado por uma espécie de mascote do sistema, não pela própria pessoa
 # aniversariante, então só admin apaga (ver _feed_pode_excluir).
@@ -8455,6 +8596,17 @@ def listar_feed():
     return jsonify(ok=True, posts=posts)
 
 
+@app.route("/api/feed/<int:post_id>", methods=["GET"])
+def obter_post_feed(post_id):
+    """Pra abrir uma publicação específica a partir de uma notificação do
+    sininho quando ela não está entre as últimas carregadas na tela (ver
+    feedFocarPost em script.js)."""
+    post = feed_sql.buscar_post_completo(post_id, session.get("app_usuario_id", ""), _sou_admin())
+    if not post:
+        return jsonify(ok=False, error="Publicação não encontrada ou removida."), 404
+    return jsonify(ok=True, post=post)
+
+
 @app.route("/api/feed", methods=["POST"])
 @requer_operador
 def criar_post_feed():
@@ -8482,6 +8634,7 @@ def criar_post_feed():
         entidade_nome=texto[:80], titulo="Publicação no feed",
         cliente_id=cliente_id, cliente_nome=cliente_nome,
     )
+    _feed_notificar_mencionados(data, post["id"], post["autor_id"], post["autor_nome"])
     return jsonify(ok=True, post=post)
 
 
@@ -8506,9 +8659,15 @@ def excluir_post_feed(post_id):
 @app.route("/api/feed/<int:post_id>/curtir", methods=["POST"])
 @requer_operador
 def curtir_post_feed(post_id):
-    if not feed_sql.buscar_post(post_id):
+    post = feed_sql.buscar_post(post_id)
+    if not post:
         return jsonify(ok=False, error="Publicação não encontrada."), 404
     curtido, total = feed_sql.alternar_curtida(post_id, session.get("app_usuario_id", ""))
+    if curtido:  # só ao curtir, nunca ao descurtir
+        _notificar(
+            post["autor_id"], "curtida", entidade_tipo="post", entidade_id=post_id,
+            origem_usuario_id=session.get("app_usuario_id", ""), origem_usuario_nome=session.get("app_usuario_nome", ""),
+        )
     return jsonify(ok=True, curtido_por_mim=curtido, curtidas_total=total)
 
 
@@ -8527,13 +8686,18 @@ def criar_comentario_feed(post_id):
     texto = _feed_texto_valido(data)
     if texto is None:
         return jsonify(ok=False, error=f"Escreva o comentário (até {FEED_TEXTO_MAX} caracteres)."), 400
-    if not feed_sql.buscar_post(post_id):
+    post = feed_sql.buscar_post(post_id)
+    if not post:
         return jsonify(ok=False, error="Publicação não encontrada."), 404
 
-    comentario = feed_sql.criar_comentario(
-        post_id, texto, session.get("app_usuario_id", ""), session.get("app_usuario_nome", ""),
-    )
+    autor_id, autor_nome = session.get("app_usuario_id", ""), session.get("app_usuario_nome", "")
+    comentario = feed_sql.criar_comentario(post_id, texto, autor_id, autor_nome)
     comentario["pode_excluir"] = True  # quem comenta sempre pode excluir o próprio comentário
+    _notificar(
+        post["autor_id"], "comentario", entidade_tipo="post", entidade_id=post_id,
+        origem_usuario_id=autor_id, origem_usuario_nome=autor_nome,
+    )
+    _feed_notificar_mencionados(data, post_id, autor_id, autor_nome)
     return jsonify(ok=True, comentario=comentario)
 
 

@@ -721,3 +721,37 @@ class FeedComentario(Base):
     )
     autor_nome: Mapped[str] = mapped_column(default="")
     criado_em: Mapped[datetime] = mapped_column(default=_agora, index=True)
+
+
+class Notificacao(Base):
+    """Notificação do sininho (sem pop-up — só acumula até o usuário abrir o
+    painel). `entidade_tipo`/`entidade_id` são referência solta (mesmo padrão
+    de cliente_id/idcentral usado no resto do projeto) pra navegar ao clicar:
+    "tarefa" -> Minha Conta/Ficha, "post" -> Feed, "cliente" -> Ficha (NPS).
+
+    Sem UniqueConstraint de propósito — "comentario"/"curtida"/"mencao" podem
+    se repetir legitimamente pra mesma entidade (dois comentários diferentes
+    no mesmo post geram duas notificações pro autor). Só os tipos gerados por
+    job periódico (`tarefa_prazo_*`, `nps`) precisam de dedup, e isso é feito
+    no próprio job com um SELECT antes do INSERT (mesmo padrão de
+    upsert_respostas em wootric_sql.py), não em constraint de banco."""
+
+    __tablename__ = "notificacoes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[str] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
+
+    # "tarefa_criada" | "tarefa_prazo_3d" | "tarefa_prazo_1d" | "tarefa_prazo_hoje" |
+    # "tarefa_atrasada" | "nps" | "mencao" | "comentario" | "curtida"
+    tipo: Mapped[str] = mapped_column()
+    texto: Mapped[str] = mapped_column()
+
+    entidade_tipo: Mapped[str] = mapped_column(default="")  # "tarefa" | "post" | "cliente"
+    entidade_id: Mapped[int | None] = mapped_column(nullable=True)
+
+    # Quem gerou a notificação (null nos tipos automáticos: prazo, NPS).
+    origem_usuario_id: Mapped[str | None] = mapped_column(nullable=True)
+    origem_usuario_nome: Mapped[str] = mapped_column(default="")
+
+    lida: Mapped[bool] = mapped_column(default=False, index=True)
+    criado_em: Mapped[datetime] = mapped_column(default=_agora, index=True)

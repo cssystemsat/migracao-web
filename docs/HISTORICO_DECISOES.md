@@ -6,6 +6,21 @@
 > e do histórico de commits disponíveis — não é exaustivo; complementar
 > sempre que uma decisão permanente for tomada.
 
+## Notificações do sininho — sem pop-up (2026-11-24)
+
+Decisão explícita do usuário: notificações (tarefa criada, prazo de tarefa,
+NPS novo, @ menção/comentário/curtida no Feed) só acumulam no contador do
+sininho e aparecem na lista ao abrir o painel — nunca em pop-up/toast. Ver
+regra completa em `docs/DOCUMENTACAO_FUNCIONAL.md`.
+
+Limiares de prazo de tarefa definidos pelo usuário: notifica a 3 dias, a 1
+dia, no dia do vencimento e quando a tarefa já está atrasada (uma
+notificação por limiar, não repete a cada vez que o job roda).
+
+@ menção usa autocomplete (dropdown de usuários ao digitar `@`, reaproveita
+`/api/app-usuarios/opcoes`) em vez de parse de texto livre — decisão
+explícita pra evitar nome ambíguo/erro de digitação não notificar ninguém.
+
 ## Unificação do cadastro de cliente (Implantação + Migração)
 
 Antes: clientes em implantação e clientes em migração viviam em coleções
@@ -82,6 +97,25 @@ Decisões explícitas confirmadas com a usuária:
   `universal DESC, ordem, id` (não dá pra confiar só em `ordem=0` porque
   "Salvar objetivos" reatribui `ordem` pela posição que o front mandou,
   sem tratamento especial pro universal).
+
+## Reorganização dos KPIs de Objetivos no Dashboard de Implantação (2026-11-24)
+
+No card "Objetivos de Implantação — tempo e duração" do Dashboard de
+Implantação: os KPIs do objetivo universal "Implantação" (`universal=True`,
+ver seção acima) passaram a vir **primeiro**, antes dos KPIs dos objetivos
+específicos — são "Tempo médio pra implantação", "Clientes com objetivo
+concluído" e "Clientes com objetivo atrasado". O tempo médio é novo
+(`universal_tempo_medio_dias` em `objetivos_sql.estatisticas_dashboard_implantacao`),
+calculado do mesmo jeito que o tempo médio dos objetivos específicos
+(`concluido_em - criado_em`, só objetivos `feito` com as duas datas), mas
+isolado do cálculo dos específicos — mantém a separação já decidida entre
+objetivo universal e objetivos específicos.
+
+Nos KPIs dos objetivos específicos (abaixo do bloco do universal): "Objetivos
+concluídos" deixou de mostrar contagem ("2 de 3") e passou a mostrar
+porcentagem; "Tempo mediano de conclusão" foi removido (duplicava "Tempo
+médio de conclusão"); "Clientes com objetivo cadastrado" foi removido do
+card (pedido explícito da usuária, sem substituto).
 
 ## Impedimentos de objetivo (Fase 2 do plano de ampliação, 2026-11-10)
 

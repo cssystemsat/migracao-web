@@ -134,6 +134,19 @@ def buscar_cliente_por_idcentral(idcentral):
         return _cliente_para_dict(c) if c else None
 
 
+def buscar_cliente_por_idcentral_wootric(idcentral_resposta):
+    """Caminho inverso de `listar_avaliacoes_wootric_cliente` (que busca na
+    Wootric por `codigo_idcentral or idcentral`) — aqui a Wootric já mandou o
+    idcentral da resposta, e precisamos achar de volta o cliente: tenta por
+    `codigo_idcentral` primeiro (é o valor usado de fato pra consultar a
+    Wootric quando preenchido), senão por `idcentral`."""
+    with obter_sessao_leitura() as sessao:
+        c = sessao.query(Cliente).filter(Cliente.codigo_idcentral == idcentral_resposta).first()
+        if not c:
+            c = sessao.query(Cliente).filter(Cliente.idcentral == idcentral_resposta).first()
+        return _cliente_para_dict(c) if c else None
+
+
 def idcentral_em_uso(idcentral, excluir_id=None):
     with obter_sessao_leitura() as sessao:
         consulta = sessao.query(Cliente.id).filter(Cliente.idcentral == idcentral)

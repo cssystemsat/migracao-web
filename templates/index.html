@@ -176,9 +176,19 @@
       <button type="button" class="topbar-icone-btn" id="topbar-tema-toggle" title="Alternar tema escuro" aria-label="Alternar tema escuro">
         <span class="material-symbols-outlined" id="topbar-tema-icone">dark_mode</span>
       </button>
-      <button type="button" class="topbar-icone-btn" id="topbar-notificacoes" title="Notificações (em breve)" aria-label="Notificações" disabled>
-        <span class="material-symbols-outlined">notifications</span>
-      </button>
+      <div class="notif-menu">
+        <button type="button" class="topbar-icone-btn" id="topbar-notificacoes" title="Notificações" aria-label="Notificações">
+          <span class="material-symbols-outlined">notifications</span>
+          <span id="notif-badge" class="notif-badge hidden">0</span>
+        </button>
+        <div id="notif-dropdown" class="app-menu-dropdown notif-dropdown hidden">
+          <div class="notif-dropdown-topo">
+            <span>Notificações</span>
+            <button type="button" id="notif-ler-todas" class="notif-ler-todas">Marcar todas como lidas</button>
+          </div>
+          <div id="notif-lista" class="notif-lista"></div>
+        </div>
+      </div>
       <span class="topbar-divisor"></span>
       <div class="app-usuario-menu">
         <button type="button" id="btn-app-menu" class="topbar-usuario-btn" title="Perfil e configurações">
@@ -325,10 +335,28 @@
 
         <div class="dashboard-insights">
           <div class="insight-card">
-            <h3>Objetivos de Implantação — tempo e duração</h3>
+            <h3>Objetivos</h3>
+            <div class="di-objetivo-universal">
+              <h4 class="di-ranking-titulo">Objetivo "Implantação"</h4>
+              <div class="di-objetivos-resumo">
+                <div class="di-objetivos-resumo-item">
+                  <span class="di-objetivos-resumo-label">Tempo médio pra implantação</span>
+                  <span class="di-objetivos-resumo-valor" id="di-universal-tempo-medio">–</span>
+                </div>
+                <div class="di-objetivos-resumo-item">
+                  <span class="di-objetivos-resumo-label">Clientes com objetivo concluído</span>
+                  <span class="di-objetivos-resumo-valor" id="di-universal-concluidos">–</span>
+                </div>
+                <div class="di-objetivos-resumo-item">
+                  <span class="di-objetivos-resumo-label">Clientes com objetivo atrasado</span>
+                  <span class="di-objetivos-resumo-valor" id="di-universal-atrasados">–</span>
+                </div>
+              </div>
+            </div>
+            <h4 class="di-ranking-titulo">Objetivos Gerais</h4>
             <div class="di-objetivos-resumo">
               <div class="di-objetivos-resumo-item">
-                <span class="di-objetivos-resumo-label">Objetivos concluídos</span>
+                <span class="di-objetivos-resumo-label">% de objetivos concluídos</span>
                 <span class="di-objetivos-resumo-valor" id="di-objetivos-concluidos">–</span>
               </div>
               <div class="di-objetivos-resumo-item">
@@ -336,32 +364,11 @@
                 <span class="di-objetivos-resumo-valor" id="di-objetivos-tempo-medio">–</span>
               </div>
               <div class="di-objetivos-resumo-item">
-                <span class="di-objetivos-resumo-label">Tempo mediano de conclusão</span>
-                <span class="di-objetivos-resumo-valor" id="di-objetivos-tempo-mediano">–</span>
-              </div>
-              <div class="di-objetivos-resumo-item">
                 <span class="di-objetivos-resumo-label">Progresso médio por cliente</span>
                 <span class="di-objetivos-resumo-valor" id="di-objetivos-progresso-medio">–</span>
               </div>
-              <div class="di-objetivos-resumo-item">
-                <span class="di-objetivos-resumo-label">Clientes com objetivo cadastrado</span>
-                <span class="di-objetivos-resumo-valor" id="di-objetivos-clientes-com-objetivo">–</span>
-              </div>
             </div>
             <p class="placeholder di-objetivos-aviso-legado hidden" id="di-objetivos-aviso-legado"></p>
-            <div class="di-objetivo-universal">
-              <h4 class="di-ranking-titulo">Objetivo "Implantação"</h4>
-              <div class="di-objetivos-resumo">
-                <div class="di-objetivos-resumo-item">
-                  <span class="di-objetivos-resumo-label">Concluído</span>
-                  <span class="di-objetivos-resumo-valor" id="di-universal-concluidos">–</span>
-                </div>
-                <div class="di-objetivos-resumo-item">
-                  <span class="di-objetivos-resumo-label">Atrasados</span>
-                  <span class="di-objetivos-resumo-valor" id="di-universal-atrasados">–</span>
-                </div>
-              </div>
-            </div>
             <h4 class="di-ranking-titulo">Ranking dos objetivos mais recorrentes</h4>
             <div id="di-ranking-objetivos" class="di-ranking"></div>
             <h4 class="di-ranking-titulo">Objetivos com maior tempo médio de conclusão</h4>
@@ -2044,7 +2051,9 @@
         </div>
         <div class="feed-coluna">
           <form id="feed-composer" class="feed-composer">
-            <textarea id="feed-texto" rows="3" maxlength="2000" placeholder="O que está acontecendo?"></textarea>
+            <div class="mention-campo">
+              <textarea id="feed-texto" rows="3" maxlength="2000" placeholder="O que está acontecendo? Use @ pra marcar alguém"></textarea>
+            </div>
             <div class="feed-composer-acoes">
               <select id="feed-cliente" title="Vincular a um cliente">
                 <option value="">Geral (sem cliente)</option>
@@ -2794,6 +2803,21 @@
           </label>
           <button type="submit" id="btn-salvar-ficha-chat-evento" class="btn-primary">Adicionar acontecimento</button>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal "Tarefas concluídas" do painel de Tarefas da Ficha do cliente —
+       mesmo padrão da Central de tarefas (overlay-central-tarefas) da Minha
+       Conta, só que já filtrado pras concluídas desse cliente. -->
+  <div id="overlay-ficha-tarefas-concluidas" class="overlay hidden">
+    <div class="modal modal-grande">
+      <div class="modal-header">
+        <h3>Tarefas concluídas</h3>
+        <button id="ficha-tarefas-concluidas-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div id="ficha-tarefas-concluidas-lista"></div>
       </div>
     </div>
   </div>

@@ -19246,6 +19246,112 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// --- NOTIFICAÇÕES (sininho) ---
+// Sem pop-up (decisão do usuário) — só o contador de não lidas no botão e a
+// lista ao abrir o painel. Atualiza por polling (mesmo padrão de status de
+// job longo já usado no resto do projeto), nunca em tempo real.
+const NOTIF_POLL_INTERVALO_MS = 60000;
+const btnNotificacoes = el("topbar-notificacoes");
+const notifDropdown = el("notif-dropdown");
+const notifBadge = el("notif-badge");
+const notifLista = el("notif-lista");
+const btnNotifLerTodas = el("notif-ler-todas");
+
+const NOTIF_ENTIDADE_TELA = { tarefa: "minha-conta", post: "feed" };
+
+function notifFormatarData(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function notifAtualizarBadge(total) {
+  notifBadge.textContent = total > 99 ? "99+" : String(total);
+  notifBadge.classList.toggle("hidden", !total);
+}
+
+async function notifPolling() {
+  try {
+    const r = await fetch("/api/notificacoes?limite=20");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return;
+    notifAtualizarBadge(data.total_nao_lidas || 0);
+    notifRenderizarLista(data.notificacoes || []);
+  } catch (e) {
+    // Silencioso de propósito — sininho não deve incomodar com erro de rede.
+  }
+}
+
+function notifRenderizarLista(notificacoes) {
+  notifLista.innerHTML = "";
+  if (!notificacoes.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "notif-vazio";
+    vazio.textContent = "Nenhuma notificação ainda.";
+    notifLista.appendChild(vazio);
+    return;
+  }
+  notificacoes.forEach((n) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "notif-item" + (n.lida ? "" : " notif-item-nao-lida");
+    const dot = document.createElement("span");
+    dot.className = "notif-item-dot";
+    const corpo = document.createElement("span");
+    corpo.className = "notif-item-corpo";
+    const texto = document.createElement("span");
+    texto.className = "notif-item-texto";
+    texto.textContent = n.texto;
+    const quando = document.createElement("span");
+    quando.className = "notif-item-quando";
+    quando.textContent = notifFormatarData(n.criado_em);
+    corpo.appendChild(texto);
+    corpo.appendChild(quando);
+    item.appendChild(dot);
+    item.appendChild(corpo);
+    item.addEventListener("click", () => notifClicarItem(n));
+    notifLista.appendChild(item);
+  });
+}
+
+async function notifClicarItem(n) {
+  notifDropdown.classList.add("hidden");
+  if (!n.lida) {
+    try { await fetch(`/api/notificacoes/${encodeURIComponent(n.id)}/ler`, { method: "POST" }); } catch (e) { /* não bloqueia navegação */ }
+    notifPolling();
+  }
+  if (n.entidade_tipo === "post" && n.entidade_id) {
+    // Leva direto pra publicação em questão (não só pra tela do Feed) — pede
+    // comentários abertos quando o motivo foi comentário/menção, já que é
+    // provavelmente o que a pessoa quer ver.
+    feedIrParaPost(n.entidade_id, n.tipo === "comentario" || n.tipo === "mencao");
+    return;
+  }
+  const tela = NOTIF_ENTIDADE_TELA[n.entidade_tipo];
+  if (tela) irParaTela(tela);
+}
+
+btnNotificacoes.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const abrindo = notifDropdown.classList.contains("hidden");
+  notifDropdown.classList.toggle("hidden");
+  if (abrindo) notifPolling();
+});
+document.addEventListener("click", (e) => {
+  if (!notifDropdown.classList.contains("hidden") && !notifDropdown.contains(e.target) && e.target !== btnNotificacoes) {
+    notifDropdown.classList.add("hidden");
+  }
+});
+btnNotifLerTodas.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  try {
+    await fetch("/api/notificacoes/ler-todas", { method: "POST" });
+    notifPolling();
+  } catch (err) { /* ignora — próximo polling tenta de novo */ }
+});
+
+notifPolling();
+setInterval(notifPolling, NOTIF_POLL_INTERVALO_MS);
+
 const btnConfiguracoes = el("btn-configuracoes");
 if (btnConfiguracoes) {
   btnConfiguracoes.addEventListener("click", () => {
@@ -20440,6 +20546,7 @@ const topbarTitulo = el("topbar-titulo");
 const TITULO_TOPBAR_POR_TELA = {
   dashboard: "Dashboard",
   feed: "Feed",
+  "dashboard-implantacao": "Dashboard de Implantação",
   implantacao: "Controle de Implantação",
   migracao: "Controle de Migração",
   ferramentas: "Ferramentas Auxiliares",
@@ -20607,6 +20714,101 @@ function irParaFicha(idcentral) {
   irParaTela("ficha", { idcentral, origem, sub: "geral" });
 }
 
+// --- AUTOCOMPLETE DE @MENÇÃO (Feed: composer e comentário) ---
+// Ao digitar "@", mostra um dropdown com usuários (reaproveita
+// /api/app-usuarios/opcoes, já usado pros selects de responsável). Escolher
+// uma opção insere "@Nome Completo " no texto e guarda o id numa Map do
+// próprio elemento — no envio, `mentionColetarIds` re-varre o texto final e
+// só manda o id de quem o texto ainda menciona de verdade (editar/apagar o
+// @nome não deixa notificação fantasma).
+let mentionUsuariosCache = null;
+async function mentionCarregarUsuarios() {
+  if (mentionUsuariosCache) return mentionUsuariosCache;
+  try {
+    const r = await fetch("/api/app-usuarios/opcoes");
+    const data = await parseJsonResponse(r);
+    mentionUsuariosCache = data.ok ? (data.usuarios || []) : [];
+  } catch (e) {
+    mentionUsuariosCache = [];
+  }
+  return mentionUsuariosCache;
+}
+
+const mentionMapaPorCampo = new WeakMap(); // textarea/input -> Map("@Nome Completo " -> usuarioId)
+
+function mentionColetarIds(campo) {
+  const mapa = mentionMapaPorCampo.get(campo);
+  if (!mapa) return [];
+  const texto = campo.value || "";
+  const ids = [];
+  mapa.forEach((id, chave) => { if (texto.includes(chave)) ids.push(id); });
+  return [...new Set(ids)];
+}
+
+function attachMentionAutocomplete(campo) {
+  mentionMapaPorCampo.set(campo, new Map());
+  const wrapper = campo.closest(".mention-campo") || campo.parentElement;
+  const dropdown = document.createElement("div");
+  dropdown.className = "mention-dropdown hidden";
+  wrapper.appendChild(dropdown);
+
+  let ativo = -1;
+  let opcoesAtuais = [];
+
+  function fechar() {
+    dropdown.classList.add("hidden");
+    dropdown.innerHTML = "";
+    ativo = -1;
+    opcoesAtuais = [];
+  }
+
+  function escolher(usuario) {
+    const inicioArroba = campo.value.lastIndexOf("@", campo.selectionStart - 1);
+    if (inicioArroba === -1) return fechar();
+    const nomeInserido = `@${usuario.nome} `;
+    campo.value = campo.value.slice(0, inicioArroba) + nomeInserido + campo.value.slice(campo.selectionStart);
+    mentionMapaPorCampo.get(campo).set(nomeInserido, usuario.id);
+    const posicao = inicioArroba + nomeInserido.length;
+    campo.setSelectionRange(posicao, posicao);
+    campo.focus();
+    fechar();
+  }
+
+  async function atualizar() {
+    const antesDoCursor = campo.value.slice(0, campo.selectionStart);
+    const match = antesDoCursor.match(/@([^\s@]{0,40})$/);
+    if (!match) return fechar();
+    const termo = match[1].toLowerCase();
+    const usuarios = await mentionCarregarUsuarios();
+    opcoesAtuais = usuarios.filter((u) => u.nome.toLowerCase().includes(termo)).slice(0, 8);
+    if (!opcoesAtuais.length) return fechar();
+    ativo = 0;
+    dropdown.innerHTML = "";
+    opcoesAtuais.forEach((u, i) => {
+      const opcao = document.createElement("button");
+      opcao.type = "button";
+      opcao.className = "mention-opcao" + (i === 0 ? " mention-opcao-ativa" : "");
+      opcao.textContent = u.nome;
+      opcao.addEventListener("mousedown", (e) => { e.preventDefault(); escolher(u); });
+      dropdown.appendChild(opcao);
+    });
+    dropdown.style.top = `${campo.offsetTop + campo.offsetHeight}px`;
+    dropdown.classList.remove("hidden");
+  }
+
+  campo.addEventListener("input", atualizar);
+  campo.addEventListener("blur", () => setTimeout(fechar, 120));
+  campo.addEventListener("keydown", (e) => {
+    if (dropdown.classList.contains("hidden") || !opcoesAtuais.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); ativo = (ativo + 1) % opcoesAtuais.length; }
+    else if (e.key === "ArrowUp") { e.preventDefault(); ativo = (ativo - 1 + opcoesAtuais.length) % opcoesAtuais.length; }
+    else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); escolher(opcoesAtuais[ativo]); return; }
+    else if (e.key === "Escape") { fechar(); return; }
+    else return;
+    dropdown.querySelectorAll(".mention-opcao").forEach((el, i) => el.classList.toggle("mention-opcao-ativa", i === ativo));
+  });
+}
+
 // --- FEED (publicações da equipe, estilo comunidade) ---
 // Tudo é montado com createElement/textContent (nunca innerHTML com texto de
 // usuário). Sem atualização automática: cada leitura do feed custa leituras no
@@ -20625,6 +20827,15 @@ const feedMais = el("feed-mais");
 let feedCursor = null;
 let feedCarregando = false;
 const feedComentariosAbertos = new Set();
+attachMentionAutocomplete(feedTexto);
+
+// Publicação a destacar depois do próximo carregamento do Feed (ver
+// feedIrParaPost, chamado ao clicar numa notificação de post/comentário/
+// curtida/menção) — setado antes de `irParaTela("feed")`, consumido no fim
+// de `carregarFeed` (que é sempre chamado de novo ao entrar na tela,
+// mesmo se já era a tela atual, então funciona clicando em notificações
+// seguidas sem sair do Feed).
+let feedPostParaFocar = null;
 
 function feedMostrarErro(msg) {
   feedErro.textContent = msg || "";
@@ -20707,7 +20918,7 @@ function feedCriarCard(post) {
   btnCurtir.className = "feed-acao";
   const btnComentar = document.createElement("button");
   btnComentar.type = "button";
-  btnComentar.className = "feed-acao";
+  btnComentar.className = "feed-acao feed-acao-comentar";
   acoes.append(btnCurtir, btnComentar);
 
   const areaComentarios = document.createElement("div");
@@ -20767,17 +20978,21 @@ function feedAbrirComentarios(post, area, pintarAcoes) {
     lista.className = "feed-comentarios-lista";
     const form = document.createElement("form");
     form.className = "feed-comentario-form";
+    const campoWrapper = document.createElement("div");
+    campoWrapper.className = "mention-campo feed-comentario-campo";
     const input = document.createElement("input");
     input.type = "text";
     input.maxLength = FEED_TEXTO_MAX_CLIENTE;
-    input.placeholder = "Escreva um comentário…";
+    input.placeholder = "Escreva um comentário… (use @ pra marcar alguém)";
     input.className = "feed-comentario-input";
+    campoWrapper.appendChild(input);
     const enviar = document.createElement("button");
     enviar.type = "submit";
     enviar.className = "btn-primary feed-comentario-enviar";
     enviar.textContent = "Enviar";
-    form.append(input, enviar);
+    form.append(campoWrapper, enviar);
     area.append(lista, form);
+    attachMentionAutocomplete(input);
 
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
@@ -20786,7 +21001,8 @@ function feedAbrirComentarios(post, area, pintarAcoes) {
       enviar.disabled = true;
       try {
         await feedRequisicao(`/api/feed/${encodeURIComponent(post.id)}/comentarios`, {
-          method: "POST", headers: feedJsonHeaders(), body: JSON.stringify({ texto }),
+          method: "POST", headers: feedJsonHeaders(),
+          body: JSON.stringify({ texto, mencionados: mentionColetarIds(input) }),
         });
         input.value = "";
         post.comentarios_total += 1;
@@ -20911,6 +21127,42 @@ async function carregarFeed() {
   feedCarregarClientes();
   feedCursor = null;
   await feedCarregar({ reiniciar: true });
+  if (feedPostParaFocar) {
+    const alvo = feedPostParaFocar;
+    feedPostParaFocar = null;
+    await feedFocarPost(alvo.postId, alvo.abrirComentarios);
+  }
+}
+
+// Chamado ao clicar numa notificação de publicação (ver notifClicarItem).
+function feedIrParaPost(postId, abrirComentarios) {
+  feedPostParaFocar = { postId, abrirComentarios };
+  irParaTela("feed");
+}
+
+async function feedFocarPost(postId, abrirComentarios) {
+  let card = feedLista.querySelector(`.feed-post[data-id="${postId}"]`);
+  if (!card) {
+    // Não está entre os últimos carregados — busca só essa publicação e
+    // encaixa no topo da lista (ver GET /api/feed/<id>, feed_sql.buscar_post_completo).
+    try {
+      const data = await feedRequisicao(`/api/feed/${encodeURIComponent(postId)}`);
+      card = feedCriarCard(data.post);
+      const vazio = feedLista.querySelector(".feed-vazio");
+      if (vazio) vazio.remove();
+      feedLista.prepend(card);
+    } catch (e) {
+      feedMostrarErro("Não foi possível abrir essa publicação — pode ter sido removida.");
+      return;
+    }
+  }
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  card.classList.add("feed-post-destacado");
+  setTimeout(() => card.classList.remove("feed-post-destacado"), 2200);
+  const areaComentarios = card.querySelector(".feed-comentarios");
+  if (abrirComentarios && areaComentarios && areaComentarios.classList.contains("hidden")) {
+    card.querySelector(".feed-acao-comentar")?.click();
+  }
 }
 
 feedComposer.addEventListener("submit", async (ev) => {
@@ -20924,7 +21176,7 @@ feedComposer.addEventListener("submit", async (ev) => {
   try {
     const data = await feedRequisicao("/api/feed", {
       method: "POST", headers: feedJsonHeaders(),
-      body: JSON.stringify({ texto, cliente_id: feedCliente.value }),
+      body: JSON.stringify({ texto, cliente_id: feedCliente.value, mencionados: mentionColetarIds(feedTexto) }),
     });
     feedTexto.value = "";
     feedMostrarErro("");
@@ -21629,22 +21881,32 @@ function diRenderImpedimentosDashboard(impedimentos) {
     const maiorCategoria = Math.max(...categorias.map((c) => c.total), 1);
     categorias.forEach((cat, indice) => {
       const linha = document.createElement("div");
-      linha.className = "di-ranking-linha di-ranking-linha-simples di-ranking-linha-clicavel";
+      linha.className = "di-ranking-linha di-ranking-linha-clicavel";
       const rotuloCat = `${cat.categoria} (${RESPONSABILIDADE_IMPEDIMENTO_ROTULOS[cat.responsabilidade] || cat.responsabilidade})`;
       linha.addEventListener("click", () => abrirModalImpedimentosFiltrados({ responsabilidade: cat.responsabilidade, categoria: cat.categoria }, rotuloCat));
+
+      const posicao = document.createElement("span");
+      posicao.className = "di-ranking-posicao";
+      posicao.textContent = `#${indice + 1}`;
+
+      const corpo = document.createElement("span");
+      corpo.className = "di-ranking-corpo";
       const nome = document.createElement("span");
       nome.className = "di-ranking-nome";
-      nome.textContent = `#${indice + 1} ${cat.categoria} (${RESPONSABILIDADE_IMPEDIMENTO_ROTULOS[cat.responsabilidade] || cat.responsabilidade})`;
+      nome.textContent = `${cat.categoria} (${RESPONSABILIDADE_IMPEDIMENTO_ROTULOS[cat.responsabilidade] || cat.responsabilidade})`;
       const barraWrap = document.createElement("span");
       barraWrap.className = "di-ranking-barra";
       const barraFill = document.createElement("span");
       barraFill.className = "di-ranking-barra-fill";
       barraFill.style.width = `${(cat.total / maiorCategoria) * 100}%`;
       barraWrap.appendChild(barraFill);
+      corpo.append(nome, barraWrap);
+
       const valor = document.createElement("span");
       valor.className = "di-ranking-valor";
       valor.textContent = `${cat.total}`;
-      linha.append(nome, barraWrap, valor);
+
+      linha.append(posicao, corpo, valor);
       porCategoria.appendChild(linha);
     });
   }
@@ -21863,13 +22125,13 @@ async function carregarDashboardImplantacao() {
     el("tile-di-tempo-medio-implantacao-amostra").textContent = data.tempo_medio_implantacao_amostra
       ? `${data.tempo_medio_implantacao_amostra} cliente${data.tempo_medio_implantacao_amostra === 1 ? "" : "s"}` : "";
 
-    el("di-objetivos-concluidos").textContent = `${data.total_objetivos_concluidos} de ${data.total_objetivos}`;
+    const pctObjetivosConcluidos = data.total_objetivos
+      ? Math.round((data.total_objetivos_concluidos / data.total_objetivos) * 100)
+      : 0;
+    el("di-objetivos-concluidos").textContent = `${pctObjetivosConcluidos}%`;
     el("di-objetivos-tempo-medio").textContent = data.tempo_medio_conclusao_objetivo_dias != null
       ? `${data.tempo_medio_conclusao_objetivo_dias} dias` : "–";
-    el("di-objetivos-tempo-mediano").textContent = data.tempo_mediano_conclusao_objetivo_dias != null
-      ? `${data.tempo_mediano_conclusao_objetivo_dias} dias` : "–";
     el("di-objetivos-progresso-medio").textContent = `${data.progresso_medio_por_cliente}%`;
-    el("di-objetivos-clientes-com-objetivo").textContent = `${data.clientes_com_objetivo} de ${data.total_implantacao}`;
 
     const avisoLegado = el("di-objetivos-aviso-legado");
     if (data.total_objetivos_sem_data_retroativa > 0) {
@@ -21887,6 +22149,8 @@ async function carregarDashboardImplantacao() {
 
     diRenderRanking(el("di-ranking-objetivos"), data.ranking_objetivos, "Nenhum objetivo cadastrado nos clientes de Implantação ainda.");
     diRenderRanking(el("di-ranking-maior-tempo"), data.objetivos_maior_tempo, "Ainda não há objetivos com tempo de conclusão suficiente pra calcular.", true);
+    el("di-universal-tempo-medio").textContent = data.universal_tempo_medio_dias != null
+      ? `${data.universal_tempo_medio_dias} dias` : "–";
     el("di-universal-concluidos").textContent = `${data.universal_concluidos ?? 0} de ${data.universal_total ?? 0}`;
     el("di-universal-atrasados").textContent = data.universal_atrasados ?? 0;
 
@@ -22697,10 +22961,12 @@ function fichaChamadosConcluidosGeralAtuais(clienteId) {
 // pedido; "erro" = pedido mas falhou; senão a lista de avaliações.
 let fichaWootricAtual = null;
 let fichaWootricClienteId = null; // de qual cliente é fichaWootricAtual, pra não misturar com outro aberto em seguida
+let fichaWootricPagina = 0; // página atual do card "Avaliações NPS" da Visão Geral, 0-indexada
 
 async function carregarWootricFicha(clienteId) {
   fichaWootricAtual = null;
   fichaWootricClienteId = clienteId;
+  fichaWootricPagina = 0;
   try {
     const r = await fetch(`/api/clientes/${clienteId}/wootric`);
     const data = await parseJsonResponse(r);
@@ -23419,6 +23685,8 @@ function construirFichaChamadosAbertosCard(chamadosState) {
 
 // Faixa de cor do score NPS: 0-6 detrator, 7-8 neutro, 9-10 promotor (escala
 // oficial Wootric/NPS).
+const FICHA_WOOTRIC_POR_PAGINA = 5;
+
 function classeScoreWootric(score) {
   if (score <= 6) return "wootric-score-detrator";
   if (score <= 8) return "wootric-score-neutro";
@@ -23484,10 +23752,44 @@ function construirFichaWootricCard(wootricState) {
   if (!wootricState.length) return null;
   h.textContent = `Avaliações NPS (${wootricState.length})`;
   card.appendChild(h);
+
+  const totalPaginas = Math.max(1, Math.ceil(wootricState.length / FICHA_WOOTRIC_POR_PAGINA));
+  fichaWootricPagina = Math.min(Math.max(0, fichaWootricPagina), totalPaginas - 1);
+  const inicio = fichaWootricPagina * FICHA_WOOTRIC_POR_PAGINA;
+  const pagina = wootricState.slice(inicio, inicio + FICHA_WOOTRIC_POR_PAGINA);
+
   const lista = document.createElement("div");
   lista.className = "ficha-wootric-lista";
-  wootricState.forEach((a) => lista.appendChild(construirLinhaAvaliacaoWootric(a)));
+  pagina.forEach((a) => lista.appendChild(construirLinhaAvaliacaoWootric(a)));
   card.appendChild(lista);
+
+  if (totalPaginas > 1) {
+    const paginacao = document.createElement("div");
+    paginacao.className = "conversor-edicao-paginacao";
+    const anterior = document.createElement("button");
+    anterior.className = "btn-secondary";
+    anterior.textContent = "← Anterior";
+    anterior.disabled = fichaWootricPagina === 0;
+    anterior.addEventListener("click", () => {
+      fichaWootricPagina -= 1;
+      mostrarFichaAba(fichaAbaAtual);
+    });
+    paginacao.appendChild(anterior);
+    const info = document.createElement("span");
+    info.textContent = `Página ${fichaWootricPagina + 1} de ${totalPaginas}`;
+    paginacao.appendChild(info);
+    const proxima = document.createElement("button");
+    proxima.className = "btn-secondary";
+    proxima.textContent = "Próxima →";
+    proxima.disabled = fichaWootricPagina + 1 >= totalPaginas;
+    proxima.addEventListener("click", () => {
+      fichaWootricPagina += 1;
+      mostrarFichaAba(fichaAbaAtual);
+    });
+    paginacao.appendChild(proxima);
+    card.appendChild(paginacao);
+  }
+
   return card;
 }
 
@@ -23704,6 +24006,28 @@ function construirFichaResumoCard(implantacao, migracao) {
   return card;
 }
 
+// "Tarefas concluídas" do painel de Tarefas da Ficha — mesmo padrão da
+// Central de tarefas da Minha Conta: abre num modal em vez de expandir
+// inline na sidebar (que é estreita pra caber uma lista grande).
+function renderizarFichaTarefasConcluidas(concluidas, aoMudar) {
+  const container = el("ficha-tarefas-concluidas-lista");
+  container.innerHTML = "";
+  container.appendChild(construirListaTarefas(concluidas, {
+    compacta: true,
+    mostrarResponsavel: true,
+    aoMudar,
+    aoClicar: (t) => abrirDetalhesTarefa(t, aoMudar),
+  }));
+}
+
+function abrirFichaTarefasConcluidas(concluidas, aoMudar) {
+  renderizarFichaTarefasConcluidas(concluidas, aoMudar);
+  el("overlay-ficha-tarefas-concluidas").classList.remove("hidden");
+}
+
+el("ficha-tarefas-concluidas-fechar").addEventListener("click", () =>
+  el("overlay-ficha-tarefas-concluidas").classList.add("hidden"));
+
 // Sidebar de Tarefas da Visão Geral — mesmo conceito visual do painel de
 // Tarefas de "Minha Conta" (reaproveita as classes .minha-conta-*): lista
 // compacta, poucas tarefas por padrão, "Ver mais" pra pendentes extras e pra
@@ -23744,7 +24068,7 @@ function construirFichaTarefasPainel(implantacao) {
 
   const LIMITE_INICIAL = 4;
   let mostrarTodasPendentes = false;
-  let mostrarConcluidas = false;
+  let concluidasAtuais = [];
 
   const recarregar = async () => {
     lista.innerHTML = '<p class="placeholder">Carregando...</p>';
@@ -23766,6 +24090,7 @@ function construirFichaTarefasPainel(implantacao) {
       const todas = data.tarefas || [];
       const pendentes = todas.filter((t) => !t.concluida);
       const concluidas = todas.filter((t) => t.concluida);
+      concluidasAtuais = concluidas;
       badge.textContent = String(pendentes.length);
 
       if (!todas.length) {
@@ -23793,15 +24118,6 @@ function construirFichaTarefasPainel(implantacao) {
         lista.appendChild(p);
       }
 
-      if (mostrarConcluidas && concluidas.length) {
-        lista.appendChild(construirListaTarefas(concluidas, {
-          compacta: true,
-          mostrarResponsavel: true,
-          aoMudar: recarregar,
-          aoClicar: (t) => abrirDetalhesTarefa(t, recarregar),
-        }));
-      }
-
       const restantes = mostrarTodasPendentes ? 0 : Math.max(0, pendentes.length - LIMITE_INICIAL);
       if (restantes) {
         btnMaisPendentes.textContent = `Ver mais ${restantes} pendente${restantes === 1 ? "" : "s"}`;
@@ -23811,10 +24127,14 @@ function construirFichaTarefasPainel(implantacao) {
       }
 
       if (concluidas.length) {
-        btnConcluidas.textContent = mostrarConcluidas ? "Ocultar tarefas concluídas" : `Ver tarefas concluídas (${concluidas.length})`;
+        btnConcluidas.textContent = `Ver tarefas concluídas (${concluidas.length})`;
         btnConcluidas.classList.remove("hidden");
+        if (!el("overlay-ficha-tarefas-concluidas").classList.contains("hidden")) {
+          renderizarFichaTarefasConcluidas(concluidasAtuais, recarregar);
+        }
       } else {
         btnConcluidas.classList.add("hidden");
+        el("overlay-ficha-tarefas-concluidas").classList.add("hidden");
       }
     } catch (err) {
       lista.innerHTML = "";
@@ -23823,7 +24143,7 @@ function construirFichaTarefasPainel(implantacao) {
 
   btnNova.addEventListener("click", () => abrirModalTarefa({ clienteId: implantacao.id, aoSalvar: recarregar }));
   btnMaisPendentes.addEventListener("click", () => { mostrarTodasPendentes = true; recarregar(); });
-  btnConcluidas.addEventListener("click", () => { mostrarConcluidas = !mostrarConcluidas; recarregar(); });
+  btnConcluidas.addEventListener("click", () => abrirFichaTarefasConcluidas(concluidasAtuais, recarregar));
 
   recarregar();
   return painel;

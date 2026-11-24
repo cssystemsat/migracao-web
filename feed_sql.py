@@ -76,6 +76,30 @@ def buscar_post(post_id):
         }
 
 
+def buscar_post_completo(post_id, usuario_atual_id, sou_admin):
+    """Mesmo formato por item de `listar_feed`, mas pra 1 post só — usado
+    quando a notificação do sininho leva a uma publicação que não está entre
+    as últimas carregadas na tela (ver GET /api/feed/<id> em app.py)."""
+    with obter_sessao() as sessao:
+        p = sessao.get(FeedPost, post_id)
+        if not p:
+            return None
+        curtidas_total = sessao.query(func.count(FeedPostCurtida.usuario_id)).filter(
+            FeedPostCurtida.post_id == post_id
+        ).scalar()
+        curtido_por_mim = False
+        if usuario_atual_id:
+            curtido_por_mim = sessao.get(FeedPostCurtida, {"post_id": post_id, "usuario_id": usuario_atual_id}) is not None
+        return {
+            "id": p.id, "texto": p.texto, "autor_id": p.autor_id, "autor_nome": p.autor_nome,
+            "cliente_id": p.cliente_id, "cliente_nome": p.cliente_nome, "tipo": p.tipo,
+            "criado_em": p.criado_em.isoformat(),
+            "curtidas_total": curtidas_total, "curtido_por_mim": curtido_por_mim,
+            "comentarios_total": p.comentarios_total,
+            "pode_excluir": (p.autor_id == usuario_atual_id) or sou_admin,
+        }
+
+
 def excluir_post(post_id):
     """Comentários e curtidas somem junto via ON DELETE CASCADE."""
     with obter_sessao() as sessao:

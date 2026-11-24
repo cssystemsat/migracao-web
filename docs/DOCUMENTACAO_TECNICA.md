@@ -205,6 +205,36 @@
   verdade exigiria paginação por outro eixo (ex. por end_user) ou backfill
   manual; não é um problema no dia a dia porque a sincronização incremental
   mantém tudo que importa (o que é recente) sempre em dia.
+- **Notificações do sininho** (`notificacoes_sql.py`, tabela `notificacoes`,
+  migração `f3a7c9d2b6e1`) — sem pop-up, só contador + painel (decisão do
+  usuário, ver `docs/HISTORICO_DECISOES.md`). Frontend faz polling a cada
+  60s em `/api/notificacoes` (mesmo padrão de polling de status já usado
+  pelos jobs longos do projeto); sem WebSocket/SSE, decisão deliberada pra
+  não introduzir infra nova num app interno sem necessidade de tempo real.
+
+  Disparo é sempre síncrono no ponto de origem do evento (`_notificar` em
+  app.py), exceto dois tipos gerados por job periódico em thread de fundo —
+  mesmo padrão de throttle/lock de `_disparar_sync_wootric_em_segundo_plano`,
+  disparado a cada `GET /api/notificacoes`:
+  - `verificar_prazos_tarefas` (limiares em `_PRAZO_TAREFAS_LIMIARES`: 3
+    dias, 1 dia, no dia, e atrasada) — dedup por `notificacoes_sql.ja_existe`
+    antes de criar, pra não duplicar a cada rodada do job.
+  - NPS novo: dentro da própria `sincronizar_avaliacoes_wootric` (ver acima),
+    usa `clientes_sql.buscar_cliente_por_idcentral_wootric` (tenta
+    `codigo_idcentral` antes de `idcentral`, mesmo fallback da consulta à
+    Wootric) pra achar o `responsavel_usuario_id` (CSM) a notificar.
+
+  `_notificar`/`notificacoes_sql.criar_notificacao` nunca notifica quem
+  gerou o próprio evento (`usuario_id == origem_usuario_id`). Sem
+  UniqueConstraint na tabela — "comentario"/"curtida"/"mencao" podem se
+  repetir legitimamente pra mesma entidade; só os tipos de job periódico
+  precisam de dedup, feito em código (ver docstring de `models.Notificacao`).
+
+  @ menção no Feed usa autocomplete no frontend (`attachMentionAutocomplete`
+  em script.js, reaproveita `/api/app-usuarios/opcoes`) — a publicação manda
+  os ids escolhidos em `mencionados`, backend só valida que cada id existe
+  (`_feed_notificar_mencionados`). Não é parse de texto livre por `@nome` de
+  propósito (ambiguidade/erro de digitação não notificaria ninguém).
 - **Google Sheets/Drive API** (`planilha_migracao.py`) — geração/leitura da
   planilha de migração por cliente. Reusa a mesma credencial de service
   account do Firebase (`FIREBASE_CREDENTIALS_JSON`), só com escopo próprio.
