@@ -1317,14 +1317,27 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 
 
 .modal-implantacao-cliente { max-width: 688px; }
-.form-implantacao-cliente-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 13px; }
-.form-implantacao-cliente-grid button[type="submit"] { grid-column: 1 / -1; }
+.modal-subtitulo { margin: 3px 0 0; color: var(--cinza-500); font-size: 0.8rem; font-weight: 400; }
+.form-implantacao-cliente-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 11px 13px; margin-bottom: 0; }
 .campo-migracao-full { grid-column: 1 / -1; }
+.campo-obrigatorio { color: var(--vermelho); }
+.campo-ajuda { color: var(--cinza-500); font-size: 0.72rem; font-weight: 400; }
+.form-implantacao-cliente-rodape {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 13px;
+  border-top: 1px solid var(--cinza-200);
+}
+.form-implantacao-cliente-rodape .btn-primary,
+.form-implantacao-cliente-rodape .btn-secondary { width: auto; min-width: 104px; margin-top: 0; }
 .implantacao-cliente-complementares {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 3px 13px;
+  gap: 11px 13px;
   border-top: 1px solid var(--cinza-200);
   margin-top: 5px;
   padding-top: 8px;

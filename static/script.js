@@ -817,6 +817,7 @@ const modalImplantacaoClienteEl = el("modal-implantacao-cliente");
 const implantacaoClienteSidebarConfig = el("implantacao-cliente-sidebar-config");
 const formImplantacaoCliente = el("form-implantacao-cliente");
 const implantacaoClienteModalTitulo = el("implantacao-cliente-modal-titulo");
+const implantacaoClienteModalSubtitulo = el("implantacao-cliente-modal-subtitulo");
 const inputImplantacaoClienteIdcentral = el("implantacao-cliente-idcentral");
 const inputImplantacaoClienteNome = el("implantacao-cliente-nome");
 const inputImplantacaoClienteData = el("implantacao-cliente-data");
@@ -1687,6 +1688,9 @@ async function abrirModalImplantacaoCliente(cliente) {
   implantacaoClienteEmEdicao = cliente;
   mostrarFormularioCliente();
   implantacaoClienteModalTitulo.textContent = cliente ? "Editar cliente" : "Adicionar cliente";
+  implantacaoClienteModalSubtitulo.textContent = cliente
+    ? "Dados completos do cadastro — alguns campos só o administrador altera."
+    : "Só o IdCentral é obrigatório — complete o resto quando quiser.";
   inputImplantacaoClienteIdcentral.value = cliente ? cliente.idcentral || "" : "";
   // Só admin altera o IdCentral de um cliente já existente (é ele que liga
   // Implantação e Migração); num cliente novo, quem estiver criando pode
@@ -1767,10 +1771,12 @@ async function abrirModalImplantacaoCliente(cliente) {
   }
 }
 
-el("implantacao-cliente-modal-fechar").addEventListener("click", () => {
+function fecharModalImplantacaoCliente() {
   overlayImplantacaoCliente.classList.add("hidden");
   fichaConfigContexto = null;
-});
+}
+el("implantacao-cliente-modal-fechar").addEventListener("click", fecharModalImplantacaoCliente);
+el("btn-cancelar-implantacao-cliente").addEventListener("click", fecharModalImplantacaoCliente);
 implantacaoClienteSidebarConfig.querySelectorAll(".modal-sidebar-config-item").forEach((btn) => {
   btn.addEventListener("click", () => {
     // "Implantação" é este próprio formulário; "Migração" troca de modal via
@@ -21509,9 +21515,6 @@ function podeSairDaAbaFicha() {
   });
 });
 
-el("card-ir-implantacao").addEventListener("click", () => irParaTela("implantacao"));
-el("card-ir-migracao").addEventListener("click", () => irParaTela("migracao"));
-el("card-ir-ferramentas").addEventListener("click", () => irParaTela("ferramentas"));
 
 async function carregarDashboardNovo() {
   try {

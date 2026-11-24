@@ -251,20 +251,6 @@
           </div>
         </div>
         <div id="dashboard-insights" class="dashboard-insights"></div>
-        <div class="area-cards">
-          <button type="button" class="area-card area-card-implantacao" id="card-ir-implantacao">
-            <h3 class="area-card-titulo">Controle de Implantação</h3>
-            <p class="area-card-desc">Clientes em processo de implantação — configuração de base e treinamentos.</p>
-          </button>
-          <button type="button" class="area-card area-card-migracao" id="card-ir-migracao">
-            <h3 class="area-card-titulo">Controle de Migração</h3>
-            <p class="area-card-desc">Clientes em processo de migração de dados e repontamento.</p>
-          </button>
-          <button type="button" class="area-card area-card-ferramentas" id="card-ir-ferramentas">
-            <h3 class="area-card-titulo">Ferramentas Auxiliares</h3>
-            <p class="area-card-desc">Consultas, importação, comandos e utilitários de apoio.</p>
-          </button>
-        </div>
       </section>
 
       <section id="tela-dashboard-implantacao" class="panel hidden">
@@ -2411,18 +2397,22 @@
         <button type="button" class="modal-sidebar-config-item" data-aba="credenciais">Credenciais SSX</button>
       </div>
       <div class="modal-header">
-        <h3 id="implantacao-cliente-modal-titulo">Adicionar cliente</h3>
+        <div>
+          <h3 id="implantacao-cliente-modal-titulo">Adicionar cliente</h3>
+          <p id="implantacao-cliente-modal-subtitulo" class="modal-subtitulo">Só o IdCentral é obrigatório — complete o resto quando quiser.</p>
+        </div>
         <button id="implantacao-cliente-modal-fechar" class="btn-secondary">Fechar</button>
       </div>
       <div class="modal-body">
         <form id="form-implantacao-cliente" class="form-migracao form-implantacao-cliente-grid">
           <label class="campo-migracao campo-migracao-full">
             <span>Cliente</span>
-            <input type="text" id="implantacao-cliente-nome">
+            <input type="text" id="implantacao-cliente-nome" placeholder="Nome da central">
           </label>
           <label class="campo-migracao">
-            <span>IdCentral</span>
-            <input type="text" id="implantacao-cliente-idcentral" required>
+            <span>IdCentral <span class="campo-obrigatorio" title="Campo obrigatório">*</span></span>
+            <input type="text" id="implantacao-cliente-idcentral" placeholder="Ex.: 1234" required>
+            <small class="campo-ajuda">Identificador único do cliente na SSX</small>
           </label>
           <label class="campo-migracao hidden" id="implantacao-cliente-codigo-idcentral-wrap">
             <span>Código IdCentral</span>
@@ -2527,7 +2517,10 @@
             </label>
           </div>
 
-          <button type="submit" id="btn-salvar-implantacao-cliente" class="btn-primary">Adicionar</button>
+          <div class="form-implantacao-cliente-rodape">
+            <button type="button" id="btn-cancelar-implantacao-cliente" class="btn-secondary">Cancelar</button>
+            <button type="submit" id="btn-salvar-implantacao-cliente" class="btn-primary">Adicionar</button>
+          </div>
         </form>
       </div>
     </div>
