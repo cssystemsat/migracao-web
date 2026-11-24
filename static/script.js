@@ -1943,6 +1943,14 @@ let objetivosImplantacaoCliente = null;
 let objetivosImplantacaoRascunho = [];
 let objetivosImplantacaoAlterado = false;
 let objetivosImplantacaoSalvando = false;
+// Auto-save: qualquer alteração agenda um salvamento silencioso (debounce,
+// ver marcarObjetivosImplantacaoAlterados) — não precisa mais clicar em
+// "Salvar". Se uma mudança nova chega enquanto o PUT anterior ainda está no
+// ar, marca pra salvar de novo assim que ele terminar (nunca perde a última
+// versão, mas também nunca deixa dois PUTs correndo ao mesmo tempo).
+let objetivosImplantacaoAutoSalvarTimer = null;
+let objetivosImplantacaoReSalvarPendente = false;
+let objetivosImplantacaoReSalvarFecharEdicaoId = null;
 const objetivosImplantacaoEmEdicao = new Set();
 // Objetivos com o painel de impedimentos expandido na tela (sobrevive ao
 // re-render do cartão, ex. ao marcar sub-atividade) — cache local por
@@ -23335,11 +23343,10 @@ function iniciaisNome(nome) {
 
 // Card de contato no padrão dos tiles da Ficha: avatar com iniciais, ícone +
 // rótulo, nome em destaque, detalhe opcional e o botão de WhatsApp da própria
-// pessoa do card (nunca o número de outra). "accent" pinta o avatar e a
-// pílula de papel (azul/violeta/verde/turquesa) só pra diferenciar os 4
-// cards à primeira vista — não representa nenhum dado novo. "papel" é um
-// rótulo curto fixo por tipo de card (Owner/Vendas/Foco), também decorativo.
-function construirCardContato({ icone, rotulo, valor, vazio, detalhes, whatsapp, accent, papel }) {
+// pessoa do card (nunca o número de outra). "accent" pinta só o avatar
+// (azul/violeta/verde/turquesa) pra diferenciar os 4 cards à primeira vista —
+// não representa nenhum dado novo.
+function construirCardContato({ icone, rotulo, valor, vazio, detalhes, whatsapp, accent }) {
   const card = document.createElement("div");
   card.className = "ficha-contato-card";
 
@@ -23357,12 +23364,6 @@ function construirCardContato({ icone, rotulo, valor, vazio, detalhes, whatsapp,
   r.className = "ficha-contato-topo-rotulo";
   r.textContent = rotulo;
   topo.appendChild(r);
-  if (papel) {
-    const p = document.createElement("span");
-    p.className = `ficha-contato-papel ficha-contato-papel-${accent || "cinza"}`;
-    p.textContent = papel;
-    topo.appendChild(p);
-  }
   card.appendChild(topo);
 
   const n = document.createElement("div");
@@ -23408,7 +23409,6 @@ function construirFichaLinhaContato(implantacao) {
     detalhes: [],
     whatsapp: implantacao.csm_whatsapp,
     accent: "azul",
-    papel: "Owner",
   }));
   linha.appendChild(construirCardContato({
     icone: "maleta",
@@ -23418,7 +23418,6 @@ function construirFichaLinhaContato(implantacao) {
     detalhes: [],
     whatsapp: implantacao.vendedor_whatsapp,
     accent: "violeta",
-    papel: "Vendas",
   }));
   linha.appendChild(construirCardContato({
     icone: "pessoa",
@@ -23428,7 +23427,6 @@ function construirFichaLinhaContato(implantacao) {
     detalhes: [implantacao.decisor_whatsapp],
     whatsapp: implantacao.decisor_whatsapp,
     accent: "verde",
-    papel: "Foco",
   }));
   linha.appendChild(construirCardContato({
     icone: "pin",
@@ -23436,7 +23434,6 @@ function construirFichaLinhaContato(implantacao) {
     valor: implantacao.decisor_cidade,
     vazio: "não definida",
     detalhes: [implantacao.decisor_estado],
-    papel: implantacao.decisor_estado || null,
     whatsapp: null,
     accent: "turquesa",
   }));
@@ -23738,7 +23735,12 @@ const ICONES_ALERTA = {
   "Momento do cliente": '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 21v-1a7 7 0 0 1 10-6.33"></path><path d="M16 15l5 5M21 15l-5 5"></path></svg>',
 };
 
+// Sem pendência nenhuma, o painel inteiro some da Visão Geral — não faz
+// sentido ocupar espaço só pra dizer que está tudo bem.
 function construirFichaAlertasCard(implantacao, migracao) {
+  const alertas = coletarFichaAlertas(implantacao, migracao);
+  if (!alertas.length) return null;
+
   const card = document.createElement("div");
   card.className = "ficha-painel ficha-alertas";
   const h = document.createElement("h3");
@@ -23747,15 +23749,6 @@ function construirFichaAlertasCard(implantacao, migracao) {
   hTexto.textContent = "Atenção";
   h.appendChild(hTexto);
   card.appendChild(h);
-
-  const alertas = coletarFichaAlertas(implantacao, migracao);
-  if (!alertas.length) {
-    const p = document.createElement("p");
-    p.className = "ficha-alertas-vazio";
-    p.textContent = "🟢 Nenhuma pendência no momento.";
-    card.appendChild(p);
-    return card;
-  }
   // Cada alerta vira um card no mesmo padrão dos contatos da Visão Geral.
   const grade = document.createElement("div");
   grade.className = "ficha-alertas-grade";
@@ -25723,8 +25716,9 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
   // (construirFichaTagsResumo), persistente entre as sub-abas.
 
   // Atenção/Pendências — concentra tudo que precisa de ação num só lugar, em
-  // vez de espalhado pela tela.
-  wrap.appendChild(construirFichaAlertasCard(implantacao, migracao));
+  // vez de espalhado pela tela. Sem nenhuma pendência, o card nem aparece.
+  const alertasCard = construirFichaAlertasCard(implantacao, migracao);
+  if (alertasCard) wrap.appendChild(alertasCard);
 
   if (implantacao) {
     wrap.appendChild(construirFichaContatosSecao(implantacao));
@@ -25979,27 +25973,16 @@ function construirPainelObjetivosImplantacao() {
   }
 
   if (podeEditar) {
+    // Sem botão de salvar — toda alteração salva sozinha em segundo plano
+    // (ver marcarObjetivosImplantacaoAlterados); isso aqui é só o indicador
+    // de status, pra confirmar que não ficou nada pendente.
     const rodape = document.createElement("div");
     rodape.className = "ficha-objetivos-rodape";
-    rodape.classList.toggle(
-      "hidden",
-      !objetivosImplantacaoAlterado || objetivosImplantacaoEmEdicao.size > 0,
-    );
-    const salvar = document.createElement("button");
-    salvar.type = "button";
-    salvar.className = "btn-primary ficha-objetivos-salvar";
-    const iconeSalvar = document.createElement("span");
-    iconeSalvar.className = "material-symbols-outlined";
-    iconeSalvar.textContent = "save";
-    iconeSalvar.setAttribute("aria-hidden", "true");
-    salvar.append(iconeSalvar, document.createTextNode("Salvar objetivos"));
-    salvar.disabled = !objetivosImplantacaoAlterado;
-    salvar.addEventListener("click", () => salvarObjetivosImplantacao());
     const estadoSalvamento = document.createElement("span");
     estadoSalvamento.className = "ficha-objetivos-estado-salvamento";
-    estadoSalvamento.textContent = objetivosImplantacaoAlterado ? "Alterações não salvas" : "Tudo salvo";
+    estadoSalvamento.textContent = objetivosImplantacaoAlterado ? "Salvando alterações..." : "Tudo salvo";
     estadoSalvamento.classList.toggle("pendente", objetivosImplantacaoAlterado);
-    rodape.append(salvar, estadoSalvamento);
+    rodape.appendChild(estadoSalvamento);
     painel.appendChild(rodape);
   }
   return painel;
@@ -26335,7 +26318,8 @@ function construirCartaoObjetivo(item, podeEditar) {
       const salvarEdicao = document.createElement("button");
       salvarEdicao.type = "button";
       salvarEdicao.className = "btn-primary ficha-objetivo-salvar-edicao";
-      salvarEdicao.textContent = "Salvar";
+      salvarEdicao.textContent = "Concluir edição";
+      salvarEdicao.title = "As alterações já salvam sozinhas — isso só fecha o modo de edição.";
       salvarEdicao.addEventListener("click", () => salvarObjetivosImplantacao(objetivoId));
       acoesEdicao.appendChild(salvarEdicao);
       objetivo.appendChild(acoesEdicao);
@@ -26507,19 +26491,30 @@ function construirPainelImpedimentosObjetivo(item, podeEditar) {
   const aberto = objetivosImpedimentosAbertos.has(String(item.id));
   const cabecalho = document.createElement("button");
   cabecalho.type = "button";
-  cabecalho.className = "btn-secondary ficha-objetivo-impedimentos-toggle";
+  cabecalho.className = "ficha-objetivo-impedimentos-toggle ficha-disclosure-toggle";
   cabecalho.setAttribute("aria-expanded", aberto ? "true" : "false");
-  cabecalho.textContent = item.impedimentos_ativos
+  const rotulo = item.impedimentos_ativos
     ? `Impedimentos (${item.impedimentos_ativos} ativo${item.impedimentos_ativos === 1 ? "" : "s"})`
     : "Impedimentos";
+  // Seta de disclosure (mesmo ícone/comportamento dos grupos do sidebar:
+  // expand_more, girando com aria-expanded) — deixa claro que é um
+  // expandir/recolher, não uma ação.
+  const seta = document.createElement("span");
+  seta.className = "material-symbols-outlined ficha-objetivo-impedimentos-seta";
+  seta.textContent = "expand_more";
+  seta.setAttribute("aria-hidden", "true");
+  cabecalho.append(document.createTextNode(rotulo), seta);
 
+  // Classe "hidden" (padrão do projeto, display:none !important) em vez do
+  // atributo nativo hidden — a classe ficha-objetivo-impedimentos-corpo tem
+  // display:flex no CSS, que empata em especificidade com o [hidden] do
+  // navegador e ganha por vir depois; o atributo sozinho nunca escondia nada.
   const corpo = document.createElement("div");
-  corpo.className = "ficha-objetivo-impedimentos-corpo";
-  corpo.hidden = !aberto;
+  corpo.className = `ficha-objetivo-impedimentos-corpo${aberto ? "" : " hidden"}`;
 
   cabecalho.addEventListener("click", async () => {
-    const abrir = corpo.hidden;
-    corpo.hidden = !abrir;
+    const abrir = corpo.classList.contains("hidden");
+    corpo.classList.toggle("hidden", !abrir);
     cabecalho.setAttribute("aria-expanded", abrir ? "true" : "false");
     if (abrir) {
       objetivosImpedimentosAbertos.add(String(item.id));
@@ -26534,7 +26529,16 @@ function construirPainelImpedimentosObjetivo(item, podeEditar) {
   return painel;
 }
 
+// Cache (objetivosImpedimentosCache) é lido aqui antes de ir pra rede — sem
+// isso, toda vez que o card reconstrói com o painel já aberto (re-render do
+// auto-save, trocar de aba e voltar, etc.) refazia a mesma consulta. Só
+// invalida de verdade quando o impedimento muda (resolver/reabrir/criar).
 async function renderizarCorpoImpedimentosObjetivo(item, corpo, podeEditar) {
+  const idStr = String(item.id);
+  if (objetivosImpedimentosCache.has(idStr)) {
+    renderizarListaImpedimentos(objetivosImpedimentosCache.get(idStr), item, corpo, podeEditar);
+    return;
+  }
   corpo.replaceChildren();
   const carregando = document.createElement("p");
   carregando.className = "placeholder";
@@ -26549,7 +26553,7 @@ async function renderizarCorpoImpedimentosObjetivo(item, corpo, podeEditar) {
     const data = await parseJsonResponse(response);
     if (!data.ok) throw new Error(data.error || "Falha ao carregar impedimentos.");
     impedimentos = data.impedimentos;
-    objetivosImpedimentosCache.set(String(item.id), impedimentos);
+    objetivosImpedimentosCache.set(idStr, impedimentos);
   } catch (error) {
     corpo.replaceChildren();
     const erro = document.createElement("p");
@@ -26558,7 +26562,10 @@ async function renderizarCorpoImpedimentosObjetivo(item, corpo, podeEditar) {
     corpo.appendChild(erro);
     return;
   }
+  renderizarListaImpedimentos(impedimentos, item, corpo, podeEditar);
+}
 
+function renderizarListaImpedimentos(impedimentos, item, corpo, podeEditar) {
   corpo.replaceChildren();
   if (!impedimentos.length) {
     const vazio = document.createElement("p");
@@ -26843,17 +26850,26 @@ function atualizarResumoVisualObjetivosImplantacao() {
 
 function marcarObjetivosImplantacaoAlterados() {
   objetivosImplantacaoAlterado = true;
+  atualizarEstadoSalvamentoObjetivosImplantacao("Salvando alterações...", true);
+  // Debounce: só dispara o PUT depois de meio segundo sem nenhuma mudança
+  // nova, pra um clique rápido em vários checkboxes/sub-atividades virar um
+  // salvamento só, não um por clique.
+  if (objetivosImplantacaoAutoSalvarTimer) clearTimeout(objetivosImplantacaoAutoSalvarTimer);
+  objetivosImplantacaoAutoSalvarTimer = setTimeout(() => {
+    objetivosImplantacaoAutoSalvarTimer = null;
+    salvarObjetivosImplantacao();
+  }, 600);
+}
+
+// Atualiza só o texto de status (sem reconstruir os cartões) — chamado o
+// tempo todo pelo auto-save, inclusive enquanto um cartão está em edição
+// (reconstruir tudo nesse momento perderia o foco/texto sendo digitado).
+function atualizarEstadoSalvamentoObjetivosImplantacao(texto, pendente) {
   const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
-  const salvar = painel?.querySelector(".ficha-objetivos-salvar");
-  if (salvar) salvar.disabled = false;
-  if (objetivosImplantacaoEmEdicao.size === 0) {
-    painel?.querySelector(".ficha-objetivos-rodape")?.classList.remove("hidden");
-  }
   const estadoSalvamento = painel?.querySelector(".ficha-objetivos-estado-salvamento");
-  if (estadoSalvamento) {
-    estadoSalvamento.textContent = "Alterações não salvas";
-    estadoSalvamento.classList.add("pendente");
-  }
+  if (!estadoSalvamento) return;
+  estadoSalvamento.textContent = texto;
+  estadoSalvamento.classList.toggle("pendente", pendente);
 }
 
 function selecionarAbaAdicionarObjetivo(aba) {
@@ -27069,9 +27085,55 @@ function atualizarPainelObjetivosImplantacao() {
   atual.replaceWith(construirPainelObjetivosImplantacao());
 }
 
+// Reconcilia só os ids depois de um salvamento — objetivo/sub-atividade
+// novos nascem com id temporário no front (novoIdItemMarco) e só ganham o id
+// de verdade do Postgres na resposta deste PUT. "enviados" é o clone exato
+// do que foi mandado (mesma ordem/tamanho da resposta, sempre), usado só pra
+// casar posição a posição; quem é atualizado de fato é o rascunho AO VIVO
+// (por isso não dá pra simplesmente substituir o rascunho pela resposta:
+// perderia qualquer edição feita em outro cartão enquanto este PUT estava no
+// ar). Resolve também objetivosImplantacaoEmEdicao, que guarda esses ids.
+function aplicarIdsReaisObjetivosImplantacao(enviados, recebidos) {
+  const mapaIds = new Map();
+  enviados.forEach((objetivoEnviado, indice) => {
+    const objetivoRecebido = recebidos[indice];
+    if (!objetivoRecebido) return;
+    if (String(objetivoEnviado.id) !== String(objetivoRecebido.id)) {
+      mapaIds.set(String(objetivoEnviado.id), objetivoRecebido.id);
+    }
+    (objetivoEnviado.itens || []).forEach((itemEnviado, indiceItem) => {
+      const itemRecebido = (objetivoRecebido.itens || [])[indiceItem];
+      if (itemRecebido && String(itemEnviado.id) !== String(itemRecebido.id)) {
+        mapaIds.set(String(itemEnviado.id), itemRecebido.id);
+      }
+    });
+  });
+  if (mapaIds.size === 0) return;
+  objetivosImplantacaoRascunho.forEach((objetivo) => {
+    if (mapaIds.has(String(objetivo.id))) objetivo.id = mapaIds.get(String(objetivo.id));
+    (objetivo.itens || []).forEach((item) => {
+      if (mapaIds.has(String(item.id))) item.id = mapaIds.get(String(item.id));
+    });
+  });
+  mapaIds.forEach((novoId, idAntigo) => {
+    if (objetivosImplantacaoEmEdicao.has(idAntigo)) {
+      objetivosImplantacaoEmEdicao.delete(idAntigo);
+      objetivosImplantacaoEmEdicao.add(String(novoId));
+    }
+  });
+}
+
 async function salvarObjetivosImplantacao(objetivoIdFecharEdicao = null) {
   const cliente = objetivosImplantacaoCliente;
-  if (!cliente || objetivosImplantacaoSalvando) return;
+  if (!cliente) return;
+  // Já tem um salvamento no ar: não dispara outro em cima (duplicaria
+  // objetivo/sub-atividade nova, que ainda não tem id real) — só marca pra
+  // salvar de novo assim que esse terminar, com o estado mais recente.
+  if (objetivosImplantacaoSalvando) {
+    objetivosImplantacaoReSalvarPendente = true;
+    if (objetivoIdFecharEdicao !== null) objetivosImplantacaoReSalvarFecharEdicaoId = objetivoIdFecharEdicao;
+    return;
+  }
   if (!objetivosImplantacaoAlterado) {
     if (objetivoIdFecharEdicao !== null) {
       objetivosImplantacaoEmEdicao.delete(String(objetivoIdFecharEdicao));
@@ -27080,35 +27142,51 @@ async function salvarObjetivosImplantacao(objetivoIdFecharEdicao = null) {
     }
     return;
   }
+  if (objetivosImplantacaoAutoSalvarTimer) {
+    clearTimeout(objetivosImplantacaoAutoSalvarTimer);
+    objetivosImplantacaoAutoSalvarTimer = null;
+  }
   objetivosImplantacaoSalvando = true;
-  const painel = el("ficha-cliente-corpo").querySelector(".ficha-objetivos-painel");
-  if (painel) painel.querySelectorAll("input, button").forEach((controle) => { controle.disabled = true; });
+  // Clone fixo do que está sendo enviado agora — ver aplicarIdsReaisObjetivosImplantacao.
+  const enviados = JSON.parse(JSON.stringify(objetivosImplantacaoRascunho));
+  let sucesso = false;
   try {
     const response = await fetch(`/api/clientes/${cliente.id}/objetivos-implantacao-detalhados`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ objetivos: objetivosImplantacaoRascunho }),
+      body: JSON.stringify({ objetivos: enviados }),
     });
     const data = await parseJsonResponse(response);
     if (!data.ok) {
       alert(`Erro ao salvar objetivos: ${data.error || "falha desconhecida"}`);
+      atualizarEstadoSalvamentoObjetivosImplantacao("Erro ao salvar — tente de novo", true);
       return;
     }
     invalidarCacheFichaTimeline(cliente.id);
-    cliente.objetivos_implantacao_detalhados = data.objetivos;
-    objetivosImplantacaoRascunho = data.objetivos.map((item) => ({
-      ...item,
-      itens: (item.itens || []).map((subatividade) => ({ ...subatividade })),
-    }));
+    cliente.objetivos_implantacao_detalhados = objetivosImplantacaoRascunho;
+    aplicarIdsReaisObjetivosImplantacao(enviados, data.objetivos);
     if (objetivoIdFecharEdicao !== null) {
       objetivosImplantacaoEmEdicao.delete(String(objetivoIdFecharEdicao));
     }
-    objetivosImplantacaoAlterado = false;
+    sucesso = true;
   } catch (error) {
     alert(`Erro ao salvar objetivos: ${String(error)}`);
+    atualizarEstadoSalvamentoObjetivosImplantacao("Erro ao salvar — tente de novo", true);
   } finally {
     objetivosImplantacaoSalvando = false;
-    if (fichaClienteAtual?.implantacao?.id === cliente.id) atualizarPainelObjetivosImplantacao();
+    if (objetivosImplantacaoReSalvarPendente) {
+      objetivosImplantacaoReSalvarPendente = false;
+      const fecharEdicaoId = objetivosImplantacaoReSalvarFecharEdicaoId;
+      objetivosImplantacaoReSalvarFecharEdicaoId = null;
+      salvarObjetivosImplantacao(fecharEdicaoId);
+    } else {
+      if (sucesso) objetivosImplantacaoAlterado = false;
+      if (fichaClienteAtual?.implantacao?.id === cliente.id && objetivosImplantacaoEmEdicao.size === 0) {
+        atualizarPainelObjetivosImplantacao();
+      } else if (sucesso) {
+        atualizarEstadoSalvamentoObjetivosImplantacao("Tudo salvo", false);
+      }
+    }
   }
 }
 
