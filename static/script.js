@@ -22101,7 +22101,6 @@ async function carregarDashboardImplantacao() {
 
     el("tile-di-ativos").textContent = data.implantacao_ativos ?? "–";
     el("tile-di-iniciadas").textContent = data.implantacoes_iniciadas_periodo ?? "–";
-    el("tile-di-sem-objetivo").textContent = data.clientes_sem_objetivo ?? "–";
     el("tile-di-objetivos-atrasados").textContent = data.total_objetivos_atrasados ?? "–";
     el("tile-di-concluidas-objetivos").textContent = data.implantacoes_concluidas_por_objetivos ?? "–";
 
