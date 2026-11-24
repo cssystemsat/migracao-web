@@ -19366,6 +19366,8 @@ const listaObjetivosTemplates = el("objetivos-templates-lista");
 const objetivoTemplateMensagem = el("objetivos-templates-mensagem");
 const objetivoTemplateFormTitulo = el("objetivo-template-form-titulo");
 const overlayObjetivoTemplate = el("overlay-objetivo-template");
+const wrapObjetivoTemplateItemVarias = el("objetivo-template-item-varias-wrap");
+const textareaObjetivoTemplateItemVarias = el("objetivo-template-item-varias-texto");
 const objetivoTemplateFormMensagem = el("objetivo-template-form-mensagem");
 const botaoCriarObjetivoTemplate = el("btn-criar-objetivo-template");
 let objetivoTemplateEditandoId = null;
@@ -19384,6 +19386,8 @@ function mostrarErroFormObjetivoTemplate(texto) {
 
 function abrirModalObjetivoTemplate(elementoOrigem = document.activeElement) {
   elementoFocoAntesModalTemplate = elementoOrigem;
+  wrapObjetivoTemplateItemVarias.classList.add("hidden");
+  textareaObjetivoTemplateItemVarias.value = "";
   overlayObjetivoTemplate.classList.remove("hidden");
   inputObjetivoTemplateNome.focus();
 }
@@ -19568,6 +19572,23 @@ el("btn-objetivo-template-item").addEventListener("click", () => {
   adicionarLinhaEditorObjetivo(listaObjetivoTemplateItens);
   listaObjetivoTemplateItens.lastElementChild.querySelector("input").focus();
 });
+el("btn-objetivo-template-item-varias").addEventListener("click", () => {
+  wrapObjetivoTemplateItemVarias.classList.remove("hidden");
+  textareaObjetivoTemplateItemVarias.focus();
+});
+el("btn-objetivo-template-item-varias-cancelar").addEventListener("click", () => {
+  wrapObjetivoTemplateItemVarias.classList.add("hidden");
+  textareaObjetivoTemplateItemVarias.value = "";
+});
+el("btn-objetivo-template-item-varias-confirmar").addEventListener("click", () => {
+  const linhas = textareaObjetivoTemplateItemVarias.value
+    .split("\n")
+    .map((linha) => linha.trim())
+    .filter(Boolean);
+  linhas.forEach((texto) => adicionarLinhaEditorObjetivo(listaObjetivoTemplateItens, { texto }));
+  wrapObjetivoTemplateItemVarias.classList.add("hidden");
+  textareaObjetivoTemplateItemVarias.value = "";
+});
 botaoCriarObjetivoTemplate.addEventListener("click", () => {
   limparFormObjetivoTemplate();
   mostrarMensagemTemplatesObjetivos("");
@@ -19575,9 +19596,8 @@ botaoCriarObjetivoTemplate.addEventListener("click", () => {
 });
 el("btn-fechar-objetivo-template").addEventListener("click", limparFormObjetivoTemplate);
 el("btn-cancelar-objetivo-template").addEventListener("click", limparFormObjetivoTemplate);
-overlayObjetivoTemplate.addEventListener("click", (event) => {
-  if (event.target === overlayObjetivoTemplate) limparFormObjetivoTemplate();
-});
+// Clique fora NÃO fecha mais esse modal — fácil perder sub-atividades já
+// digitadas num toque sem querer fora dele; fechar é só pelo X/Cancelar/Esc.
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !overlayObjetivoTemplate.classList.contains("hidden")) {
     limparFormObjetivoTemplate();

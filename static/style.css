@@ -3808,7 +3808,8 @@ input:disabled, select:disabled, input.input-travado {
 #form-objetivo-template { display: grid; grid-template-columns: minmax(0, 1fr) 220px; align-items: start; gap: 16px 12px; }
 #form-objetivo-template > #objetivo-template-form-mensagem,
 #form-objetivo-template > .objetivo-editor-itens,
-#form-objetivo-template > #btn-objetivo-template-item,
+#form-objetivo-template > .objetivo-editor-acoes,
+#form-objetivo-template > .objetivo-editor-varias,
 #form-objetivo-template > .form-credencial-botoes { grid-column: 1 / -1; }
 #form-objetivo-template > #objetivo-template-form-mensagem { align-self: start; margin: 0; }
 #form-objetivo-template > label { display: grid; grid-template-rows: auto 40px; align-content: start; gap: 5px; width: 100%; min-width: 0; max-width: none; color: var(--cinza-700); font-size: 0.82rem; font-weight: 600; }
@@ -3816,7 +3817,6 @@ input:disabled, select:disabled, input.input-travado {
 #form-objetivo-template > label > input { display: block; box-sizing: border-box; width: 100%; min-width: 0; height: 40px; margin: 0; padding: 6px 10px; border: 1px solid var(--cinza-300); border-radius: 8px; font: inherit; font-size: 13px; font-weight: 400; }
 #form-objetivo-template > .objetivo-template-prazo-label { max-width: 220px; }
 #form-objetivo-template > .objetivo-editor-itens { width: 100%; }
-#form-objetivo-template > #btn-objetivo-template-item { justify-self: start; width: auto; margin: 0; }
 #form-objetivo-template > .form-credencial-botoes { justify-content: flex-end; width: 100%; padding-top: 8px; border-top: 1px solid var(--cinza-200); }
 #form-objetivo-template > .form-credencial-botoes button { width: auto; margin: 0; }
 #objetivo-template-form-mensagem.erro { color: #b91c1c; }
@@ -3825,6 +3825,13 @@ input:disabled, select:disabled, input.input-travado {
 .objetivo-editor-linha input { flex: 1; min-width: 0; }
 .objetivo-editor-linha button { width: auto; margin: 0; flex-shrink: 0; }
 .objetivo-editor-linha .btn-remover-item-marco { font-size: 1.2rem; }
+.objetivo-editor-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.objetivo-editor-acoes button { width: auto; margin: 0; }
+.objetivo-editor-varias { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--cinza-200); border-radius: var(--radius); background: var(--cinza-100); }
+.objetivo-editor-varias label { display: flex; flex-direction: column; gap: 5px; font-size: 0.82rem; font-weight: 600; color: var(--cinza-700); }
+.objetivo-editor-varias textarea { box-sizing: border-box; width: 100%; padding: 6px 10px; border: 1px solid var(--cinza-300); border-radius: 8px; font: inherit; font-size: 13px; font-weight: 400; resize: vertical; }
+.objetivo-editor-varias-botoes { display: flex; gap: 8px; }
+.objetivo-editor-varias-botoes button { width: auto; margin: 0; }
 #objetivos-templates-mensagem.erro { color: #b91c1c; }
 @media (max-width: 760px) {
   .ficha-marcos-layout { grid-template-columns: 1fr; }
