@@ -290,9 +290,6 @@
             <input type="date" id="di-periodo-ate" aria-label="Data final do período">
             <button type="button" class="btn-secondary" id="di-periodo-aplicar">Aplicar</button>
           </div>
-          <span class="di-periodo-aviso placeholder hidden" id="di-periodo-aviso">
-            "Implantações concluídas" aqui é calculada pelos Objetivos (todos concluídos), não pelos marcos — ver card abaixo.
-          </span>
         </div>
 
         <div class="dashboard-tiles">
@@ -304,14 +301,6 @@
             <div class="stat-tile-label">Implantações iniciadas no período</div>
             <div class="stat-tile-valor" id="tile-di-iniciadas">–</div>
           </div>
-          <div class="stat-tile" style="--tile-accent: var(--verde);">
-            <div class="stat-tile-label">Implantações concluídas (marcos)</div>
-            <div class="stat-tile-valor" id="tile-di-concluidos">–</div>
-          </div>
-          <div class="stat-tile" style="--tile-accent: var(--vermelho);">
-            <div class="stat-tile-label">Clientes com marco atrasado</div>
-            <div class="stat-tile-valor" id="tile-di-atrasados">–</div>
-          </div>
         </div>
         <div class="dashboard-tiles">
           <div class="stat-tile" style="--tile-accent: var(--azul);">
@@ -319,9 +308,10 @@
             <div class="stat-tile-valor" id="tile-di-tempo-medio-implantacao">–</div>
             <div class="stat-tile-sub" id="tile-di-tempo-medio-implantacao-amostra"></div>
           </div>
-          <div class="stat-tile" style="--tile-accent: var(--violeta);">
-            <div class="stat-tile-label">Clientes sem objetivo cadastrado</div>
-            <div class="stat-tile-valor" id="tile-di-sem-objetivo">–</div>
+          <div class="stat-tile stat-tile-destaque" style="--tile-accent: var(--verde);">
+            <div class="stat-tile-label">TTFV — Time to First Value</div>
+            <div class="stat-tile-valor" id="tile-di-ttfv">–</div>
+            <div class="stat-tile-sub" id="tile-di-ttfv-sub"></div>
           </div>
           <div class="stat-tile" style="--tile-accent: var(--amarelo-escuro);">
             <div class="stat-tile-label">Objetivos atrasados (do prazo individual)</div>
@@ -373,10 +363,6 @@
             <div id="di-ranking-objetivos" class="di-ranking"></div>
             <h4 class="di-ranking-titulo">Objetivos com maior tempo médio de conclusão</h4>
             <div id="di-ranking-maior-tempo" class="di-ranking"></div>
-          </div>
-          <div class="insight-card">
-            <h3>Funil de Implantação</h3>
-            <div id="di-funil-etapas"></div>
           </div>
         </div>
 

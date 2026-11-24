@@ -21792,18 +21792,6 @@ function abrirModalObjetivosAtrasados() {
   );
 }
 
-function abrirModalClientesSemObjetivo() {
-  abrirModalDrillDownGenerico(
-    "Clientes sem objetivo específico cadastrado",
-    "/api/dashboard-implantacao/sem-objetivo",
-    [
-      ["idcentral", "IdCentral"], ["cliente_nome", "Cliente"],
-      [(l) => formatarDataBRSimples(l.data_entrada) || l.data_entrada, "Entrada em Implantação"],
-    ],
-    "clientes",
-  );
-}
-
 function abrirModalConcluidosPorObjetivos() {
   const params = new URLSearchParams();
   if (diPeriodoSelecionado.de) params.set("de", diPeriodoSelecionado.de);
@@ -21821,9 +21809,7 @@ function abrirModalConcluidosPorObjetivos() {
 
 [
   ["tile-di-objetivos-atrasados", abrirModalObjetivosAtrasados],
-  ["tile-di-sem-objetivo", abrirModalClientesSemObjetivo],
   ["tile-di-concluidas-objetivos", abrirModalConcluidosPorObjetivos],
-  ["tile-di-concluidos", () => { if (implantacaoClientesCache.length) abrirModalImplantados(); }],
 ].forEach(([id, abrir]) => {
   const tile = el(id)?.closest(".stat-tile");
   if (!tile) return;
@@ -22115,7 +22101,6 @@ async function carregarDashboardImplantacao() {
 
     el("tile-di-ativos").textContent = data.implantacao_ativos ?? "–";
     el("tile-di-iniciadas").textContent = data.implantacoes_iniciadas_periodo ?? "–";
-    el("tile-di-concluidos").textContent = data.implantacao_concluidos ?? "–";
     el("tile-di-sem-objetivo").textContent = data.clientes_sem_objetivo ?? "–";
     el("tile-di-objetivos-atrasados").textContent = data.total_objetivos_atrasados ?? "–";
     el("tile-di-concluidas-objetivos").textContent = data.implantacoes_concluidas_por_objetivos ?? "–";
@@ -22124,6 +22109,11 @@ async function carregarDashboardImplantacao() {
       ? `${data.tempo_medio_implantacao_dias} dias` : "–";
     el("tile-di-tempo-medio-implantacao-amostra").textContent = data.tempo_medio_implantacao_amostra
       ? `${data.tempo_medio_implantacao_amostra} cliente${data.tempo_medio_implantacao_amostra === 1 ? "" : "s"}` : "";
+
+    el("tile-di-ttfv").textContent = data.ttfv_tempo_medio_dias != null ? `${data.ttfv_tempo_medio_dias} dias` : "–";
+    el("tile-di-ttfv-sub").textContent = data.ttfv_tempo_medio_dias != null
+      ? `Meta: ${data.ttfv_meta_dias} dias · ${data.ttfv_pct_dentro_meta}% dentro da meta (${data.ttfv_amostra} cliente${data.ttfv_amostra === 1 ? "" : "s"})`
+      : `Meta: ${data.ttfv_meta_dias} dias`;
 
     const pctObjetivosConcluidos = data.total_objetivos
       ? Math.round((data.total_objetivos_concluidos / data.total_objetivos) * 100)
@@ -22141,12 +22131,6 @@ async function carregarDashboardImplantacao() {
       avisoLegado.classList.add("hidden");
     }
 
-    const funil = el("di-funil-etapas");
-    funil.innerHTML = "";
-    funil.appendChild(construirBarraDistribuicao(
-      IMPLANTACAO_ETAPAS_ORDEM, MARCO_COR, data.por_etapa, data.total_implantacao, IMPLANTACAO_ETAPA_LABELS,
-    ));
-
     diRenderRanking(el("di-ranking-objetivos"), data.ranking_objetivos, "Nenhum objetivo cadastrado nos clientes de Implantação ainda.");
     diRenderRanking(el("di-ranking-maior-tempo"), data.objetivos_maior_tempo, "Ainda não há objetivos com tempo de conclusão suficiente pra calcular.", true);
     el("di-universal-tempo-medio").textContent = data.universal_tempo_medio_dias != null
@@ -22157,25 +22141,21 @@ async function carregarDashboardImplantacao() {
     diRenderImpedimentosDashboard(data.impedimentos || {});
     diRenderAtivacaoDashboard(data.ativacao || {});
 
-    // Bloco de clientes — reaproveita as funções já usadas no Dashboard
-    // geral (clientesComMarcoAtrasado/renderDashboardParados/
-    // renderDashboardTempoMarcos), só que filtrado pra Implantação e com o
-    // tile de atraso específico desta tela.
+    // Marco deixou de ser parâmetro de Implantação (passa a ser de
+    // Onboarding) — os cards de atraso/parados/tempo nos marcos saíram
+    // deste dashboard; só "Envelhecimento da carteira" continua (usa
+    // data_entrada/etapa, não os marcos em si).
     const rClientes = await fetch("/api/clientes");
     const dataClientes = await parseJsonResponse(rClientes);
-    // Também alimenta o cache compartilhado (implantacaoClientesCache) —
-    // o drill-down do tile "Implantações concluídas (marcos)" reaproveita o
-    // modal "Implantados" existente, que depende desse cache estar populado
-    // mesmo que a usuária não tenha passado pela tela de lista antes.
+    // Alimenta o cache compartilhado (implantacaoClientesCache) — usado pelo
+    // Kanban de Implantação e pela busca global, que dependem dele estar
+    // populado mesmo que a usuária não tenha passado pela tela de lista antes.
     if (dataClientes.ok) implantacaoClientesCache = dataClientes.clientes || [];
     const clientesImplantacao = dataClientes.ok
       ? (dataClientes.clientes || []).filter((c) => c.tem_implantacao !== false)
       : [];
     const insightsClientes = el("di-insights-clientes");
     insightsClientes.innerHTML = "";
-    insightsClientes.appendChild(renderDashboardAtrasados(clientesImplantacao, "tile-di-atrasados"));
-    insightsClientes.appendChild(renderDashboardParados(clientesImplantacao));
-    insightsClientes.appendChild(renderDashboardTempoMarcos(clientesImplantacao));
     insightsClientes.appendChild(renderDiEnvelhecimentoCarteira(clientesImplantacao));
   } catch (err) {
     // Silencioso — os tiles ficam com "–" e o resto do app continua normal.

@@ -576,7 +576,7 @@ def estatisticas_dashboard_implantacao(data_de=None, data_ate=None):
             sessao.query(func.count(Cliente.id)).filter(Cliente.tem_implantacao.is_(True)).scalar() or 0
         )
         objetivos = (
-            sessao.query(ClienteObjetivo)
+            sessao.query(ClienteObjetivo, Cliente.data_entrada)
             .join(Cliente, Cliente.id == ClienteObjetivo.cliente_id)
             .filter(Cliente.tem_implantacao.is_(True))
             .all()
@@ -584,6 +584,7 @@ def estatisticas_dashboard_implantacao(data_de=None, data_ate=None):
 
     clientes_com_objetivo = set()
     objetivos_por_cliente = {}  # cliente_id -> [ClienteObjetivo específico, ...] (universal NUNCA entra aqui)
+    cliente_data_entrada = {}  # cliente_id -> data_entrada (str ISO), pro TTFV abaixo
     progresso_por_cliente = {}  # cliente_id -> [concluidos, total] (só específicos)
     por_nome = {}  # nome -> {usados, concluidos, pendentes, atrasados, _tempos: []} (só específicos)
     total_objetivos = 0
@@ -603,7 +604,8 @@ def estatisticas_dashboard_implantacao(data_de=None, data_ate=None):
     universal_atrasados = 0
     tempos_universal = []  # dias, só objetivo universal com concluido_em válido
 
-    for objetivo in objetivos:
+    for objetivo, data_entrada in objetivos:
+        cliente_data_entrada[objetivo.cliente_id] = data_entrada
         criado_em = objetivo.criado_em.date() if objetivo.criado_em else None
         concluido_em = _data_iso(objetivo.concluido_em)
         prevista = criado_em + timedelta(days=objetivo.prazo_dias) if (criado_em and objetivo.prazo_dias) else None
@@ -697,6 +699,35 @@ def estatisticas_dashboard_implantacao(data_de=None, data_ate=None):
                 continue
         implantacoes_concluidas_por_objetivos += 1
 
+    # TTFV (Time to First Value) — KPI principal da responsável por
+    # Implantação (pedido explícito): dias entre `Cliente.data_entrada` e a
+    # conclusão do PRIMEIRO objetivo ESPECÍFICO (nunca o universal) do
+    # cliente. Meta: 14 dias. Independente de "implantação concluída" (por
+    # marcos ou por objetivos) — mede velocidade até o primeiro resultado,
+    # não o fim do processo.
+    TTFV_META_DIAS = 14
+    tempos_ttfv = []
+    ttfv_dentro_meta = 0
+    for cliente_id, lista in objetivos_por_cliente.items():
+        datas_conclusao_validas = [
+            d for o in lista if o.feito and (d := _data_iso(o.concluido_em)) is not None
+        ]
+        if not datas_conclusao_validas:
+            continue
+        primeira_conclusao = min(datas_conclusao_validas)
+        entrada = _data_iso(cliente_data_entrada.get(cliente_id))
+        if not entrada:
+            continue
+        if data_de or data_ate:
+            if not _no_periodo(primeira_conclusao):
+                continue
+        dias = (primeira_conclusao - entrada).days
+        if dias < 0:
+            continue
+        tempos_ttfv.append(dias)
+        if dias <= TTFV_META_DIAS:
+            ttfv_dentro_meta += 1
+
     return {
         "total_clientes_implantacao": total_clientes_implantacao,
         "clientes_com_objetivo": len(clientes_com_objetivo),
@@ -718,6 +749,10 @@ def estatisticas_dashboard_implantacao(data_de=None, data_ate=None):
         "universal_concluidos": universal_concluidos,
         "universal_atrasados": universal_atrasados,
         "universal_tempo_medio_dias": round(sum(tempos_universal) / len(tempos_universal)) if tempos_universal else None,
+        "ttfv_meta_dias": TTFV_META_DIAS,
+        "ttfv_tempo_medio_dias": round(sum(tempos_ttfv) / len(tempos_ttfv)) if tempos_ttfv else None,
+        "ttfv_amostra": len(tempos_ttfv),
+        "ttfv_pct_dentro_meta": round(ttfv_dentro_meta / len(tempos_ttfv) * 100) if tempos_ttfv else None,
     }
 
 

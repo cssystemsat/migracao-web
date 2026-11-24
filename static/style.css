@@ -431,6 +431,11 @@ table.tabela-saida th.th-redimensionavel { position: sticky; top: 0; padding-rig
 }
 .stat-tile-clicavel { cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease; }
 .stat-tile-clicavel:hover { border-color: var(--cinza-300); background: var(--cinza-100); }
+
+/* KPI principal (ex.: TTFV) — mesma tile, só com mais peso visual: borda
+   esquerda mais grossa e um fundo levemente tingido pela --tile-accent. */
+.stat-tile-destaque { border-left-width: 6px; background: color-mix(in srgb, var(--tile-accent, var(--azul)) 6%, var(--painel)); }
+.stat-tile-destaque .stat-tile-valor { font-size: 2.8rem; }
 .stat-tile-label {
   font-size: 0.75rem;
   font-weight: 600;

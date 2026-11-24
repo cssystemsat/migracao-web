@@ -98,6 +98,59 @@ Decisões explícitas confirmadas com a usuária:
   "Salvar objetivos" reatribui `ordem` pela posição que o front mandou,
   sem tratamento especial pro universal).
 
+## Marco sai do Dashboard de Implantação — vai virar parâmetro de Onboarding (2026-11-24)
+
+Pedido explícito da usuária: marco deixa de ser parâmetro de Implantação —
+vai virar parâmetro de uma futura área de Onboarding (ainda não
+implementada). Por enquanto isso só mudou o Dashboard de Implantação, não a
+regra oficial de "implantado" em todo o resto do sistema (`Cliente.etapa`/
+`concluido_em`, ver seção "Objetivo universal..." acima), que continua
+intacta até decisão explícita em contrário.
+
+Removidos do Dashboard de Implantação (`templates/index.html`,
+`static/script.js`): tiles "Implantações concluídas (marcos)" e "Clientes
+com marco atrasado", e os cards de detalhe "Clientes com marco em atraso",
+"Implantações paradas" e "Tempo nos marcos" (todos baseados em
+`Cliente.etapa`/marcos). As funções `clientesComMarcoAtrasado`,
+`renderDashboardAtrasados`, `renderDashboardParados` e
+`renderDashboardTempoMarcos` **não foram apagadas** — continuam em uso no
+Dashboard geral (tela inicial), que não foi alterado por esse pedido.
+Ficaram: "Tempo médio de implantação (concluídas)" (tile do topo, ainda
+baseado em marco — não foi pedido pra sair) e "Envelhecimento da carteira"
+(usa `data_entrada`/`etapa`, não os marcos em si).
+
+**Mesmo dia, pedido seguinte:** o card "Funil de Implantação" (distribuição
+de clientes por etapa/marco, `construirBarraDistribuicao` com
+`IMPLANTACAO_ETAPAS_ORDEM`/`MARCO_COR`) também saiu do Dashboard de
+Implantação pelo mesmo motivo. A função `construirBarraDistribuicao`
+continua em uso no Dashboard geral e no funil por status — não foi
+apagada, só a chamada específica desta tela.
+
+## TTFV (Time to First Value) como KPI principal da Implantação (2026-11-24)
+
+Pedido explícito da usuária (responsável por Implantação): TTFV passa a ser
+o KPI principal dela. Definição confirmada: dias entre `Cliente.data_entrada`
+e a data de conclusão do PRIMEIRO objetivo ESPECÍFICO do cliente (nunca o
+universal "Implantação" — mesma separação já decidida em "Objetivo
+universal... obrigatório" acima). Meta: 14 dias.
+
+Decisão explícita de escopo: é um KPI novo e separado — **não substitui**
+o card "Ativação e prevenção de churn" existente (checklist "Primeiro valor
+percebido", meta 30 dias, ver seção "Dashboard de ativação/churn
+recalculado..." acima), que continua como está. Os dois medem coisas
+diferentes com o mesmo nome popular ("primeiro valor") — não misturar.
+
+Implementação: `objetivos_sql.estatisticas_dashboard_implantacao` agora
+também recebe `Cliente.data_entrada` na query principal e calcula
+`ttfv_tempo_medio_dias`, `ttfv_pct_dentro_meta` e `ttfv_amostra` (dias < 0
+descartados, mesmo filtro de período dos demais indicadores de conclusão).
+Na tela, substituiu a tile "Clientes sem objetivo cadastrado" (pedido
+explícito da usuária) como tile em destaque (`stat-tile-destaque`, borda
+mais grossa e fundo tingido pela cor do tile) — a função de drill-down
+`abrirModalClientesSemObjetivo` ficou sem uso e foi removida do
+`script.js`; o endpoint `/api/dashboard-implantacao/sem-objetivo` não foi
+removido do `app.py` (fora do pedido, sem efeito colateral ficar parado).
+
 ## Reorganização dos KPIs de Objetivos no Dashboard de Implantação (2026-11-24)
 
 No card "Objetivos de Implantação — tempo e duração" do Dashboard de

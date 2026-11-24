@@ -51,8 +51,17 @@ corte do presente (hoje vs. data prevista), não é afetado pelo período.
 KPIs:
 
 - Carteira: clientes em implantação ativos, implantações iniciadas no
-  período, implantações concluídas (pelos marcos — ver regra de negócio
-  central), clientes com marco atrasado, clientes sem objetivo cadastrado.
+  período. Marco deixou de ser parâmetro de Implantação (passa a ser de
+  Onboarding, ver `docs/HISTORICO_DECISOES.md`) — "implantações concluídas
+  (marcos)" e "clientes com marco atrasado" saíram deste dashboard.
+- **TTFV (Time to First Value)** — KPI principal da responsável por
+  Implantação (tile em destaque, substituiu "Clientes sem objetivo
+  cadastrado"): dias entre `Cliente.data_entrada` e a conclusão do primeiro
+  objetivo ESPECÍFICO do cliente (nunca o universal "Implantação"). Meta:
+  14 dias — mostra também % de clientes dentro da meta. Independente da
+  regra de "implantação concluída" (por marcos ou por todos os objetivos):
+  mede velocidade até o primeiro resultado, não o fim do processo. Origem:
+  `objetivos_sql.estatisticas_dashboard_implantacao`.
 - Tempo e duração: tempo médio de implantação das concluídas (`data_entrada`
   → `concluido_em` do cliente, só marcos), tempo médio/mediano de conclusão
   de objetivo, objetivos atrasados (prazo individual vencido), ranking dos
@@ -69,11 +78,6 @@ KPIs:
   "Implantação concluída" pelos marcos (`Cliente.etapa`), que continua sendo
   a regra oficial em todo o resto do sistema — ver
   `docs/HISTORICO_DECISOES.md`.
-- Funil por etapa/marco (mesma lógica do Funil de Implantação do Dashboard
-  geral, mas só com clientes de Implantação).
-- Clientes com marco atrasado, implantações paradas (sem atividade recente) e
-  tempo nos marcos: reaproveita as mesmas funções/regras do Dashboard geral,
-  filtradas só pra Implantação.
 - Envelhecimento da carteira: clientes ativos agrupados por dias em
   implantação (até 15 / 16–30 / 31–60 / 61–90 / mais de 90) — classificação
   de tempo, não indica atraso por si só.
@@ -85,11 +89,9 @@ objetivos)" nunca contam o objetivo universal "Implantação" — ele tem
 métrica própria e separada (concluído/atrasados) logo abaixo do ranking,
 sem se misturar com os objetivos específicos contratados.
 
-**Drill-down dos tiles do topo**: "Objetivos atrasados", "Clientes sem
-objetivo cadastrado", "Implantações concluídas (por objetivos)" e
-"Implantações concluídas (marcos)" agora são clicáveis — abrem a lista
-correspondente (a de marcos reaproveita o modal "Clientes implantados" já
-existente), clicar no registro abre a ficha.
+**Drill-down dos tiles do topo**: "Objetivos atrasados" e "Implantações
+concluídas (por objetivos)" são clicáveis — abrem a lista correspondente,
+clicar no registro abre a ficha.
 
 **Drill-down de impedimentos**: clicar numa linha de "Por responsabilidade"
 ou de "Maiores categorias de impedimento" abre um modal com os impedimentos
