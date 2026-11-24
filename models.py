@@ -221,6 +221,7 @@ class Cliente(Base):
     marcos_atualizado_em: Mapped[str] = mapped_column(default="")
     marcos_itens_feitos: Mapped[list] = mapped_column(JSON, default=list)
     marcos_itens_extras: Mapped[dict] = mapped_column(JSON, default=dict)
+    marcos_itens_datas: Mapped[dict] = mapped_column(JSON, default=dict)
     marcos_concluidos_manual: Mapped[list] = mapped_column(JSON, default=list)
     marcos_prioridades: Mapped[list] = mapped_column(JSON, default=list)
     objetivos_implantacao: Mapped[list] = mapped_column(JSON, default=list)

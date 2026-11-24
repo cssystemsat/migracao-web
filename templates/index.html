@@ -2533,7 +2533,13 @@
     <div id="implantacao-marcos-submenu" class="ficha-marcos-lista"></div>
     <div id="implantacao-marco-painel" class="marco-painel">
       <h3 id="implantacao-marco-titulo" class="ficha-marcos-titulo"></h3>
-      <p id="implantacao-marco-resumo" class="marco-resumo"></p>
+      <div class="marco-resumo-linha">
+        <p id="implantacao-marco-resumo" class="marco-resumo"></p>
+        <label class="marco-data-conclusao hidden" id="implantacao-marco-data-conclusao-wrap" title="Data de finalização do marco — em branco, vira a data de hoje ao salvar">
+          <span>Finalizado em</span>
+          <input type="date" id="implantacao-marco-data-conclusao" class="marco-item-data">
+        </label>
+      </div>
       <div id="implantacao-marco-itens"></div>
       <label class="marco-linha marco-manual">
         <input type="checkbox" id="implantacao-marco-manual">

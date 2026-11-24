@@ -96,6 +96,27 @@ def sincronizar_eventos_marcos(cliente_id, marcos_concluidos, implantacao_conclu
         return bool(para_excluir)
 
 
+def atualizar_datas_eventos_marcos(cliente_id, datas_por_marco):
+    """Corrige a data do evento de "<Marco N> concluído" na Timeline quando a
+    data de finalização do marco é ajustada manualmente (marcos_concluidos_em
+    em app.py) — só atualiza evento já existente, não cria nada."""
+    if not datas_por_marco:
+        return False
+    with obter_sessao() as sessao:
+        eventos = sessao.query(ClienteEvento).filter(
+            ClienteEvento.cliente_id == cliente_id,
+            ClienteEvento.origem_tipo == "marco",
+            ClienteEvento.origem_id.in_(list(datas_por_marco.keys())),
+        ).all()
+        alterado = False
+        for evento in eventos:
+            nova_data = datas_por_marco.get(evento.origem_id)
+            if nova_data and evento.data != nova_data:
+                evento.data = nova_data
+                alterado = True
+        return alterado
+
+
 def editar_evento(cliente_id, evento_id, dados):
     with obter_sessao() as sessao:
         alvo = sessao.get(ClienteEvento, evento_id)

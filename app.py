@@ -1730,9 +1730,7 @@ IMPLANTACAO_MARCOS = ["marco-1", "marco-2", "marco-3", "marco-4", "marco-5"]
 # salvo em marcos_itens_feitos, então NÃO mude o id de um item que já está em
 # uso (só o texto); item novo = id novo. Cada cliente ainda pode ter itens
 # extras só dele (marcos_itens_extras), editados pelo modal de Marcos.
-# Itens tirados do "Plano de Sucesso do Cliente — Jornada de 180 Dias". O
-# Marco 2 (Quick Win) é quase todo montado por cliente: as prioridades
-# acordadas no kick-off, cada uma com suas subtarefas (marcos_prioridades).
+# Itens tirados do "Plano de Sucesso do Cliente — Jornada de 180 Dias".
 # Textos = "Definition of Done" do Playbook SSX (seção 16). Onde o sentido do
 # item antigo continuou o mesmo, o id foi mantido (quem já marcou continua
 # marcado); item com sentido novo ganhou id novo. Itens de passagem pro
@@ -1778,8 +1776,6 @@ IMPLANTACAO_CHECKLIST_PADRAO = {
 # Motivo do atraso — árvore de decisão do Playbook (seção 17, "Cliente não
 # está avançando"). A ação sugerida mora no front (MOTIVOS_ATRASO).
 MOTIVOS_ATRASO = ["nao_executa", "nao_entende", "sem_estrutura", "nao_responde", "problema_tecnico", "expectativa"]
-# Marco onde ficam as prioridades acordadas com o cliente (Quick Win).
-IMPLANTACAO_MARCO_PRIORIDADES = "marco-2"
 
 
 def _etapa_a_partir_dos_marcos(marcos_concluidos):
@@ -1789,17 +1785,14 @@ def _etapa_a_partir_dos_marcos(marcos_concluidos):
     return "concluido"
 
 
-def _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual, prioridades=()):
+def _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual):
     """Marco conclui sozinho quando todos os itens dele (padrão + extras do
-    cliente + subtarefas das prioridades, no Marco 2) estão feitos, ou quando
-    foi marcado como concluído manualmente."""
+    cliente) estão feitos, ou quando foi marcado como concluído manualmente."""
     feitos = set(itens_feitos)
     concluidos = []
     for marco in IMPLANTACAO_MARCOS:
         ids = [i["id"] for i in IMPLANTACAO_CHECKLIST_PADRAO.get(marco, [])]
         ids += [i["id"] for i in itens_extras.get(marco, [])]
-        if marco == IMPLANTACAO_MARCO_PRIORIDADES:
-            ids += [i["id"] for p in prioridades for i in p["itens"]]
         if marco in concluidos_manual or (ids and all(i in feitos for i in ids)):
             concluidos.append(marco)
     return concluidos
@@ -2111,34 +2104,27 @@ def salvar_marcos_cliente(cliente_id):
                 lista.append({"id": item_id, "texto": texto})
         if lista:
             itens_extras[marco] = lista
-    # Prioridades da Quick Win (Marco 2): nome não vazio; subtarefas com o
-    # mesmo filtro dos extras. Ids únicos no cliente todo (extras + prioridades
-    # + subtarefas), já que "feitos" é uma lista só.
-    prioridades = []
-    for prio in data.get("prioridades") or []:
-        prio_id = str((prio or {}).get("id", "")).strip()
-        nome = str((prio or {}).get("nome", "")).strip()[:100]
-        if not prio_id or not nome or prio_id in ids_extras:
-            continue
-        ids_extras.add(prio_id)
-        itens = []
-        for item in (prio or {}).get("itens") or []:
-            item_id = str((item or {}).get("id", "")).strip()
-            texto = str((item or {}).get("texto", "")).strip()[:200]
-            if item_id and texto and item_id not in ids_extras:
-                ids_extras.add(item_id)
-                itens.append({"id": item_id, "texto": texto})
-        prioridades.append({"id": prio_id, "nome": nome, "itens": itens})
     ids_validos = ids_extras | {i["id"] for itens in IMPLANTACAO_CHECKLIST_PADRAO.values() for i in itens}
     itens_feitos = [i for i in dict.fromkeys(data.get("itens_feitos") or []) if i in ids_validos]
     concluidos_manual = [m for m in IMPLANTACAO_MARCOS if m in (data.get("concluidos_manual") or [])]
 
-    marcos_concluidos = _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual, prioridades)
+    def _data_valida(valor):
+        valor = str(valor or "").strip()
+        try:
+            datetime.strptime(valor, "%Y-%m-%d")
+            return valor
+        except ValueError:
+            return None
+
+    marcos_concluidos = _marcos_concluidos_derivados(itens_feitos, itens_extras, concluidos_manual)
     etapa = _etapa_a_partir_dos_marcos(marcos_concluidos)
     hoje = time.strftime("%Y-%m-%d")
     # Data em que cada marco ficou concluído (base do TTV e do tempo por
     # marco). Grava só na transição; reabrir apaga; marco que continua
-    # concluído mantém a data original. Conclusões anteriores a isso não têm data.
+    # concluído mantém a data original. Conclusões anteriores a isso não têm
+    # data. A pessoa pode ajustar a data manualmente (ex.: lançar o checklist
+    # atrasado) — a correção em "concluidos_em_manual" só vale pra marco que
+    # continua concluído depois deste salvamento.
     concluidos_em = {
         m: d for m, d in (doc_atual_dict.get("marcos_concluidos_em") or {}).items()
         if m in marcos_concluidos
@@ -2147,10 +2133,30 @@ def salvar_marcos_cliente(cliente_id):
     for m in marcos_concluidos:
         if m not in concluidos_antes:
             concluidos_em[m] = hoje
+    for m, d in (data.get("concluidos_em_manual") or {}).items():
+        if m in concluidos_em:
+            valida = _data_valida(d)
+            if valida:
+                concluidos_em[m] = valida
+    # Mesma lógica por item do checklist: data de quando o item foi marcado
+    # como feito, ajustável manualmente (itens_datas_manual).
+    itens_datas = {
+        i: d for i, d in (doc_atual_dict.get("marcos_itens_datas") or {}).items()
+        if i in itens_feitos
+    }
+    itens_feitos_antes = set(doc_atual_dict.get("marcos_itens_feitos") or [])
+    for i in itens_feitos:
+        if i not in itens_feitos_antes:
+            itens_datas[i] = hoje
+    for i, d in (data.get("itens_datas_manual") or {}).items():
+        if i in itens_datas:
+            valida = _data_valida(d)
+            if valida:
+                itens_datas[i] = valida
     campos = {
         "marcos_itens_feitos": itens_feitos,
         "marcos_itens_extras": itens_extras,
-        "marcos_prioridades": prioridades,
+        "marcos_itens_datas": itens_datas,
         "marcos_concluidos_manual": concluidos_manual,
         "marcos_concluidos": marcos_concluidos,
         "marcos_concluidos_em": concluidos_em,
@@ -2183,7 +2189,17 @@ def salvar_marcos_cliente(cliente_id):
         marcos_concluidos,
         etapa == "concluido",
     )
-    if eventos_removidos:
+    # Marco que já estava concluído e continua concluído, mas teve a data de
+    # finalização corrigida manualmente — reflete a correção no evento já
+    # existente da Timeline (marco recém-concluído agora cria o dele com a
+    # data certa, não precisa disso).
+    datas_marco_originais = doc_atual_dict.get("marcos_concluidos_em") or {}
+    marcos_data_alterada = {
+        m: d for m, d in concluidos_em.items()
+        if m in concluidos_antes and datas_marco_originais.get(m) != d
+    }
+    eventos_data_corrigida = cliente_eventos_sql.atualizar_datas_eventos_marcos(cliente_id, marcos_data_alterada)
+    if eventos_removidos or eventos_data_corrigida:
         cliente_eventos_sql.recalcular_ultima_acao(cliente_id)
     for m in marcos_recem_concluidos:
         _registrar_evento_automatico_cliente(
@@ -2209,10 +2225,10 @@ def salvar_marcos_cliente(cliente_id):
     return jsonify(
         ok=True, marcos_concluidos=marcos_concluidos, etapa=etapa,
         marcos_itens_feitos=itens_feitos, marcos_itens_extras=itens_extras,
-        marcos_prioridades=prioridades, marcos_concluidos_manual=concluidos_manual,
+        marcos_concluidos_manual=concluidos_manual,
         concluido_em=campos.get("concluido_em", doc_atual_dict.get("concluido_em", "")),
         concluido_por=campos.get("concluido_por", doc_atual_dict.get("concluido_por", "")),
-        marcos_concluidos_em=concluidos_em, marcos_atualizado_em=hoje,
+        marcos_concluidos_em=concluidos_em, marcos_itens_datas=itens_datas, marcos_atualizado_em=hoje,
     )
 
 

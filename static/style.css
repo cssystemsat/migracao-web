@@ -3407,7 +3407,8 @@ input:disabled, select:disabled, input.input-travado {
 
 /* Checklist de um marco (painel dentro do modal do cliente, aberto pelo
    submenu Marcos do sidebar). */
-.marco-resumo { font-size: 0.85rem; color: var(--cinza-500); margin: 0 0 8px; font-weight: 600; }
+.marco-resumo-linha { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
+.marco-resumo { font-size: 0.85rem; color: var(--cinza-500); margin: 0; font-weight: 600; }
 .marco-resumo.concluido { color: var(--verde-escuro); }
 .marco-resumo.atrasado { color: var(--vermelho); }
 .btn-remover-item-marco {
@@ -3425,15 +3426,26 @@ input:disabled, select:disabled, input.input-travado {
 .marco-extra-form input { flex: 1; }
 .marco-extra-form button { width: auto; margin-top: 0; white-space: nowrap; }
 .marco-linha.marco-manual { border-top: 1px solid var(--cinza-200); border-bottom: none; color: var(--cinza-700); }
+.marco-item-data {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  font-size: 0.78rem;
+  border: 1px solid var(--cinza-300);
+  border-radius: var(--radius);
+  color: var(--cinza-700);
+}
+.marco-data-conclusao {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--cinza-500);
+}
 
-/* Prioridades da Quick Win (Marco 2) — um bloco por prioridade, com as
-   subtarefas dentro. */
 .tag-implantado { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
-.marco-secao-titulo { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cinza-500); margin: 11px 0 5px; }
-.marco-prioridade { border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 6px 10px 0; margin-bottom: 8px; }
-.marco-prioridade-cabecalho { display: flex; align-items: center; gap: 6px; padding-bottom: 5px; border-bottom: 1px solid var(--cinza-200); }
-.marco-prioridade-cabecalho strong { flex: 1; font-size: 0.92rem; }
-.marco-prioridade .marco-linha { padding-left: 6px; }
 .marco-adicionar { margin: 5px 0 8px; }
 .marco-adicionar .marco-extra-form { margin: 0; align-items: center; }
 .btn-adicionar-inline {
@@ -3449,7 +3461,6 @@ input:disabled, select:disabled, input.input-travado {
   cursor: pointer;
 }
 .btn-adicionar-inline:hover { background: var(--cinza-200); border-style: solid; }
-.marco-prioridade .btn-adicionar-inline { border: none; padding: 3px 6px; }
 .campo-implantado-info { font-size: 0.75rem; color: var(--verde-escuro); font-weight: 600; min-height: 1em; }
 /* Aba "Marcos" da Ficha: lista dos marcos à esquerda, checklist à direita. */
 .ficha-marcos-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 13px; align-items: start; margin-top: 13px; }

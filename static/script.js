@@ -1,5 +1,29 @@
 const el = (id) => document.getElementById(id);
 
+// Cola datas em qualquer <input type="date"> da ferramenta (atual ou futuro,
+// via listener no document). O paste nativo do navegador só aceita o texto
+// exatamente no formato de exibição do locale — colar uma data copiada de
+// planilha/sistema (dd/mm/aaaa, dd-mm-aaaa ou aaaa-mm-dd) simplesmente não
+// fazia nada. Aqui a gente intercepta, reconhece o formato e seta o valor.
+document.addEventListener("paste", (e) => {
+  const input = e.target.closest && e.target.closest('input[type="date"]');
+  if (!input) return;
+  const texto = (e.clipboardData || window.clipboardData).getData("text").trim();
+  const isoDireto = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  const diaMesAno = texto.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  let iso = null;
+  if (isoDireto) {
+    iso = `${isoDireto[1]}-${isoDireto[2].padStart(2, "0")}-${isoDireto[3].padStart(2, "0")}`;
+  } else if (diaMesAno) {
+    iso = `${diaMesAno[3]}-${diaMesAno[2].padStart(2, "0")}-${diaMesAno[1].padStart(2, "0")}`;
+  }
+  if (!iso) return;
+  e.preventDefault();
+  input.value = iso;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+});
+
 // Ícone único de engrenagem (configurar/editar) usado em toda a ferramenta. Botões do HTML marcam
 // com data-icone="engrenagem" e recebem o ícone no carregamento; os criados via JS usam
 // aplicarIconeEngrenagem. O title do botão vira também o aria-label.
@@ -1882,8 +1906,6 @@ const IMPLANTACAO_MARCOS_INFO = {
   "marco-4": { nome: "Consolidação e Otimização", dono: "Onboarding", inicio: 61 },
   "marco-5": { nome: "Maturação e Advocacia", dono: "Onboarding", inicio: 121 },
 };
-// Marco onde ficam as prioridades acordadas com o cliente (mesmo do backend).
-const IMPLANTACAO_MARCO_PRIORIDADES = "marco-2";
 
 function nomeCompletoMarco(marco) {
   const info = IMPLANTACAO_MARCOS_INFO[marco];
@@ -1908,6 +1930,8 @@ const implantacaoMarcoPainel = el("implantacao-marco-painel");
 const implantacaoMarcoResumo = el("implantacao-marco-resumo");
 const implantacaoMarcoItens = el("implantacao-marco-itens");
 const inputImplantacaoMarcoManual = el("implantacao-marco-manual");
+const wrapImplantacaoMarcoDataConclusao = el("implantacao-marco-data-conclusao-wrap");
+const inputImplantacaoMarcoDataConclusao = el("implantacao-marco-data-conclusao");
 const btnSalvarImplantacaoMarcos = el("btn-salvar-implantacao-marcos");
 const implantacaoMarcoTitulo = el("implantacao-marco-titulo");
 let marcosRascunho = null;
@@ -1997,7 +2021,8 @@ function iniciarRascunhoMarcos(cliente) {
   marcosRascunho = {
     feitos: new Set(cliente.marcos_itens_feitos || []),
     extras,
-    prioridades: (cliente.marcos_prioridades || []).map((p) => ({ ...p, itens: (p.itens || []).map((i) => ({ ...i })) })),
+    datas: { ...(cliente.marcos_itens_datas || {}) },
+    concluidosEm: { ...(cliente.marcos_concluidos_em || {}) },
     manual: new Set(manual),
   };
   // Marco salvo como concluído que não fecharia mais pelo checklist atual
@@ -2020,16 +2045,8 @@ function itensChecklistDoMarco(marco) {
   return padrao.concat(extras);
 }
 
-// Tudo que conta pro progresso do marco — no Marco 2 inclui as subtarefas
-// das prioridades.
-function itensDoMarco(marco) {
-  const itens = itensChecklistDoMarco(marco);
-  if (marco !== IMPLANTACAO_MARCO_PRIORIDADES) return itens;
-  return marcosRascunho.prioridades.flatMap((p) => p.itens).concat(itens);
-}
-
 function progressoMarco(marco) {
-  const itens = itensDoMarco(marco);
+  const itens = itensChecklistDoMarco(marco);
   return { feitos: itens.filter((i) => marcosRascunho.feitos.has(i.id)).length, total: itens.length };
 }
 
@@ -2143,7 +2160,7 @@ function renderizarSubmenuMarcos() {
     // ser gravada (ou ainda não salvo, no rascunho).
     const salvoConcluido = (cliente.marcos_concluidos || []).includes(marco);
     if (concluidos.includes(marco)) {
-      const dataConclusao = (cliente.marcos_concluidos_em || {})[marco];
+      const dataConclusao = marcosRascunho.concluidosEm[marco];
       const linhaData = document.createElement("small");
       linhaData.className = "subitem-prazo concluido-em";
       if (dataConclusao) {
@@ -2179,15 +2196,20 @@ function renderizarSubmenuMarcos() {
 // Linha de checklist (checkbox + texto); com onRemover, ganha o "×" — o
 // callback só tira o item da lista dele, o resto (feitos/rascunho/render) é aqui.
 function criarLinhaItemMarco(item, onRemover) {
-  const linha = document.createElement("label");
+  const linha = document.createElement("div");
   linha.className = "marco-linha";
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = marcosRascunho.feitos.has(item.id);
   checkbox.addEventListener("change", () => {
-    if (checkbox.checked) marcosRascunho.feitos.add(item.id);
-    else marcosRascunho.feitos.delete(item.id);
+    if (checkbox.checked) {
+      marcosRascunho.feitos.add(item.id);
+      if (!marcosRascunho.datas[item.id]) marcosRascunho.datas[item.id] = new Date().toISOString().slice(0, 10);
+    } else {
+      marcosRascunho.feitos.delete(item.id);
+      delete marcosRascunho.datas[item.id];
+    }
     marcosRascunhoAlterado = true;
     renderizarPainelMarco();
   });
@@ -2199,6 +2221,29 @@ function criarLinhaItemMarco(item, onRemover) {
   linha.appendChild(checkbox);
   linha.appendChild(nome);
 
+  // Clicar em qualquer ponto da linha alterna o checkbox, como um <label>
+  // normal faria — só que aqui não dá pra usar <label> de verdade: com o
+  // campo de data também dentro da linha, o navegador tentaria alternar o
+  // checkbox de novo ao clicar nele. Por isso o toggle é manual, pulando
+  // cliques que já caem num input/button próprio.
+  linha.addEventListener("click", (e) => {
+    if (e.target.closest("input, button")) return;
+    checkbox.click();
+  });
+
+  if (checkbox.checked) {
+    const dataInput = document.createElement("input");
+    dataInput.type = "date";
+    dataInput.className = "marco-item-data";
+    dataInput.title = "Data de finalização deste item";
+    dataInput.value = marcosRascunho.datas[item.id] || "";
+    dataInput.addEventListener("change", () => {
+      marcosRascunho.datas[item.id] = dataInput.value;
+      marcosRascunhoAlterado = true;
+    });
+    linha.appendChild(dataInput);
+  }
+
   if (onRemover) {
     const btnRemover = document.createElement("button");
     btnRemover.type = "button";
@@ -2209,110 +2254,13 @@ function criarLinhaItemMarco(item, onRemover) {
       e.preventDefault();
       onRemover();
       marcosRascunho.feitos.delete(item.id);
+      delete marcosRascunho.datas[item.id];
       marcosRascunhoAlterado = true;
       renderizarPainelMarco();
     });
     linha.appendChild(btnRemover);
   }
   return linha;
-}
-
-// Prioridades da Quick Win (Marco 2): cada cliente tem as dele, combinadas no
-// kick-off (ex.: Videotelemetria, Rede CAN), e cada uma tem subtarefas. O
-// analista adiciona/renomeia/remove livremente — tudo no rascunho, vai pro
-// servidor no "Salvar marcos" junto com o resto.
-function construirPrioridadesMarco() {
-  const wrap = document.createElement("div");
-  wrap.className = "marco-prioridades";
-
-  const titulo = document.createElement("h4");
-  titulo.className = "marco-secao-titulo";
-  titulo.textContent = "Prioridades acordadas com o cliente";
-  wrap.appendChild(titulo);
-
-  if (marcosRascunho.prioridades.length === 0) {
-    const vazio = document.createElement("p");
-    vazio.className = "placeholder";
-    vazio.textContent = "Nenhuma prioridade ainda. Adicione as prioridades combinadas no kick-off (ex.: Videotelemetria).";
-    wrap.appendChild(vazio);
-  }
-
-  marcosRascunho.prioridades.forEach((prio) => {
-    const bloco = document.createElement("div");
-    bloco.className = "marco-prioridade";
-
-    const cabecalho = document.createElement("div");
-    cabecalho.className = "marco-prioridade-cabecalho";
-    const nome = document.createElement("strong");
-    nome.textContent = prio.nome;
-    const feitos = prio.itens.filter((i) => marcosRascunho.feitos.has(i.id)).length;
-    const status = document.createElement("span");
-    status.className = "subitem-status";
-    if (prio.itens.length > 0 && feitos === prio.itens.length) {
-      status.textContent = "✓";
-      status.classList.add("concluido");
-    } else {
-      status.textContent = `${feitos}/${prio.itens.length}`;
-    }
-
-    const btnRenomear = document.createElement("button");
-    btnRenomear.type = "button";
-    btnRenomear.className = "btn-remover-item-marco";
-    btnRenomear.textContent = "✎";
-    btnRenomear.title = "Renomear prioridade";
-    btnRenomear.addEventListener("click", () => {
-      const novo = (prompt("Nome da prioridade:", prio.nome) || "").trim();
-      if (!novo || novo === prio.nome) return;
-      prio.nome = novo.slice(0, 100);
-      marcosRascunhoAlterado = true;
-      renderizarPainelMarco();
-    });
-
-    const btnRemover = document.createElement("button");
-    btnRemover.type = "button";
-    btnRemover.className = "btn-remover-item-marco";
-    btnRemover.textContent = "×";
-    btnRemover.title = "Remover prioridade";
-    btnRemover.addEventListener("click", () => {
-      const aviso = prio.itens.length
-        ? `Remover a prioridade "${prio.nome}" e as ${prio.itens.length} subtarefa(s) dela?`
-        : `Remover a prioridade "${prio.nome}"?`;
-      if (!confirm(aviso)) return;
-      prio.itens.forEach((i) => marcosRascunho.feitos.delete(i.id));
-      marcosRascunho.prioridades = marcosRascunho.prioridades.filter((p) => p.id !== prio.id);
-      marcosRascunhoAlterado = true;
-      renderizarPainelMarco();
-    });
-
-    cabecalho.appendChild(nome);
-    cabecalho.appendChild(status);
-    cabecalho.appendChild(btnRenomear);
-    cabecalho.appendChild(btnRemover);
-    bloco.appendChild(cabecalho);
-
-    prio.itens.forEach((item) => {
-      bloco.appendChild(criarLinhaItemMarco(item, () => {
-        prio.itens = prio.itens.filter((i) => i.id !== item.id);
-      }));
-    });
-
-    bloco.appendChild(criarAdicionarInline(`sub:${prio.id}`, "Adicionar subtarefa",
-      "Ex.: apontar câmera, criar regras/templates...", 200, (texto) => {
-        prio.itens.push({ id: novoIdItemMarco(), texto });
-      }));
-
-    wrap.appendChild(bloco);
-  });
-
-  wrap.appendChild(criarAdicionarInline("prioridade", "Adicionar prioridade",
-    "Ex.: Videotelemetria, Rede CAN...", 100, (nome) => {
-      const id = novoIdItemMarco();
-      marcosRascunho.prioridades.push({ id, nome, itens: [] });
-      // Já abre o campo de subtarefa da prioridade recém-criada.
-      return `sub:${id}`;
-    }));
-
-  return wrap;
 }
 
 // "+ Adicionar ..." que vira um campo só quando clicado — deixa o painel
@@ -2412,14 +2360,12 @@ function renderizarPainelMarco() {
   }
   implantacaoMarcoResumo.textContent = partes.join(" · ");
 
-  implantacaoMarcoItens.innerHTML = "";
-  if (marco === IMPLANTACAO_MARCO_PRIORIDADES) {
-    implantacaoMarcoItens.appendChild(construirPrioridadesMarco());
-    const titulo = document.createElement("h4");
-    titulo.className = "marco-secao-titulo";
-    titulo.textContent = "Checklist do marco";
-    implantacaoMarcoItens.appendChild(titulo);
+  wrapImplantacaoMarcoDataConclusao.classList.toggle("hidden", !concluidos.includes(marco));
+  if (concluidos.includes(marco)) {
+    inputImplantacaoMarcoDataConclusao.value = marcosRascunho.concluidosEm[marco] || "";
   }
+
+  implantacaoMarcoItens.innerHTML = "";
   const itens = itensChecklistDoMarco(marco);
   if (itens.length === 0) {
     const vazio = document.createElement("p");
@@ -2456,6 +2402,13 @@ inputImplantacaoMarcoManual.addEventListener("change", () => {
   renderizarPainelMarco();
 });
 
+inputImplantacaoMarcoDataConclusao.addEventListener("change", () => {
+  if (!marcoAberto) return;
+  marcosRascunho.concluidosEm[marcoAberto] = inputImplantacaoMarcoDataConclusao.value;
+  marcosRascunhoAlterado = true;
+  renderizarSubmenuMarcos();
+});
+
 
 btnSalvarImplantacaoMarcos.addEventListener("click", async () => {
   const cliente = marcosCliente;
@@ -2468,8 +2421,9 @@ btnSalvarImplantacaoMarcos.addEventListener("click", async () => {
       body: JSON.stringify({
         itens_feitos: Array.from(marcosRascunho.feitos),
         itens_extras: marcosRascunho.extras,
-        prioridades: marcosRascunho.prioridades,
+        itens_datas_manual: marcosRascunho.datas,
         concluidos_manual: Array.from(marcosRascunho.manual),
+        concluidos_em_manual: marcosRascunho.concluidosEm,
       }),
     });
     const data = await parseJsonResponse(r);
