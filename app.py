@@ -1157,15 +1157,15 @@ def _renderizar_shell(ficha_abas_iniciais=None):
 
 
 def _abas_ficha_do_cliente(cliente):
-    """Quais abas opcionais da Ficha o cliente tem — derivado só do cadastro
-    (tem_implantacao/fase_entrada). MESMA regra de abasFichaDoCliente /
-    clienteUsaMarcos em static/script.js."""
+    """Quais abas opcionais da Ficha o cliente tem — derivado do cadastro
+    (tem_implantacao/fase_entrada) e de ter ou já ter tido migração. MESMA
+    regra de abasFichaDoCliente / clienteUsaMarcos em static/script.js."""
     tem_implantacao = cliente.get("tem_implantacao", True) is not False
     return {
         "idcentral": cliente["idcentral"],
         "implantacao": tem_implantacao,
         "marcos": tem_implantacao or cliente.get("fase_entrada") == "onboarding",
-        "migracao": True,
+        "migracao": bool(migracoes_sql.listar_migracoes(cliente["id"])),
     }
 
 

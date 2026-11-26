@@ -653,8 +653,8 @@ Reestruturação pedida pela usuária. Decisões:
 - **Uma migração ativa por cliente** (regra que já existia), com **Histórico**
   das anteriores — não projetos simultâneos. Enquanto a migração está ativa,
   tudo que o cliente manda entra nela. A aba Migração da Ficha ganhou
-  sub-abas Ativa | Histórico; a aba aparece sempre (antes sumia sem
-  migração). `/api/ficha` passou a devolver em `migracao` só a ATIVA (antes
+  sub-abas Ativa | Histórico; a aba aparece pra quem tem ou já teve
+  migração (ver "Aba Migração só pra quem tem ou teve migração" abaixo). `/api/ficha` passou a devolver em `migracao` só a ATIVA (antes
   "a ativa ou a mais recente").
 - **Finalização com formulário** (resultado, o que aconteceu, pendências,
   data) e **números congelados** no encerramento. Colunas novas em
@@ -732,3 +732,14 @@ e NPS (Wootric). Correção:
   "Carregando...") e, quando chegam, só o cartão é trocado
   (`preencherSlotFicha`); a página não é mais redesenhada. Abas do Histórico
   que misturam esses dados continuam sendo redesenhadas, como antes.
+
+## Aba Migração só pra quem tem ou teve migração (2026-11-26)
+
+Revisão do mesmo dia: a aba Migração tinha ficado sempre visível (pra
+mostrar "Nenhuma migração ativa" + "Iniciar migração" em todo cliente). A
+usuária pediu que ela não apareça pra quem nunca teve migração — começar
+uma migração é pelo "+ Adicionar migração" do Controle de Migração. A aba
+aparece pra quem tem migração ativa OU encerrada (Histórico). Pra lateral
+nascer certa sem esperar `/api/ficha`, `/api/clientes` passou a trazer
+`tem_migracoes` (1 consulta `DISTINCT cliente_id` em `migracoes`, não N+1) e
+a página aberta pela URL já vem com isso calculado (`_abas_ficha_do_cliente`).

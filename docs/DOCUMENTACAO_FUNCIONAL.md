@@ -321,7 +321,9 @@ conclusão de objetivo.
   "Possui Migração?" saiu do formulário do cliente.
 - **Controle de Migração (Kanban/lista):** só migrações **ativas**. "Excluir"
   no Controle = cancelar a migração (nunca apaga o cliente).
-- **Aba Migração da Ficha — sub-abas Ativa | Histórico:**
+- **Aba Migração da Ficha — sub-abas Ativa | Histórico.** Só aparece pra
+  cliente que tem ou já teve migração (quem nunca teve começa pelo
+  "+ Adicionar migração" do Controle):
   - *Ativa:* a migração em andamento (veículos, informações, planilha,
     importar, finalizar/cancelar). Tudo que o cliente mandar enquanto ela
     está ativa entra nela. Sem ativa: "Nenhuma migração ativa no momento" +

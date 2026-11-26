@@ -21935,6 +21935,14 @@ function construirRankingSimples(contagens, limite) {
   return wrap;
 }
 
+// Preenche um tile de valor em dinheiro: o CSS (.stat-tile-valor-moeda)
+// usa --chars pra calcular uma fonte em que o valor inteiro caiba no card.
+function ajustarValorMoedaTile(elemento, texto) {
+  elemento.textContent = texto;
+  elemento.title = texto;
+  elemento.style.setProperty("--chars", String(Math.max(texto.length, 8)));
+}
+
 async function carregarDashboardCrm() {
   try {
     const r = await fetch("/api/dashboard-crm");
@@ -21945,7 +21953,7 @@ async function carregarDashboardCrm() {
     el("tile-crm-implantacao").textContent = data.por_estagio?.implantacao ?? "–";
     el("tile-crm-onboarding").textContent = data.por_estagio?.onboarding ?? "–";
     el("tile-crm-ongoing").textContent = data.por_estagio?.ongoing ?? "–";
-    el("tile-crm-valor-contrato").textContent = formatarMoedaBRL(data.valor_contrato_total);
+    ajustarValorMoedaTile(el("tile-crm-valor-contrato"), formatarMoedaBRL(data.valor_contrato_total));
 
     const barraWrap = el("crm-barra-estagio");
     barraWrap.innerHTML = "";
@@ -29097,11 +29105,16 @@ function mostrarFichaAba(aba, opcoes = {}) {
 // (tem_implantacao/fase_entrada), então dá pra saber ANTES de /api/ficha
 // responder, a partir de qualquer lista que já tenha o cliente. Mesma regra
 // de _abas_ficha_do_cliente em app.py.
-function abasFichaDoCliente(c) {
+// Migração: só pra quem tem ou já teve migração (ativa ou no Histórico) —
+// pra começar uma, é pelo "+ Adicionar migração" do Controle de Migração.
+// `temMigracoes`: da Ficha (lista "migracoes") ou da lista de clientes
+// ("tem_migracoes"); desconhecido = false (a aba aparece quando /api/ficha
+// confirmar, nunca aparece errada).
+function abasFichaDoCliente(c, temMigracoes) {
   return {
     implantacao: !!c && c.tem_implantacao !== false,
     marcos: clienteUsaMarcos(c),
-    migracao: !!c,
+    migracao: !!c && !!temMigracoes,
   };
 }
 
@@ -29118,11 +29131,11 @@ function aplicarAbasFicha(abas) {
 function abasFichaConhecidas(idcentral) {
   const alvo = String(idcentral);
   const cacheado = fichaClienteCache.get(idcentral);
-  if (cacheado && cacheado.implantacao) return abasFichaDoCliente(cacheado.implantacao);
+  if (cacheado && cacheado.implantacao) return abasFichaDoCliente(cacheado.implantacao, (cacheado.migracoes || []).length > 0);
   const listas = [buscaGlobalClientes, implantacaoClientesCache, crmClientesCache, clientesFaseCache];
   for (const lista of listas) {
     const c = (lista || []).find((x) => String(x.idcentral) === alvo);
-    if (c) return abasFichaDoCliente(c);
+    if (c) return abasFichaDoCliente(c, c.tem_migracoes === true);
   }
   const iniciais = window.FICHA_ABAS_INICIAIS;
   if (iniciais && String(iniciais.idcentral) === alvo) return iniciais;
@@ -29136,10 +29149,9 @@ function marcarAbasSidebarFicha(aba) {
 }
 
 function aplicarVisibilidadeAbasFicha(data) {
-  // Migração: sempre pra quem tem cadastro (Ativa vazia + Histórico).
   // Implantação: só quem tem Implantação. Marcos: também quem entrou direto
-  // em Onboarding (ver clienteUsaMarcos).
-  const abas = abasFichaDoCliente(data.implantacao);
+  // em Onboarding (ver clienteUsaMarcos). Migração: quem tem ou já teve.
+  const abas = abasFichaDoCliente(data.implantacao, (data.migracoes || []).length > 0);
   aplicarAbasFicha(abas);
   return !abas.implantacao;
 }
@@ -29192,8 +29204,9 @@ async function carregarFichaCliente(idcentral, aba = fichaAbaAtual || "geral") {
     const abasEscondidas = [
       ...(semImplantacao ? ["implantacao"] : []),
       ...(clienteUsaMarcos(data.implantacao) ? [] : ["marcos"]),
+      ...((data.migracoes || []).length ? [] : ["migracao"]),
     ];
-    const abaFinal = (abaAtual === "migracao" && !data.implantacao) || abasEscondidas.includes(abaAtual) ? "geral" : abaAtual;
+    const abaFinal = abasEscondidas.includes(abaAtual) ? "geral" : abaAtual;
     // Chamados (ssxdesk) e NPS (Wootric) em segundo plano, disparados ANTES
     // do render: assim a Visão Geral já nasce com os cartões em "Carregando..."
     // no lugar certo, e quando os dados chegam só o conteúdo do cartão é

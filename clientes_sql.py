@@ -15,7 +15,7 @@ from sqlalchemy import func
 
 import objetivos_sql
 from db_sql import obter_sessao, obter_sessao_leitura
-from models import Cliente, Usuario
+from models import Cliente, Migracao, Usuario
 
 
 class IdCentralEmUsoError(Exception):
@@ -99,6 +99,12 @@ def listar_clientes():
     with obter_sessao_leitura() as sessao:
         clientes = sessao.query(Cliente).all()
         lista = [_cliente_para_dict(c) for c in clientes]
+        # "tem_migracoes": tem ou já teve migração (ativa ou no histórico) —
+        # é o que decide se a Ficha mostra a aba Migração, e vem já na lista
+        # pra lateral da Ficha nascer certa (ver abasFichaDoCliente no JS).
+        com_migracao = {cid for (cid,) in sessao.query(Migracao.cliente_id).distinct()}
+    for c in lista:
+        c["tem_migracoes"] = c["id"] in com_migracao
     lista.sort(key=lambda c: c["ultima_acao_data"], reverse=True)
     return lista
 

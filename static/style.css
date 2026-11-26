@@ -468,6 +468,20 @@ table.tabela-saida th.th-redimensionavel { position: sticky; top: 0; padding-rig
   color: var(--cinza-900);
   line-height: 1;
 }
+/* Valor em dinheiro (ex.: "Valor total em contrato" do Dashboard CRM) pode
+   ser bem grande (milhões) e estourava o card. A fonte é calculada pela
+   largura do card dividida pela quantidade de caracteres do valor (--chars,
+   definido no JS ao preencher — ver ajustarValorMoedaTile), então o número
+   inteiro sempre cabe: grande quando é curto, menor quando é longo, no
+   máximo o tamanho normal dos outros cards. Nunca quebra linha; o "..." é
+   só uma última garantia, e o valor completo fica no title. */
+.stat-tile:has(.stat-tile-valor-moeda) { container-type: inline-size; min-width: 0; }
+.stat-tile-valor-moeda {
+  font-size: clamp(0.9rem, calc(100cqi / (var(--chars, 12) * 0.6)), 2.5rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* "Com erro" quando tem pelo menos 1 — clica e pula pro primeiro erro da
    planilha (ver irParaPrimeiroErroConvcli). Sem contorno extra no hover: só
