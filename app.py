@@ -1141,7 +1141,7 @@ def requisicao_padrao(endpoint, payload, token, timeout=20, retries=0):
     )
 
 
-def _renderizar_shell():
+def _renderizar_shell(ficha_abas_iniciais=None):
     return render_template(
         "index.html",
         app_version=APP_VERSION,
@@ -1152,7 +1152,21 @@ def _renderizar_shell():
         app_usuario_tem_foto=session.get("app_usuario_tem_foto", False),
         app_usuario_foto_versao=session.get("app_usuario_foto_versao", 0),
         checklist_marcos_padrao=IMPLANTACAO_CHECKLIST_PADRAO,
+        ficha_abas_iniciais=ficha_abas_iniciais,
     )
+
+
+def _abas_ficha_do_cliente(cliente):
+    """Quais abas opcionais da Ficha o cliente tem — derivado só do cadastro
+    (tem_implantacao/fase_entrada). MESMA regra de abasFichaDoCliente /
+    clienteUsaMarcos em static/script.js."""
+    tem_implantacao = cliente.get("tem_implantacao", True) is not False
+    return {
+        "idcentral": cliente["idcentral"],
+        "implantacao": tem_implantacao,
+        "marcos": tem_implantacao or cliente.get("fase_entrada") == "onboarding",
+        "migracao": True,
+    }
 
 
 @app.route("/")
@@ -1245,7 +1259,18 @@ def tela_ferramentas_sub(sub):
 @app.route("/cliente/<idcentral>")
 @app.route("/cliente/<idcentral>/<aba>")
 def tela_ficha_cliente(idcentral, aba=None):
-    return _renderizar_shell()
+    # Abrindo a Ficha direto pela URL (link, F5): já manda na página quais
+    # abas esse cliente tem, pra lateral nascer certa — sem isso ela mostrava
+    # as abas padrão do HTML até /api/ficha responder e depois trocava.
+    abas = None
+    if session.get("app_ok"):
+        try:
+            cliente = clientes_sql.buscar_cliente_por_idcentral(idcentral)
+            if cliente:
+                abas = _abas_ficha_do_cliente(cliente)
+        except Exception:
+            app.logger.exception("Falha ao calcular abas iniciais da Ficha %s", idcentral)
+    return _renderizar_shell(ficha_abas_iniciais=abas)
 
 
 @app.route("/api/status")
@@ -2054,6 +2079,33 @@ def listar_clientes():
     return jsonify(ok=True, clientes=_cache_api_obter("clientes", clientes_sql.listar_clientes))
 
 
+# Cliente em Onboarding ou Ongoing já está implantado (regra da usuária,
+# 2026-11-26): as fases são sequenciais e essas duas vêm depois da
+# Implantação. Aplicado no backend (criar/editar cliente), então vale pra
+# qualquer tela; e desmarcar "implantado" nessas fases é recusado.
+FASES_SEMPRE_IMPLANTADO = ("onboarding", "ongoing")
+ROTULOS_FASE = {"implantacao": "Implantação", "onboarding": "Onboarding", "ongoing": "Ongoing"}
+
+
+def _garantir_implantado_por_fase(cliente):
+    if not cliente or cliente.get("estagio") not in FASES_SEMPRE_IMPLANTADO or cliente.get("implantado"):
+        return cliente
+    campos = {
+        "implantado": True,
+        "implantado_em": time.strftime("%Y-%m-%d"),
+        "implantado_por": session.get("app_usuario_responsavel") or session.get("app_usuario_nome", ""),
+    }
+    atualizado = clientes_sql.atualizar_cliente(cliente["id"], campos)
+    registrar_acao(
+        acao="editar", entidade_tipo="cliente", entidade_id=cliente["id"],
+        entidade_nome=cliente.get("cliente", ""),
+        titulo=f"Cliente marcado como implantado (fase {ROTULOS_FASE.get(cliente['estagio'], cliente['estagio'])})",
+        cliente_id=cliente["id"], idcentral=cliente.get("idcentral", ""),
+        cliente_nome=cliente.get("cliente", ""),
+    )
+    return atualizado or {**cliente, **campos}
+
+
 @app.route("/api/clientes", methods=["POST"])
 def criar_cliente():
     data = request.get_json(force=True) or {}
@@ -2079,6 +2131,7 @@ def criar_cliente():
         entidade_nome=cliente["cliente"], titulo="Cliente criado",
         cliente_id=cliente["id"], idcentral=cliente["idcentral"], cliente_nome=cliente["cliente"],
     )
+    cliente = _garantir_implantado_por_fase(cliente)
     return jsonify(ok=True, cliente=cliente)
 
 
@@ -2129,6 +2182,7 @@ def editar_cliente(cliente_id):
             entidade_nome=cliente["cliente"], mudancas=mudancas, titulo="Cliente editado",
             cliente_id=cliente_id, idcentral=cliente["idcentral"], cliente_nome=cliente["cliente"],
         )
+    cliente = _garantir_implantado_por_fase(cliente)
     return jsonify(ok=True, cliente=cliente)
 
 
@@ -2828,6 +2882,11 @@ def salvar_implantado_cliente(cliente_id):
     if not doc_atual_dict:
         return jsonify(ok=False, error="Cliente não encontrado."), 404
     implantado = bool(data.get("implantado"))
+    if not implantado and doc_atual_dict.get("estagio") in FASES_SEMPRE_IMPLANTADO:
+        return jsonify(ok=False, error=(
+            f"Cliente em {ROTULOS_FASE.get(doc_atual_dict['estagio'])} já é implantado — pra desmarcar, "
+            "volte a fase de vida dele pra Implantação."
+        )), 400
     if implantado == bool(doc_atual_dict.get("implantado")):
         return jsonify(ok=True, implantado=implantado,
                        implantado_em=doc_atual_dict.get("implantado_em", ""),

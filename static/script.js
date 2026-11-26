@@ -862,8 +862,16 @@ const btnSalvarImplantacaoCliente = el("btn-salvar-implantacao-cliente");
 const inputImplantacaoClienteImplantado = el("implantacao-cliente-implantado");
 const infoImplantacaoClienteImplantado = el("implantacao-cliente-implantado-info");
 
+// Onboarding/Ongoing = sempre implantado (regra do backend, ver
+// _garantir_implantado_por_fase em app.py) — o switch fica travado em "Sim".
+const FASES_SEMPRE_IMPLANTADO = ["onboarding", "ongoing"];
+
 function atualizarCampoImplantado(cliente) {
-  inputImplantacaoClienteImplantado.value = cliente && cliente.implantado ? "sim" : "nao";
+  const travado = !!cliente && FASES_SEMPRE_IMPLANTADO.includes(cliente.estagio);
+  inputImplantacaoClienteImplantado.disabled = travado;
+  inputImplantacaoClienteImplantado.title = travado
+    ? "Cliente em Onboarding/Ongoing já é implantado automaticamente." : "";
+  inputImplantacaoClienteImplantado.value = cliente && (cliente.implantado || travado) ? "sim" : "nao";
   infoImplantacaoClienteImplantado.textContent = cliente && cliente.implantado && cliente.implantado_em
     ? `desde ${formatarDataBRSimples(cliente.implantado_em)}${cliente.implantado_por ? ` · ${cliente.implantado_por}` : ""}`
     : "";
@@ -906,7 +914,7 @@ inputImplantacaoClienteImplantado.addEventListener("change", async () => {
   if (!cliente) return;
   inputImplantacaoClienteImplantado.disabled = true;
   await salvarImplantadoCliente(cliente, inputImplantacaoClienteImplantado.value === "sim");
-  inputImplantacaoClienteImplantado.disabled = false;
+  atualizarCampoImplantado(cliente); // reaplica a trava (Onboarding/Ongoing)
 });
 
 // Estado/Cidade do CLIENTE (não do decisor — corrigido em 2026-11-25, ver
@@ -1050,6 +1058,15 @@ function clientePossivelRisco(c) {
 function placasCliente(c) {
   const urs = parseInt((c.dados_planilha || {})["7 - UR's"], 10);
   return Number.isNaN(urs) ? null : urs;
+}
+
+// Quem usa o plano de marcos (Marco 1 a 5): cliente que passou pela
+// Implantação, ou que ENTROU DIRETO em Onboarding (usa os 5 marcos, com prazo
+// contado da data de entrada — decisão da usuária em 2026-11-26). Quem entrou
+// direto em Ongoing, ou existe só por causa da Migração, não usa marcos: sem
+// aba Marcos e fora de todo KPI de marco/atraso.
+function clienteUsaMarcos(c) {
+  return !!c && (c.tem_implantacao !== false || c.fase_entrada === "onboarding");
 }
 
 function clienteAtrasadoNoMarco(c) {
@@ -21323,10 +21340,14 @@ async function carregarDashboardNovo() {
 
     const insights = el("dashboard-insights");
     insights.innerHTML = "";
-    insights.appendChild(renderDashboardAtrasados(clientes));
-    insights.appendChild(renderDashboardParados(clientes));
-    insights.appendChild(renderDashboardTempoMarcos(clientes));
-    insights.appendChild(renderDashboardFunil(clientes));
+    // Atrasados/Parados/Tempo nos marcos/Funil são de marcos — só quem usa
+    // marcos (ver clienteUsaMarcos); antes entrava todo cliente, inclusive os
+    // que nem têm aba Marcos (ex.: entrada direta em Ongoing).
+    const clientesMarcos = clientes.filter(clienteUsaMarcos);
+    insights.appendChild(renderDashboardAtrasados(clientesMarcos));
+    insights.appendChild(renderDashboardParados(clientesMarcos));
+    insights.appendChild(renderDashboardTempoMarcos(clientesMarcos));
+    insights.appendChild(renderDashboardFunil(clientesMarcos));
     insights.appendChild(renderDashboardFlags(clientes));
     insights.appendChild(renderDashboardVeiculosStatus(data));
   } catch (err) {
@@ -22090,8 +22111,16 @@ function renderClientesCrmTabela() {
     tagEtapa.className = `tag-resumo tag-estagio-${c.estagio || "implantacao"}`;
     tagEtapa.textContent = CRM_ESTAGIO_LABELS[c.estagio] || c.estagio || "—";
     tdEtapa.appendChild(tagEtapa);
+    const tdEstado = document.createElement("td");
+    tdEstado.textContent = c.estado || "—";
+    // Boleto = "Último boleto" da planilha de CS (dados_planilha, só existe
+    // depois de uma Sincronizar Planilha) — "-" da planilha conta como vazio,
+    // mesma regra dos Indicadores da Ficha.
+    const tdBoleto = document.createElement("td");
+    const boleto = ((c.dados_planilha || {})["6 - Ultimo boleto"] || "").trim();
+    tdBoleto.textContent = boleto && boleto !== "-" ? boleto : "—";
 
-    tr.append(tdCliente, tdIdcentral, tdCsm, tdVendedor, tdEtapa);
+    tr.append(tdCliente, tdIdcentral, tdCsm, tdVendedor, tdEtapa, tdEstado, tdBoleto);
     corpo.appendChild(tr);
   });
 
@@ -23366,10 +23395,7 @@ async function carregarChamadosFicha(clienteId) {
   // "timeline"/"detalhado" também dependem (chamados concluídos entram
   // misturados nos acontecimentos, ver construirEventosSinteticosChamados).
   const AREAS_HISTORICO_COM_CHAMADOS = ["suporte", "timeline", "detalhado"];
-  if (fichaChamadosClienteId === clienteId
-    && ((fichaAbaAtual === "geral" && fichaSubAbaAtual !== "informacoes") || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_CHAMADOS.includes(fichaHistoricoAreaAtual)))) {
-    mostrarFichaAba(fichaAbaAtual);
-  }
+  if (fichaChamadosClienteId === clienteId) atualizarFichaAposSegundoPlano("chamados", AREAS_HISTORICO_COM_CHAMADOS);
 }
 
 // Chamados CONCLUÍDOS já carregados pra esse cliente, ou [] se ainda não
@@ -23413,10 +23439,7 @@ async function carregarWootricFicha(clienteId) {
   // "timeline"/"detalhado" também dependem (avaliações entram misturadas
   // nos acontecimentos, ver construirEventosSinteticosWootric).
   const AREAS_HISTORICO_COM_WOOTRIC = ["timeline", "detalhado", "nps"];
-  if (fichaWootricClienteId === clienteId
-    && ((fichaAbaAtual === "geral" && fichaSubAbaAtual !== "informacoes") || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_WOOTRIC.includes(fichaHistoricoAreaAtual)))) {
-    mostrarFichaAba(fichaAbaAtual);
-  }
+  if (fichaWootricClienteId === clienteId) atualizarFichaAposSegundoPlano("wootric", AREAS_HISTORICO_COM_WOOTRIC);
 }
 
 // Avaliações de NPS já carregadas pra esse cliente, ou [] se ainda não
@@ -23435,7 +23458,7 @@ function fichaWootricAtuaisValidas(clienteId) {
 // "Implantado" também não — virou o card de Status na aba Implantação
 // (construirInfoItemStatusImplantacao), não é mais badge/tag em lugar nenhum.
 function construirFichaTagsResumo(implantacao) {
-  if (!implantacao || implantacao.tem_implantacao === false) return null;
+  if (!clienteUsaMarcos(implantacao)) return null;
   const tags = document.createElement("div");
   tags.className = "ficha-tags-resumo";
   if (implantacao.momento) {
@@ -23793,7 +23816,7 @@ function diasDesdeEntrada(dataIso) {
 // cabeçalho, card de Atenção e callout do Progresso) — centraliza aqui pra não
 // triplicar a mesma conta de dias.
 function implantacaoAtrasada(implantacao) {
-  return !!implantacao && implantacao.etapa !== "concluido"
+  return clienteUsaMarcos(implantacao) && implantacao.etapa !== "concluido"
     && marcoAtrasado(implantacao.data_entrada, implantacao.etapa, implantacao.marcos_concluidos);
 }
 
@@ -24572,7 +24595,7 @@ function construirFichaTarefasPainel(implantacao) {
 // stepper e, quando existir atraso, um callout curto acima dele. Sem atraso,
 // não tem texto nenhum: o stepper já mostra em que marco o cliente está.
 function construirFichaProgressoCard(implantacao, migracao) {
-  const temImplantacao = implantacao && implantacao.tem_implantacao !== false;
+  const temImplantacao = clienteUsaMarcos(implantacao);
   if (!temImplantacao && !migracao) return null;
   const card = document.createElement("div");
   card.className = "ficha-painel";
@@ -25014,7 +25037,7 @@ async function salvarFichaCadastro() {
     }
     // "Implantado" tem endpoint próprio (grava data/quem e histórico) — só
     // chama se mudou; recarregar=false porque a Ficha recarrega logo abaixo.
-    if (v.implantado !== ed.original.implantado) {
+    if (v.implantado !== ed.original.implantado && !FASES_SEMPRE_IMPLANTADO.includes(v.estagio)) {
       await salvarImplantadoCliente({ id: ed.clienteId }, v.implantado === "sim", false);
     }
     fichaCadastroEdicao = null;
@@ -25383,7 +25406,9 @@ function construirFichaCadastro(idcentral, implantacao, migracao, migracoes, cre
     {
       chave: "implantado", rotulo: "Cliente implantado?", tipo: "select",
       opcoes: [{ value: "nao", label: "Não" }, { value: "sim", label: "Sim" }],
-      exibir: (v) => (v === "sim" ? `Sim${implantadoInfo}` : "Não"),
+      exibir: (v) => (v === "sim" || FASES_SEMPRE_IMPLANTADO.includes(implantacao.estagio) ? `Sim${implantadoInfo}` : "Não"),
+      travado: FASES_SEMPRE_IMPLANTADO.includes(implantacao.estagio)
+        ? "Automático: cliente em Onboarding/Ongoing já é implantado." : null,
     },
     {
       // Só leitura: migração não é mais campo do cadastro — é criada pelo
@@ -25406,9 +25431,9 @@ function construirFichaCadastro(idcentral, implantacao, migracao, migracoes, cre
     valores, emEdicao,
     emEdicao ? { extra: construirFichaCadastroLocalizacaoEdicao(valores) } : {}));
 
-  // Situação — tudo calculado (nunca editável aqui). Só faz sentido pra quem
-  // tem jornada de Implantação (cliente só de Migração não tem marcos).
-  if (implantacao.tem_implantacao !== false) {
+  // Situação — tudo calculado (nunca editável aqui). Só pra quem usa marcos
+  // (ver clienteUsaMarcos: Implantação ou entrada direta em Onboarding).
+  if (clienteUsaMarcos(implantacao)) {
     const status = statusImplantacaoCard(implantacao);
     const dias = diasDesdeEntrada(implantacao.data_entrada);
     const diasSemAcao = diasSemAtividade(implantacao);
@@ -26755,6 +26780,36 @@ function construirFichaHistorico(implantacao, migracao) {
   return wrap;
 }
 
+// Preenche (ou re-preenche) o cartão de NPS/Chamados da Visão Geral — chamado
+// no render e de novo quando os dados chegam em segundo plano, trocando só
+// esse cartão em vez de redesenhar a página inteira (era isso que fazia a
+// Ficha "pular" ~1s depois de abrir).
+function preencherSlotFicha(slot, tipo, implantacao) {
+  slot.innerHTML = "";
+  let card = null;
+  if (tipo === "wootric" && fichaWootricClienteId === implantacao?.id) {
+    card = construirFichaWootricCard(fichaWootricAtual);
+  }
+  if (tipo === "chamados" && fichaChamadosClienteId === implantacao?.id) {
+    card = construirFichaChamadosAbertosCard(fichaChamadosAtual);
+  }
+  if (card) slot.appendChild(card);
+}
+
+// Dados de chamados/NPS chegaram: na Visão Geral, só o cartão muda; no
+// Histórico (Timeline/Detalhado/Suporte/NPS, que misturam esses dados nos
+// acontecimentos) a aba é redesenhada como antes.
+function atualizarFichaAposSegundoPlano(tipo, areasHistorico) {
+  if (fichaAbaAtual === "geral") {
+    const slot = el(`ficha-slot-${tipo}`);
+    if (slot && fichaClienteAtual) preencherSlotFicha(slot, tipo, fichaClienteAtual.implantacao);
+    return;
+  }
+  if (fichaAbaAtual === "historico" && areasHistorico.includes(fichaHistoricoAreaAtual)) {
+    mostrarFichaAba(fichaAbaAtual);
+  }
+}
+
 function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin, subAba = "geral", documentos, migracoes) {
   const wrap = document.createElement("div");
   wrap.appendChild(construirFichaSubAbas(subAba));
@@ -26811,16 +26866,20 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
   // Avaliações de NPS (Wootric, buscadas pelo IdCentral) — carrega em segundo
   // plano (ver carregarWootricFicha); fichaWootricAtual só tem dado de
   // verdade se for deste mesmo cliente.
-  if (fichaWootricClienteId === implantacao?.id) {
-    const cardWootric = construirFichaWootricCard(fichaWootricAtual);
-    if (cardWootric) colEsquerda.appendChild(cardWootric);
-  }
+  // Cada um num "slot" próprio (display: contents) que é preenchido de novo
+  // sozinho quando os dados chegam — ver preencherSlotFicha.
+  const slotWootric = document.createElement("div");
+  slotWootric.id = "ficha-slot-wootric";
+  slotWootric.className = "ficha-slot";
+  preencherSlotFicha(slotWootric, "wootric", implantacao);
+  colEsquerda.appendChild(slotWootric);
   // Chamados de suporte abertos (ssxdesk, buscados pelo IdCentral) — mesmo
   // padrão de carregamento em segundo plano (ver carregarChamadosFicha).
-  if (fichaChamadosClienteId === implantacao?.id) {
-    const cardChamados = construirFichaChamadosAbertosCard(fichaChamadosAtual);
-    if (cardChamados) colEsquerda.appendChild(cardChamados);
-  }
+  const slotChamados = document.createElement("div");
+  slotChamados.id = "ficha-slot-chamados";
+  slotChamados.className = "ficha-slot";
+  preencherSlotFicha(slotChamados, "chamados", implantacao);
+  colEsquerda.appendChild(slotChamados);
 
   const colDireita = document.createElement("div");
   colDireita.className = "ficha-coluna";
@@ -29008,11 +29067,7 @@ function mostrarFichaAba(aba, opcoes = {}) {
   if (!FICHA_SEGMENTO_POR_ABA[aba]) aba = "geral";
   atualizarUrlAbaFicha(aba, Boolean(opcoes.semHistorico));
   fichaAbaAtual = aba;
-  marcarFichaAbaAtiva("ficha-aba-geral", aba === "geral");
-  marcarFichaAbaAtiva("ficha-aba-implantacao", aba === "implantacao");
-  marcarFichaAbaAtiva("ficha-aba-marcos", aba === "marcos");
-  marcarFichaAbaAtiva("ficha-aba-migracao", aba === "migracao");
-  marcarFichaAbaAtiva("ficha-aba-historico", aba === "historico");
+  marcarAbasSidebarFicha(aba);
 
   const corpo = el("ficha-cliente-corpo");
   corpo.innerHTML = "";
@@ -29038,17 +29093,55 @@ function mostrarFichaAba(aba, opcoes = {}) {
 // Só toca na visibilidade das abas da sidebar da Ficha — usada tanto pro
 // preview otimista (com o dado em cache, antes do fetch) quanto pra resposta
 // de verdade (depois do fetch), pra nunca duplicar essa regra.
+// Quais abas opcionais da Ficha um cliente tem — derivado só do cadastro
+// (tem_implantacao/fase_entrada), então dá pra saber ANTES de /api/ficha
+// responder, a partir de qualquer lista que já tenha o cliente. Mesma regra
+// de _abas_ficha_do_cliente em app.py.
+function abasFichaDoCliente(c) {
+  return {
+    implantacao: !!c && c.tem_implantacao !== false,
+    marcos: clienteUsaMarcos(c),
+    migracao: !!c,
+  };
+}
+
+function aplicarAbasFicha(abas) {
+  el("ficha-aba-implantacao").classList.toggle("hidden", !abas.implantacao);
+  el("ficha-aba-marcos").classList.toggle("hidden", !abas.marcos);
+  el("ficha-aba-migracao").classList.toggle("hidden", !abas.migracao);
+}
+
+// Abas já conhecidas desse cliente sem esperar a API: Ficha aberta antes,
+// qualquer lista carregada (busca, Implantação, CRM, Onboarding/Ongoing) ou
+// o que o servidor mandou na página (Ficha aberta direto pela URL / F5).
+// null = desconhecido (aí as abas opcionais ficam escondidas, nunca erradas).
+function abasFichaConhecidas(idcentral) {
+  const alvo = String(idcentral);
+  const cacheado = fichaClienteCache.get(idcentral);
+  if (cacheado && cacheado.implantacao) return abasFichaDoCliente(cacheado.implantacao);
+  const listas = [buscaGlobalClientes, implantacaoClientesCache, crmClientesCache, clientesFaseCache];
+  for (const lista of listas) {
+    const c = (lista || []).find((x) => String(x.idcentral) === alvo);
+    if (c) return abasFichaDoCliente(c);
+  }
+  const iniciais = window.FICHA_ABAS_INICIAIS;
+  if (iniciais && String(iniciais.idcentral) === alvo) return iniciais;
+  return null;
+}
+
+function marcarAbasSidebarFicha(aba) {
+  ["geral", "implantacao", "marcos", "migracao", "historico"].forEach((a) => {
+    marcarFichaAbaAtiva(`ficha-aba-${a}`, a === aba);
+  });
+}
+
 function aplicarVisibilidadeAbasFicha(data) {
-  // Aba Migração sempre aparece pra quem tem cadastro: mesmo sem migração
-  // ativa ela mostra "Nenhuma migração ativa" + Histórico.
-  el("ficha-aba-migracao").classList.toggle("hidden", !data.implantacao);
-  // Cliente criado pela tela de Migração sem par na Implantação
-  // (tem_implantacao=false) tem menu enxuto: só Visão Geral, Migração e
-  // Histórico — sem Implantação/Marcos, que não existem pra ele.
-  const semImplantacao = !data.implantacao || data.implantacao.tem_implantacao === false;
-  el("ficha-aba-implantacao").classList.toggle("hidden", semImplantacao);
-  el("ficha-aba-marcos").classList.toggle("hidden", semImplantacao);
-  return semImplantacao;
+  // Migração: sempre pra quem tem cadastro (Ativa vazia + Histórico).
+  // Implantação: só quem tem Implantação. Marcos: também quem entrou direto
+  // em Onboarding (ver clienteUsaMarcos).
+  const abas = abasFichaDoCliente(data.implantacao);
+  aplicarAbasFicha(abas);
+  return !abas.implantacao;
 }
 
 let fichaClienteCarregamentoToken = 0;
@@ -29061,13 +29154,14 @@ async function carregarFichaCliente(idcentral, aba = fichaAbaAtual || "geral") {
   cabecalho.innerHTML = "";
   const corpo = el("ficha-cliente-corpo");
   corpo.innerHTML = '<p class="placeholder">Carregando...</p>';
-  // Preview otimista: se já vimos esse idcentral nesta sessão, deixa a aba
-  // Migração (e Implantação/Marcos) já no estado certo AGORA — sem isso, ela
-  // sempre começa escondida (classe padrão no HTML) até o fetch abaixo
-  // responder, o que pisca pra quem já sabia que esse cliente tem migração.
-  // Será confirmado/corrigido pelo fetch de verdade a seguir de qualquer jeito.
-  const cacheado = fichaClienteCache.get(idcentral);
-  if (cacheado) aplicarVisibilidadeAbasFicha(cacheado);
+  // Lateral certa desde o 1º quadro (antes de /api/ficha responder): abas
+  // do cliente vindas do que já está em memória ou do servidor (ver
+  // abasFichaConhecidas). Desconhecido = abas opcionais escondidas — nunca
+  // mostra uma aba que o cliente não tem pra depois tirar. A aba pedida já
+  // fica marcada como ativa.
+  const abasPrevias = abasFichaConhecidas(idcentral) || { implantacao: false, marcos: false, migracao: false };
+  aplicarAbasFicha(abasPrevias);
+  marcarAbasSidebarFicha(abasPrevias[aba] === false ? "geral" : aba);
   try {
     const r = await fetch(`/api/ficha/${encodeURIComponent(idcentral)}`);
     const data = await parseJsonResponse(r);
@@ -29095,17 +29189,18 @@ async function carregarFichaCliente(idcentral, aba = fichaAbaAtual || "geral") {
     const abaAtual = rotaAtual.tela === "ficha" && rotaAtual.idcentral === String(idcentral)
       ? rotaAtual.sub
       : aba;
-    const abasEscondidas = semImplantacao ? ["implantacao", "marcos"] : [];
+    const abasEscondidas = [
+      ...(semImplantacao ? ["implantacao"] : []),
+      ...(clienteUsaMarcos(data.implantacao) ? [] : ["marcos"]),
+    ];
     const abaFinal = (abaAtual === "migracao" && !data.implantacao) || abasEscondidas.includes(abaAtual) ? "geral" : abaAtual;
-    mostrarFichaAba(abaFinal, { semHistorico: abaFinal !== abaAtual });
-    // Chamados do ssxdesk: busca em segundo plano, nunca atrasa a Ficha —
-    // quando chegar, carregarChamadosFicha redesenha a aba sozinha se ainda
-    // fizer sentido (ver a função).
+    // Chamados (ssxdesk) e NPS (Wootric) em segundo plano, disparados ANTES
+    // do render: assim a Visão Geral já nasce com os cartões em "Carregando..."
+    // no lugar certo, e quando os dados chegam só o conteúdo do cartão é
+    // trocado (ver preencherSlotFicha) — a página não é redesenhada.
     if (data.implantacao) carregarChamadosFicha(data.implantacao.id);
-    // Avaliações NPS da Wootric: mesmo padrão — busca em segundo plano,
-    // nunca atrasa a Ficha; carregarWootricFicha redesenha a aba sozinha
-    // quando chegar, se ainda fizer sentido.
     if (data.implantacao) carregarWootricFicha(data.implantacao.id);
+    mostrarFichaAba(abaFinal, { semHistorico: abaFinal !== abaAtual });
   } catch (err) {
     if (carregamentoToken !== fichaClienteCarregamentoToken) return;
     mostrarErroEmNode(corpo, String(err));

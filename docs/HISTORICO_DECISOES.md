@@ -685,3 +685,50 @@ Reestruturação pedida pela usuária. Decisões:
 
 **Deploy:** a migração `e5b1d7c3a920` precisa rodar no Postgres antes (ou
 junto) do código novo — o model passa a ler as colunas novas de `migracoes`.
+
+## Quem entra direto em Onboarding usa marcos (2026-11-26)
+
+Problema relatado: o Tremix (entrou direto em Onboarding, `tem_implantacao
+= false`) aparecia como "marco atrasado" no Dashboard principal, mas a Ficha
+dele não tinha aba Marcos. O Dashboard principal calculava atraso no front
+com TODOS os clientes, sem filtro nenhum.
+
+Decisão da usuária: cliente que entra direto em **Onboarding usa os 5
+marcos**, com prazo contado da **data de entrada** (não de uma data de
+início do Onboarding — então cliente antigo aparece atrasado; aceito).
+Quem entra direto em **Ongoing não usa marcos**. Implementado no front com
+uma regra única, `clienteUsaMarcos(c)` = `tem_implantacao !== false ||
+fase_entrada === "onboarding"`, usada na aba Marcos da Ficha, na tag de
+atraso/Progresso/Situação e nos blocos de marcos do Dashboard principal
+(Atrasados, Parados, Tempo nos marcos, Funil; Flags continua com todos). A
+aba Implantação continua só pra quem tem Implantação (`tem_implantacao`), e
+o Dashboard/Controle de Implantação não mudaram (seguem sem esses clientes,
+pela regra de fase de entrada).
+
+## Onboarding/Ongoing = implantado automaticamente (2026-11-26)
+
+Regra da usuária: se o cliente está em Onboarding ou Ongoing, ele já está
+implantado (as fases são sequenciais). Aplicado no backend
+(`_garantir_implantado_por_fase` em `app.py`, chamado no criar e no editar
+cliente — vale pra qualquer tela), com a mesma gravação do switch manual
+(`implantado_em`, `implantado_por`, auditoria). `PUT .../implantado` recusa
+desmarcar nessas fases. Não altera `tem_implantacao`/`fase_entrada`: quem
+entrou direto em Onboarding/Ongoing continua fora dos KPIs de Implantação.
+
+## Ficha do cliente sem "piscar" ao abrir (2026-11-26)
+
+Problema: ao abrir a Ficha, a lateral mostrava por um instante abas que o
+cliente não tem (o HTML nascia com Implantação/Marcos visíveis) e a Visão
+Geral era redesenhada inteira ~1s depois, quando chegavam chamados (ssxdesk)
+e NPS (Wootric). Correção:
+- As abas opcionais nascem escondidas e são definidas antes de `/api/ficha`
+  responder, a partir do cadastro já em memória (qualquer lista carregada)
+  ou, abrindo direto pela URL/F5, do que o servidor manda na própria página
+  (`window.FICHA_ABAS_INICIAIS`, calculado em `tela_ficha_cliente`). Regra
+  única: `abasFichaDoCliente` (JS) = `_abas_ficha_do_cliente` (Python),
+  derivada de `tem_implantacao`/`fase_entrada` — que já estão no banco, sem
+  campo novo. A aba pedida já fica marcada como ativa durante o carregamento.
+- Chamados/NPS são disparados antes do render (cartões nascem em
+  "Carregando...") e, quando chegam, só o cartão é trocado
+  (`preencherSlotFicha`); a página não é mais redesenhada. Abas do Histórico
+  que misturam esses dados continuam sendo redesenhadas, como antes.

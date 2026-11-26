@@ -4307,6 +4307,11 @@ table.churn-tabela th, table.churn-tabela td { max-width: 220px; white-space: no
    .btn-primary global é largura cheia com margem — aqui fica na linha dos filtros. */
 .crm-clientes-adicionar { width: auto; margin: 0; padding: 0 14px; height: 32px; white-space: nowrap; flex-shrink: 0; }
 
+/* Cartões de NPS/Chamados da Visão Geral: o slot não gera caixa própria
+   (os cartões continuam filhos diretos da coluna, mesmo espaçamento) e
+   vazio não ocupa espaço. Ver preencherSlotFicha. */
+.ficha-slot { display: contents; }
+
 /* Aba Migração da Ficha: Ativa | Histórico (2026-11-26). */
 .ficha-migracao-vazia { text-align: center; padding: 32px 20px; }
 .ficha-migracao-vazia h3 { justify-content: center; margin-bottom: 6px; }

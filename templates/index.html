@@ -157,11 +157,11 @@
         <span class="material-symbols-outlined sidebar-item-icone">space_dashboard</span>
         <span class="sidebar-item-texto">Visão Geral</span>
       </button>
-      <button type="button" class="sidebar-item" id="ficha-aba-implantacao" title="Implantação">
+      <button type="button" class="sidebar-item hidden" id="ficha-aba-implantacao" title="Implantação">
         <span class="material-symbols-outlined sidebar-item-icone">rocket_launch</span>
         <span class="sidebar-item-texto">Implantação</span>
       </button>
-      <button type="button" class="sidebar-item" id="ficha-aba-marcos" title="Marcos">
+      <button type="button" class="sidebar-item hidden" id="ficha-aba-marcos" title="Marcos">
         <span class="material-symbols-outlined sidebar-item-icone">flag</span>
         <span class="sidebar-item-texto">Marcos</span>
       </button>
@@ -535,6 +535,8 @@
                 <th>CS responsável</th>
                 <th>Comercial responsável</th>
                 <th>Etapa atual</th>
+                <th>Estado</th>
+                <th>Boleto</th>
               </tr>
             </thead>
             <tbody id="crm-clientes-corpo"></tbody>
@@ -2781,6 +2783,7 @@
     </div>
   </div>
   <script>window.CHECKLIST_MARCOS_PADRAO = {{ checklist_marcos_padrao | tojson }};</script>
+  <script>window.FICHA_ABAS_INICIAIS = {{ ficha_abas_iniciais | tojson }};</script>
 
   <div id="overlay-importar-clientes" class="overlay hidden">
     <div class="modal modal-grande">

@@ -30,8 +30,19 @@
   nas fases por onde passou.
 - Cliente criado direto em Onboarding/Ongoing nasce com `tem_implantacao =
   false`: fica fora do Controle e do Dashboard de Implantação, não recebe o
-  objetivo universal "IMPLANTAÇÃO" e a Ficha não mostra as abas
-  Implantação/Marcos.
+  objetivo universal "IMPLANTAÇÃO" e a Ficha não mostra a aba Implantação.
+- **Marcos:** usa o plano de marcos (Marco 1 a 5) quem passou pela
+  Implantação **ou entrou direto em Onboarding** — este usa os 5 marcos, com
+  prazo contado da data de entrada (cliente antigo aparece atrasado, por
+  decisão da usuária). Quem entrou direto em Ongoing (ou existe só pela
+  Migração) não usa marcos: sem aba Marcos, sem tag de atraso e fora dos
+  blocos de marcos do Dashboard (Atrasados, Parados, Tempo nos marcos,
+  Funil). Regra centralizada em `clienteUsaMarcos` (static/script.js).
+- **Cliente em Onboarding ou Ongoing é sempre implantado.** Ao criar ou
+  salvar um cliente nessas fases, o backend marca "implantado" sozinho (com
+  data, quem e registro na auditoria). O switch "Cliente implantado?" fica
+  travado em "Sim" nessas fases; pra desmarcar, a fase de vida tem que
+  voltar pra Implantação.
 - **Implantação e Migração são processos paralelos e independentes**, não um
   sub-estágio um do outro. Um cliente pode estar em qualquer etapa de
   relacionamento e, paralelamente, ter ou não um processo de Migração.
