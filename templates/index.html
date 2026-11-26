@@ -47,6 +47,27 @@
         <span class="sidebar-item-texto">Feed</span>
       </button>
       <div class="sidebar-grupo">
+        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-crm" data-sidebar-group="crm" aria-controls="sidebar-subnav-crm" aria-expanded="false" title="Expandir ou recolher CRM">
+          <span class="material-symbols-outlined sidebar-item-icone">groups</span>
+          <span class="sidebar-item-texto">CRM</span>
+          <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
+        </button>
+        <div class="sidebar-subnav hidden" id="sidebar-subnav-crm" role="group" aria-label="Páginas de CRM">
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-dashboard-crm" title="Dashboard CRM">
+            <span class="material-symbols-outlined sidebar-item-icone">bar_chart</span>
+            <span class="sidebar-item-texto">Dashboard CRM</span>
+          </button>
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-clientes-crm" title="Clientes">
+            <span class="material-symbols-outlined sidebar-item-icone">groups</span>
+            <span class="sidebar-item-texto">Clientes</span>
+          </button>
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-churn-crm" title="Churn">
+            <span class="material-symbols-outlined sidebar-item-icone">trending_down</span>
+            <span class="sidebar-item-texto">Churn</span>
+          </button>
+        </div>
+      </div>
+      <div class="sidebar-grupo">
         <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-implantacao" data-sidebar-group="implantacao" aria-controls="sidebar-subnav-implantacao" aria-expanded="false" title="Expandir ou recolher Implantação">
           <span class="material-symbols-outlined sidebar-item-icone">tune</span>
           <span class="sidebar-item-texto">Implantação</span>
@@ -403,6 +424,126 @@
         </div>
 
         <div class="dashboard-insights" id="di-insights-clientes"></div>
+      </section>
+
+      <section id="tela-dashboard-crm" class="panel hidden">
+        <div class="conteudo-header">
+          <div>
+            <h2 class="conteudo-titulo">Dashboard CRM</h2>
+            <p class="conteudo-subtitulo">Visão geral de todos os clientes da empresa, em qualquer etapa.</p>
+          </div>
+        </div>
+        <div class="dashboard-tiles">
+          <div class="stat-tile" style="--tile-accent: var(--azul);">
+            <div class="stat-tile-label">Total de clientes</div>
+            <div class="stat-tile-valor" id="tile-crm-total">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--amarelo-escuro);">
+            <div class="stat-tile-label">Em implantação</div>
+            <div class="stat-tile-valor" id="tile-crm-implantacao">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--violeta);">
+            <div class="stat-tile-label">Em onboarding</div>
+            <div class="stat-tile-valor" id="tile-crm-onboarding">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--verde);">
+            <div class="stat-tile-label">Em ongoing</div>
+            <div class="stat-tile-valor" id="tile-crm-ongoing">–</div>
+          </div>
+          <div class="stat-tile" style="--tile-accent: var(--verde);">
+            <div class="stat-tile-label">Valor total em contrato</div>
+            <div class="stat-tile-valor" id="tile-crm-valor-contrato">–</div>
+          </div>
+        </div>
+        <div class="dashboard-insights">
+          <div class="insight-card">
+            <h3>Distribuição por etapa</h3>
+            <div id="crm-barra-estagio"></div>
+          </div>
+          <div class="insight-card">
+            <h3>Clientes por CS responsável</h3>
+            <div id="crm-ranking-csm"></div>
+          </div>
+          <div class="insight-card">
+            <h3>Clientes por Comercial responsável</h3>
+            <div id="crm-ranking-vendedor"></div>
+          </div>
+        </div>
+
+        <div class="insight-card crm-mapa-card">
+          <div class="crm-mapa-abas" role="tablist" aria-label="Filtrar mapa por etapa">
+            <button type="button" class="crm-mapa-aba" data-estagio="onboarding">Onboarding</button>
+            <button type="button" class="crm-mapa-aba" data-estagio="ongoing">Ongoing</button>
+            <button type="button" class="crm-mapa-aba ativa" data-estagio="geral">Geral</button>
+          </div>
+          <h3 id="crm-mapa-titulo">Distribuição — Geral</h3>
+          <div class="dashboard-tiles crm-mapa-tiles">
+            <div class="stat-tile">
+              <div class="stat-tile-label">Total</div>
+              <div class="stat-tile-valor" id="crm-mapa-total">–</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-tile-label">Estados</div>
+              <div class="stat-tile-valor" id="crm-mapa-estados">–</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-tile-label">Maior</div>
+              <div class="stat-tile-valor" id="crm-mapa-maior">–</div>
+            </div>
+          </div>
+          <div class="crm-mapa-wrap" id="crm-mapa-wrap">
+            <p class="placeholder hidden" id="crm-mapa-vazio">Nenhum cliente com estado cadastrado nessa etapa ainda.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="tela-clientes-crm" class="panel hidden">
+        <div class="conteudo-header">
+          <div>
+            <h2 class="conteudo-titulo">Clientes</h2>
+            <p class="conteudo-subtitulo">Todos os clientes da empresa, em qualquer etapa — clique num cliente pra abrir a ficha.</p>
+          </div>
+        </div>
+        <div class="crm-clientes-filtros">
+          <input type="search" id="crm-clientes-busca" class="crm-clientes-busca" placeholder="Buscar por nome ou IdCentral...">
+          <select id="crm-clientes-filtro-etapa">
+            <option value="">Todas as etapas</option>
+            <option value="implantacao">Implantação</option>
+            <option value="onboarding">Onboarding</option>
+            <option value="ongoing">Ongoing</option>
+          </select>
+          <select id="crm-clientes-filtro-csm">
+            <option value="">Todos os CS</option>
+          </select>
+          <select id="crm-clientes-filtro-vendedor">
+            <option value="">Todos os comerciais</option>
+          </select>
+        </div>
+        <div class="crm-clientes-tabela-wrap">
+          <table class="tabela-saida crm-clientes-tabela">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>IdCentral</th>
+                <th>CS responsável</th>
+                <th>Comercial responsável</th>
+                <th>Etapa atual</th>
+              </tr>
+            </thead>
+            <tbody id="crm-clientes-corpo"></tbody>
+          </table>
+          <p class="placeholder hidden" id="crm-clientes-vazio">Nenhum cliente encontrado com esses filtros.</p>
+        </div>
+      </section>
+
+      <section id="tela-churn-crm" class="panel hidden">
+        <div class="conteudo-header">
+          <div>
+            <h2 class="conteudo-titulo">Churn</h2>
+            <p class="conteudo-subtitulo">Acompanhamento de cancelamentos e risco de churn.</p>
+          </div>
+        </div>
+        <p class="placeholder">Em construção — essa tela ainda não está disponível.</p>
       </section>
 
       <section id="tela-ferramentas" class="panel hidden">
@@ -2520,12 +2661,12 @@
               <input type="tel" id="implantacao-cliente-decisor-whatsapp" placeholder="(00) 00000-0000">
             </label>
             <label class="campo-migracao">
-              <span>Estado do Decisor</span>
-              <div id="implantacao-cliente-decisor-estado-wrap"></div>
+              <span>Estado</span>
+              <div id="implantacao-cliente-estado-wrap"></div>
             </label>
             <label class="campo-migracao">
-              <span>Cidade do Decisor</span>
-              <div id="implantacao-cliente-decisor-cidade-wrap"></div>
+              <span>Cidade</span>
+              <div id="implantacao-cliente-cidade-wrap"></div>
             </label>
           </div>
 

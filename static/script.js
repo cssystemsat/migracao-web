@@ -909,14 +909,15 @@ inputImplantacaoClienteImplantado.addEventListener("change", async () => {
   inputImplantacaoClienteImplantado.disabled = false;
 });
 
-// Estado/Cidade do Decisor — comboboxes pesquisáveis. Estado vem de uma lista
-// fixa (carregada 1x); Cidade depende do estado escolhido (API do IBGE,
-// carregada sob demanda e cacheada por UF pelo próprio backend).
-const comboDecisorEstado = criarComboboxPesquisavel("Digite o estado...");
-el("implantacao-cliente-decisor-estado-wrap").appendChild(comboDecisorEstado.wrap);
-const comboDecisorCidade = criarComboboxPesquisavel("Escolha o estado primeiro");
-comboDecisorCidade.input.disabled = true;
-el("implantacao-cliente-decisor-cidade-wrap").appendChild(comboDecisorCidade.wrap);
+// Estado/Cidade do CLIENTE (não do decisor — corrigido em 2026-11-25, ver
+// docs/HISTORICO_DECISOES.md) — comboboxes pesquisáveis. Estado vem de uma
+// lista fixa (carregada 1x); Cidade depende do estado escolhido (API do
+// IBGE, carregada sob demanda e cacheada por UF pelo próprio backend).
+const comboClienteEstado = criarComboboxPesquisavel("Digite o estado...");
+el("implantacao-cliente-estado-wrap").appendChild(comboClienteEstado.wrap);
+const comboClienteCidade = criarComboboxPesquisavel("Escolha o estado primeiro");
+comboClienteCidade.input.disabled = true;
+el("implantacao-cliente-cidade-wrap").appendChild(comboClienteCidade.wrap);
 
 let estadosBrasilCache = null;
 async function carregarEstadosBrasil() {
@@ -928,21 +929,21 @@ async function carregarEstadosBrasil() {
   } catch (err) {
     estadosBrasilCache = [];
   }
-  comboDecisorEstado.setOpcoes(estadosBrasilCache);
+  comboClienteEstado.setOpcoes(estadosBrasilCache);
   return estadosBrasilCache;
 }
 
 const cacheMunicipiosPorUf = {};
 async function carregarMunicipiosDoEstado(uf, cidadeAtual) {
-  comboDecisorCidade.limpar();
+  comboClienteCidade.limpar();
   if (!uf) {
-    comboDecisorCidade.setOpcoes([]);
-    comboDecisorCidade.input.disabled = true;
-    comboDecisorCidade.input.placeholder = "Escolha o estado primeiro";
+    comboClienteCidade.setOpcoes([]);
+    comboClienteCidade.input.disabled = true;
+    comboClienteCidade.input.placeholder = "Escolha o estado primeiro";
     return;
   }
-  comboDecisorCidade.input.disabled = true;
-  comboDecisorCidade.input.placeholder = "Carregando cidades...";
+  comboClienteCidade.input.disabled = true;
+  comboClienteCidade.input.placeholder = "Carregando cidades...";
   try {
     if (!cacheMunicipiosPorUf[uf]) {
       const r = await fetch(`/api/localidades/municipios/${uf}`);
@@ -950,23 +951,23 @@ async function carregarMunicipiosDoEstado(uf, cidadeAtual) {
       if (!data.ok) throw new Error(data.error || "Falha ao carregar cidades.");
       cacheMunicipiosPorUf[uf] = data.municipios.map((nome) => ({ value: nome, label: nome }));
     }
-    comboDecisorCidade.setOpcoes(cacheMunicipiosPorUf[uf]);
-    comboDecisorCidade.input.disabled = false;
-    comboDecisorCidade.input.placeholder = "Digite a cidade...";
-    if (cidadeAtual) comboDecisorCidade.setValor(cidadeAtual);
+    comboClienteCidade.setOpcoes(cacheMunicipiosPorUf[uf]);
+    comboClienteCidade.input.disabled = false;
+    comboClienteCidade.input.placeholder = "Digite a cidade...";
+    if (cidadeAtual) comboClienteCidade.setValor(cidadeAtual);
   } catch (err) {
     // Fallback: API do IBGE fora do ar agora — deixa como texto livre pra
     // não travar o cadastro por causa de um serviço externo.
-    comboDecisorCidade.setOpcoes([]);
-    comboDecisorCidade.modoLivre = true;
-    comboDecisorCidade.input.disabled = false;
-    comboDecisorCidade.input.placeholder = "Digite a cidade (busca indisponível agora)";
-    comboDecisorCidade.input.value = cidadeAtual || "";
-    comboDecisorCidade.valor = cidadeAtual || "";
+    comboClienteCidade.setOpcoes([]);
+    comboClienteCidade.modoLivre = true;
+    comboClienteCidade.input.disabled = false;
+    comboClienteCidade.input.placeholder = "Digite a cidade (busca indisponível agora)";
+    comboClienteCidade.input.value = cidadeAtual || "";
+    comboClienteCidade.valor = cidadeAtual || "";
   }
 }
 
-comboDecisorEstado.aoSelecionar = (uf) => carregarMunicipiosDoEstado(uf, "");
+comboClienteEstado.aoSelecionar = (uf) => carregarMunicipiosDoEstado(uf, "");
 
 // Tentativa de migração em andamento do cliente que está aberto no modal agora
 // (ou null se não tiver nenhuma) — carregada em abrirModalImplantacaoCliente.
@@ -1749,10 +1750,10 @@ async function abrirModalImplantacaoCliente(cliente) {
   inputImplantacaoClientePersona.value = cliente ? cliente.persona || "" : "";
   inputImplantacaoClienteDecisorNome.value = cliente ? cliente.decisor_nome || "" : "";
   inputImplantacaoClienteDecisorWhatsapp.value = cliente ? cliente.decisor_whatsapp || "" : "";
-  comboDecisorEstado.limpar();
-  comboDecisorCidade.limpar();
-  comboDecisorCidade.input.disabled = true;
-  comboDecisorCidade.input.placeholder = "Escolha o estado primeiro";
+  comboClienteEstado.limpar();
+  comboClienteCidade.limpar();
+  comboClienteCidade.input.disabled = true;
+  comboClienteCidade.input.placeholder = "Escolha o estado primeiro";
 
   // Migração é uma condição à parte do cliente (não uma etapa) — só esse campo
   // (Sim/Não) trava quando já há uma ativa: não dá pra "excluir" a migração
@@ -1785,12 +1786,12 @@ async function abrirModalImplantacaoCliente(cliente) {
       // silencioso: não bloqueia a edição do cliente por falha nessa consulta
     }
 
-    // Estado/Cidade do Decisor — carrega em segundo plano, igual à checagem
+    // Estado/Cidade do cliente — carrega em segundo plano, igual à checagem
     // de migração acima (o modal já está visível, isso só popula os campos).
     await carregarEstadosBrasil();
-    if (cliente.decisor_estado) {
-      comboDecisorEstado.setValor(cliente.decisor_estado);
-      await carregarMunicipiosDoEstado(cliente.decisor_estado, cliente.decisor_cidade || "");
+    if (cliente.estado) {
+      comboClienteEstado.setValor(cliente.estado);
+      await carregarMunicipiosDoEstado(cliente.estado, cliente.cidade || "");
     }
   }
 }
@@ -1829,8 +1830,8 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     persona: inputImplantacaoClientePersona.value,
     decisor_nome: inputImplantacaoClienteDecisorNome.value.trim(),
     decisor_whatsapp: inputImplantacaoClienteDecisorWhatsapp.value.trim(),
-    decisor_estado: comboDecisorEstado.valor,
-    decisor_cidade: comboDecisorCidade.valor || comboDecisorCidade.input.value.trim(),
+    estado: comboClienteEstado.valor,
+    cidade: comboClienteCidade.valor || comboClienteCidade.input.value.trim(),
     codigo_idcentral: inputImplantacaoClienteCodigoIdcentral.value.trim(),
   };
   if (!payload.idcentral) return alert("Informe o IdCentral do cliente.");
@@ -20175,6 +20176,7 @@ sidebarToggle.addEventListener("click", () => {
 const SIDEBAR_GRUPOS = {
   implantacao: { botao: el("sidebar-grupo-implantacao"), submenu: el("sidebar-subnav-implantacao") },
   migracao: { botao: el("sidebar-grupo-migracao"), submenu: el("sidebar-subnav-migracao") },
+  crm: { botao: el("sidebar-grupo-crm"), submenu: el("sidebar-subnav-crm") },
   ferramentas: { botao: el("sidebar-grupo-ferramentas"), submenu: el("sidebar-subnav-ferramentas") },
 };
 
@@ -20210,6 +20212,9 @@ const TELAS_NAV = {
   "dashboard-implantacao": el("tela-dashboard-implantacao"),
   implantacao: el("tela-saida-wrapper"),
   migracao: el("tela-saida-wrapper"),
+  "dashboard-crm": el("tela-dashboard-crm"),
+  "clientes-crm": el("tela-clientes-crm"),
+  "churn-crm": el("tela-churn-crm"),
   ferramentas: el("tela-ferramentas"),
   ficha: el("tela-ficha-cliente"),
   "minha-conta": el("tela-minha-conta"),
@@ -20222,6 +20227,9 @@ const NAV_BOTOES = {
   "dashboard-implantacao": el("nav-sub-dashboard-implantacao"),
   implantacao: el("nav-sub-implantacao"),
   migracao: el("nav-sub-migracao"),
+  "dashboard-crm": el("nav-sub-dashboard-crm"),
+  "clientes-crm": el("nav-sub-clientes-crm"),
+  "churn-crm": el("nav-sub-churn-crm"),
 };
 // Telas que pertencem ao mesmo grupo do sidebar, mas não têm o mesmo nome do
 // grupo (ex.: "dashboard-implantacao" mora dentro do grupo "implantacao") —
@@ -20230,6 +20238,9 @@ const TELA_PARA_GRUPO_SIDEBAR = {
   "dashboard-implantacao": "implantacao",
   implantacao: "implantacao",
   migracao: "migracao",
+  "dashboard-crm": "crm",
+  "clientes-crm": "crm",
+  "churn-crm": "crm",
   ferramentas: "ferramentas",
 };
 const NAV_BOTOES_FERRAMENTAS = {
@@ -20252,6 +20263,9 @@ const CAMINHO_POR_TELA = {
   "dashboard-implantacao": "/implantacao/dashboard",
   implantacao: "/implantacao",
   migracao: "/migracao",
+  "dashboard-crm": "/crm/dashboard",
+  "clientes-crm": "/crm/clientes",
+  "churn-crm": "/crm/churn",
   ferramentas: "/ferramentas",
   "minha-conta": "/minha-conta",
   configuracoes: "/configuracoes",
@@ -20262,6 +20276,9 @@ const TELA_POR_CAMINHO_RAIZ = {
   "/implantacao/dashboard": "dashboard-implantacao",
   "/implantacao": "implantacao",
   "/migracao": "migracao",
+  "/crm/dashboard": "dashboard-crm",
+  "/crm/clientes": "clientes-crm",
+  "/crm/churn": "churn-crm",
   "/ferramentas": "ferramentas",
   "/minha-conta": "minha-conta",
   "/configuracoes": "configuracoes",
@@ -20688,6 +20705,8 @@ function irParaTela(tela, opcoes) {
   if (tela === "migracao") { atualizarSaidaHeader("Controle de Migração", false); carregarClientesMigracao(); }
   if (tela === "dashboard") carregarDashboardNovo();
   if (tela === "dashboard-implantacao") carregarDashboardImplantacao();
+  if (tela === "dashboard-crm") carregarDashboardCrm();
+  if (tela === "clientes-crm") carregarClientesCrm();
   if (tela === "feed") carregarFeed();
   if (tela === "ficha") carregarFichaCliente(opcoes.idcentral, abaFichaSolicitada);
   if (tela === "minha-conta") { carregarMinhaConta(); carregarMinhasTarefas(); }
@@ -21194,6 +21213,9 @@ NAV_BOTOES.dashboard.addEventListener("click", () => irParaTela("dashboard"));
 NAV_BOTOES["dashboard-implantacao"].addEventListener("click", () => irParaTela("dashboard-implantacao"));
 NAV_BOTOES.implantacao.addEventListener("click", () => irParaTela("implantacao"));
 NAV_BOTOES.migracao.addEventListener("click", () => irParaTela("migracao"));
+NAV_BOTOES["dashboard-crm"].addEventListener("click", () => irParaTela("dashboard-crm"));
+NAV_BOTOES["clientes-crm"].addEventListener("click", () => irParaTela("clientes-crm"));
+NAV_BOTOES["churn-crm"].addEventListener("click", () => irParaTela("churn-crm"));
 
 const PREPARAR_FERRAMENTA_PARA_ABRIR = {
   "conversor-kml": limparConversor,
@@ -22072,6 +22094,248 @@ function renderDiEnvelhecimentoCarteira(clientes) {
   });
   card.appendChild(linhas);
   return card;
+}
+
+// --- CRM: Dashboard CRM e lista de Clientes (todos os estágios) ---
+const CRM_ESTAGIO_ORDEM = ["implantacao", "onboarding", "ongoing"];
+const CRM_ESTAGIO_LABELS = { implantacao: "Implantação", onboarding: "Onboarding", ongoing: "Ongoing" };
+const CRM_ESTAGIO_CORES = {
+  implantacao: "var(--amarelo-escuro)",
+  onboarding: "var(--violeta)",
+  ongoing: "var(--verde)",
+};
+
+function construirRankingSimples(contagens, limite) {
+  const wrap = document.createElement("div");
+  wrap.className = "status-legenda";
+  const entradas = Object.entries(contagens).sort((a, b) => b[1] - a[1]).slice(0, limite || 8);
+  if (!entradas.length) {
+    wrap.textContent = "Sem dados.";
+    return wrap;
+  }
+  entradas.forEach(([nome, qtd]) => {
+    const item = document.createElement("div");
+    item.className = "status-legenda-item";
+    const nomeSpan = document.createElement("span");
+    nomeSpan.textContent = nome;
+    const valor = document.createElement("span");
+    valor.className = "status-legenda-valor";
+    valor.textContent = String(qtd);
+    item.appendChild(nomeSpan);
+    item.appendChild(valor);
+    wrap.appendChild(item);
+  });
+  return wrap;
+}
+
+async function carregarDashboardCrm() {
+  try {
+    const r = await fetch("/api/dashboard-crm");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return;
+
+    el("tile-crm-total").textContent = data.total ?? "–";
+    el("tile-crm-implantacao").textContent = data.por_estagio?.implantacao ?? "–";
+    el("tile-crm-onboarding").textContent = data.por_estagio?.onboarding ?? "–";
+    el("tile-crm-ongoing").textContent = data.por_estagio?.ongoing ?? "–";
+    el("tile-crm-valor-contrato").textContent = formatarMoedaBRL(data.valor_contrato_total);
+
+    const barraWrap = el("crm-barra-estagio");
+    barraWrap.innerHTML = "";
+    barraWrap.appendChild(construirBarraDistribuicao(
+      CRM_ESTAGIO_ORDEM, CRM_ESTAGIO_CORES, data.por_estagio || {}, data.total || 0, CRM_ESTAGIO_LABELS
+    ));
+
+    const rankingCsm = el("crm-ranking-csm");
+    rankingCsm.innerHTML = "";
+    rankingCsm.appendChild(construirRankingSimples(data.por_csm || {}));
+
+    const rankingVendedor = el("crm-ranking-vendedor");
+    rankingVendedor.innerHTML = "";
+    rankingVendedor.appendChild(construirRankingSimples(data.por_vendedor || {}));
+
+    crmMapaPorUfCache = data.por_uf || {};
+    renderCrmMapa(crmMapaAbaAtual);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// --- Mapa "Clientes por estado" do Dashboard CRM ---
+// Posição de cada UF é aproximada (centro geográfico da sigla, projeção
+// equiretangular simples) — não é um contorno fiel do Brasil, só um mapa de
+// bolhas posicionado pela localização real de cada estado.
+const CRM_UF_CENTROIDES = {
+  AC: [-9.0, -70.5], AL: [-9.6, -36.2], AP: [1.4, -51.8], AM: [-5.0, -65.0],
+  BA: [-12.5, -41.7], CE: [-5.2, -39.3], DF: [-15.8, -47.9], ES: [-19.5, -40.5],
+  GO: [-15.8, -49.8], MA: [-5.0, -45.5], MT: [-12.8, -56.0], MS: [-20.5, -54.6],
+  MG: [-18.5, -44.5], PA: [-4.0, -52.0], PB: [-7.2, -36.5], PR: [-24.5, -51.5],
+  PE: [-8.5, -37.5], PI: [-7.5, -42.5], RJ: [-22.0, -43.0], RN: [-5.7, -36.6],
+  RS: [-29.8, -53.0], RO: [-10.9, -62.8], RR: [2.0, -61.5], SC: [-27.3, -50.0],
+  SP: [-22.2, -48.5], SE: [-10.6, -37.3], TO: [-10.2, -48.3],
+};
+const CRM_MAPA_LON_RANGE = [-74, -34];
+const CRM_MAPA_LAT_RANGE = [-34, 6];
+
+let crmMapaPorUfCache = {};
+let crmMapaAbaAtual = "geral";
+
+function renderCrmMapa(estagio) {
+  crmMapaAbaAtual = estagio;
+  document.querySelectorAll(".crm-mapa-aba").forEach((btn) => {
+    btn.classList.toggle("ativa", btn.dataset.estagio === estagio);
+  });
+  el("crm-mapa-titulo").textContent = `Distribuição — ${CRM_ESTAGIO_LABELS[estagio] || "Geral"}`;
+
+  const contagens = crmMapaPorUfCache[estagio] || {};
+  const ufs = Object.keys(contagens);
+  const total = ufs.reduce((soma, uf) => soma + contagens[uf], 0);
+  const maiorUf = ufs.reduce((maior, uf) => (!maior || contagens[uf] > contagens[maior] ? uf : maior), null);
+
+  el("crm-mapa-total").textContent = total || "–";
+  el("crm-mapa-estados").textContent = ufs.length || "–";
+  el("crm-mapa-maior").textContent = maiorUf || "–";
+
+  const wrap = el("crm-mapa-wrap");
+  wrap.querySelectorAll(".crm-mapa-bolha").forEach((b) => b.remove());
+  el("crm-mapa-vazio").classList.toggle("hidden", ufs.length > 0);
+  if (!ufs.length) return;
+
+  const maiorQtd = Math.max(...ufs.map((uf) => contagens[uf]));
+  ufs.forEach((uf) => {
+    const centroide = CRM_UF_CENTROIDES[uf];
+    if (!centroide) return;
+    const qtd = contagens[uf];
+    const [lat, lon] = centroide;
+    const xPct = ((lon - CRM_MAPA_LON_RANGE[0]) / (CRM_MAPA_LON_RANGE[1] - CRM_MAPA_LON_RANGE[0])) * 100;
+    const yPct = ((CRM_MAPA_LAT_RANGE[1] - lat) / (CRM_MAPA_LAT_RANGE[1] - CRM_MAPA_LAT_RANGE[0])) * 100;
+
+    const bolha = document.createElement("div");
+    bolha.className = "crm-mapa-bolha";
+    bolha.style.left = `${xPct}%`;
+    bolha.style.top = `${yPct}%`;
+    bolha.title = `${uf}: ${qtd} cliente${qtd === 1 ? "" : "s"}`;
+    bolha.addEventListener("click", () => {
+      irParaTela("clientes-crm");
+      // O filtro de etapa da lista só entende implantacao/onboarding/ongoing
+      // — "geral" (aba Geral do mapa) não filtra etapa, só mostra o estado
+      // clicado em todos os estágios. Reaproveita a busca livre (que já
+      // procura em c.estado) em vez de criar um filtro de UF dedicado.
+      setTimeout(() => {
+        el("crm-clientes-filtro-etapa").value = estagio === "geral" ? "" : estagio;
+        el("crm-clientes-busca").value = uf;
+        renderClientesCrmTabela();
+      }, 0);
+    });
+
+    const circulo = document.createElement("div");
+    circulo.className = "crm-mapa-bolha-circulo";
+    const tamanho = 22 + Math.round((qtd / maiorQtd) * 26);
+    circulo.style.width = `${tamanho}px`;
+    circulo.style.height = `${tamanho}px`;
+    circulo.textContent = String(qtd);
+
+    const rotuloUf = document.createElement("div");
+    rotuloUf.className = "crm-mapa-bolha-uf";
+    rotuloUf.textContent = uf;
+
+    bolha.append(circulo, rotuloUf);
+    wrap.appendChild(bolha);
+  });
+}
+
+document.querySelectorAll(".crm-mapa-aba").forEach((btn) => {
+  btn.addEventListener("click", () => renderCrmMapa(btn.dataset.estagio));
+});
+
+let crmClientesCache = [];
+let crmClientesFiltrosPreparados = false;
+
+function crmPopularSelectDistinto(selectEl, valores, placeholder) {
+  const atual = selectEl.value;
+  selectEl.innerHTML = "";
+  const optPadrao = document.createElement("option");
+  optPadrao.value = "";
+  optPadrao.textContent = placeholder;
+  selectEl.appendChild(optPadrao);
+  [...new Set(valores.filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR")).forEach((v) => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v;
+    selectEl.appendChild(opt);
+  });
+  if ([...selectEl.options].some((o) => o.value === atual)) selectEl.value = atual;
+}
+
+function renderClientesCrmTabela() {
+  const busca = el("crm-clientes-busca").value.trim().toLowerCase();
+  const etapa = el("crm-clientes-filtro-etapa").value;
+  const csm = el("crm-clientes-filtro-csm").value;
+  const vendedor = el("crm-clientes-filtro-vendedor").value;
+
+  const filtrados = crmClientesCache.filter((c) => {
+    if (etapa && c.estagio !== etapa) return false;
+    if (csm && (c.csm || "") !== csm) return false;
+    if (vendedor && (c.vendedor || "") !== vendedor) return false;
+    if (busca) {
+      const alvo = `${c.cliente || ""} ${c.idcentral || ""} ${c.estado || ""}`.toLowerCase();
+      if (!alvo.includes(busca)) return false;
+    }
+    return true;
+  });
+
+  const corpo = el("crm-clientes-corpo");
+  corpo.innerHTML = "";
+  filtrados.forEach((c) => {
+    const tr = document.createElement("tr");
+    tr.className = "crm-clientes-linha";
+    tr.tabIndex = 0;
+    tr.addEventListener("click", () => irParaFicha(c.idcentral));
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter") irParaFicha(c.idcentral); });
+
+    const tdCliente = document.createElement("td");
+    tdCliente.textContent = c.cliente || "—";
+    const tdIdcentral = document.createElement("td");
+    tdIdcentral.textContent = c.idcentral || "—";
+    const tdCsm = document.createElement("td");
+    tdCsm.textContent = c.csm || "—";
+    const tdVendedor = document.createElement("td");
+    tdVendedor.textContent = c.vendedor || "—";
+    const tdEtapa = document.createElement("td");
+    const tagEtapa = document.createElement("span");
+    tagEtapa.className = `tag-resumo tag-estagio-${c.estagio || "implantacao"}`;
+    tagEtapa.textContent = CRM_ESTAGIO_LABELS[c.estagio] || c.estagio || "—";
+    tdEtapa.appendChild(tagEtapa);
+
+    tr.append(tdCliente, tdIdcentral, tdCsm, tdVendedor, tdEtapa);
+    corpo.appendChild(tr);
+  });
+
+  el("crm-clientes-vazio").classList.toggle("hidden", filtrados.length > 0);
+}
+
+async function carregarClientesCrm() {
+  try {
+    const r = await fetch("/api/clientes");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return;
+    crmClientesCache = data.clientes || [];
+
+    crmPopularSelectDistinto(el("crm-clientes-filtro-csm"), crmClientesCache.map((c) => c.csm), "Todos os CS");
+    crmPopularSelectDistinto(el("crm-clientes-filtro-vendedor"), crmClientesCache.map((c) => c.vendedor), "Todos os comerciais");
+
+    if (!crmClientesFiltrosPreparados) {
+      crmClientesFiltrosPreparados = true;
+      el("crm-clientes-busca").addEventListener("input", renderClientesCrmTabela);
+      el("crm-clientes-filtro-etapa").addEventListener("change", renderClientesCrmTabela);
+      el("crm-clientes-filtro-csm").addEventListener("change", renderClientesCrmTabela);
+      el("crm-clientes-filtro-vendedor").addEventListener("change", renderClientesCrmTabela);
+    }
+
+    renderClientesCrmTabela();
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 async function carregarDashboardImplantacao() {
@@ -23451,9 +23715,9 @@ function construirFichaLinhaContato(implantacao) {
   linha.appendChild(construirCardContato({
     icone: "pin",
     rotulo: "Região",
-    valor: implantacao.decisor_cidade,
+    valor: implantacao.cidade,
     vazio: "não definida",
-    detalhes: [implantacao.decisor_estado],
+    detalhes: [implantacao.estado],
     whatsapp: null,
     accent: "turquesa",
   }));
@@ -23471,7 +23735,7 @@ function construirFichaContatosSecao(implantacao) {
   const h3 = document.createElement("h3");
   h3.textContent = "Contatos Essenciais da Conta";
   titulo.appendChild(h3);
-  const preenchidos = [implantacao.csm, implantacao.vendedor, implantacao.decisor_nome, implantacao.decisor_cidade]
+  const preenchidos = [implantacao.csm, implantacao.vendedor, implantacao.decisor_nome, implantacao.cidade]
     .filter(Boolean).length;
   const contagem = document.createElement("span");
   contagem.textContent = `${preenchidos} canal${preenchidos === 1 ? "" : "is"} vinculado${preenchidos === 1 ? "" : "s"}`;
@@ -24234,7 +24498,7 @@ function construirFichaOperacionalCard(idcentral, implantacao, credencialConfigu
     const dp = implantacao.dados_planilha;
     const valorUtil = (v) => (v && v !== "-" ? v : null);
     const itensIndicadores = [
-      ["Cidade/Estado", [implantacao.decisor_cidade, implantacao.decisor_estado].filter(Boolean).join(" - ") || null],
+      ["Cidade/Estado", [implantacao.cidade, implantacao.estado].filter(Boolean).join(" - ") || null],
       ["% Veículos desatualizados", valorUtil(dp["9 - % veiculos desatualizados"])],
       ["Rastreadores desatualizados", valorUtil(dp["10 - Rasteadores desatualizados"])],
       ["Último boleto", valorUtil(dp["6 - Ultimo boleto"])],

@@ -1181,6 +1181,21 @@ def tela_migracao():
     return _renderizar_shell()
 
 
+@app.route("/crm/dashboard")
+def tela_dashboard_crm():
+    return _renderizar_shell()
+
+
+@app.route("/crm/clientes")
+def tela_clientes_crm():
+    return _renderizar_shell()
+
+
+@app.route("/crm/churn")
+def tela_churn_crm():
+    return _renderizar_shell()
+
+
 @app.route("/ferramentas")
 def tela_ferramentas():
     return _renderizar_shell()
@@ -1918,8 +1933,8 @@ ROTULOS_CLIENTE = {
     "persona": "Persona",
     "decisor_nome": "Nome do decisor",
     "decisor_whatsapp": "WhatsApp do decisor",
-    "decisor_estado": "Estado do decisor",
-    "decisor_cidade": "Cidade do decisor",
+    "estado": "Estado",
+    "cidade": "Cidade",
     "codigo_idcentral": "Código IdCentral",
 }
 
@@ -1948,9 +1963,9 @@ def _dados_cliente(data):
     persona = str(data.get("persona", "")).strip()
     if persona not in PERSONA_CLIENTE_OPCOES:
         persona = ""
-    decisor_estado = str(data.get("decisor_estado", "")).strip().upper()
-    if decisor_estado not in SIGLAS_ESTADOS_BRASIL:
-        decisor_estado = ""
+    estado = str(data.get("estado", "")).strip().upper()
+    if estado not in SIGLAS_ESTADOS_BRASIL:
+        estado = ""
     return {
         "idcentral": idcentral,
         "cliente": cliente,
@@ -1979,10 +1994,11 @@ def _dados_cliente(data):
         "persona": persona,
         "decisor_nome": str(data.get("decisor_nome", "")).strip(),
         "decisor_whatsapp": str(data.get("decisor_whatsapp", "")).strip(),
-        "decisor_estado": decisor_estado,
+        # Localização do CLIENTE (não do decisor) — ver docs/HISTORICO_DECISOES.md.
+        "estado": estado,
         # Cidade não é validada contra uma lista fixa — vem da API do IBGE,
         # filtrada pelo estado, mas o valor final salvo é só o nome mesmo.
-        "decisor_cidade": str(data.get("decisor_cidade", "")).strip(),
+        "cidade": str(data.get("cidade", "")).strip(),
         # Código de associação usado por sistemas externos (ex. Suporte) —
         # só perfil adm pode gravar (trava aplicada na rota de editar, não
         # aqui: aqui só extrai o que veio no payload).
@@ -2858,8 +2874,8 @@ COLUNAS_PLANILHA_CS = {
     "objetivo": "27 - Objetivos do cliente",
     "decisor_nome": "31 - Decisor",
     "decisor_whatsapp": "32 - Contato",
-    "decisor_cidade": "35 - Cidade",
-    "decisor_estado": "36 - Estado",
+    "cidade": "35 - Cidade",
+    "estado": "36 - Estado",
     "valor_contrato": "55 - Valor de contrato",
 }
 
@@ -2875,8 +2891,8 @@ CAMPOS_SYNC_PLANILHA = [
     ("objetivo", "Objetivo"),
     ("decisor_nome", "Decisor"),
     ("decisor_whatsapp", "WhatsApp do decisor"),
-    ("decisor_cidade", "Cidade do decisor"),
-    ("decisor_estado", "Estado do decisor"),
+    ("cidade", "Cidade"),
+    ("estado", "Estado"),
     ("valor_contrato", "Valor de contrato"),
 ]
 
@@ -2960,9 +2976,9 @@ def _linha_planilha_para_dados(row):
     persona = str(row.get(COLUNAS_PLANILHA_CS["persona"], "")).strip()
     if persona not in PERSONA_CLIENTE_OPCOES:
         persona = ""
-    decisor_estado = str(row.get(COLUNAS_PLANILHA_CS["decisor_estado"], "")).strip().upper()
-    if decisor_estado not in SIGLAS_ESTADOS_BRASIL:
-        decisor_estado = ""
+    estado = str(row.get(COLUNAS_PLANILHA_CS["estado"], "")).strip().upper()
+    if estado not in SIGLAS_ESTADOS_BRASIL:
+        estado = ""
 
     return {
         "idcentral": str(row.get(COLUNAS_PLANILHA_CS["idcentral"], "")).strip(),
@@ -2976,8 +2992,8 @@ def _linha_planilha_para_dados(row):
         "objetivo": str(row.get(COLUNAS_PLANILHA_CS["objetivo"], "")).strip(),
         "decisor_nome": str(row.get(COLUNAS_PLANILHA_CS["decisor_nome"], "")).strip(),
         "decisor_whatsapp": str(row.get(COLUNAS_PLANILHA_CS["decisor_whatsapp"], "")).strip(),
-        "decisor_cidade": str(row.get(COLUNAS_PLANILHA_CS["decisor_cidade"], "")).strip(),
-        "decisor_estado": decisor_estado,
+        "cidade": str(row.get(COLUNAS_PLANILHA_CS["cidade"], "")).strip(),
+        "estado": estado,
         "valor_contrato": _parse_valor_planilha(row.get(COLUNAS_PLANILHA_CS["valor_contrato"], "")),
     }
 
@@ -3152,8 +3168,8 @@ COLUNAS_IMPORT_CLIENTES = {
     "persona": "Persona",
     "decisor_nome": "Nome do Decisor",
     "decisor_whatsapp": "WhatsApp do Decisor",
-    "decisor_estado": "Estado do Decisor",
-    "decisor_cidade": "Cidade do Decisor",
+    "estado": "Estado",
+    "cidade": "Cidade",
 }
 
 IMPORT_CLIENTES_UPLOADS = {}
@@ -4604,6 +4620,17 @@ def _contar(query):
     """Contagem agregada do Firestore (count()) — custa 1 leitura a cada 1.000
     documentos contados, em vez de 1 leitura por documento como .stream()."""
     return int(query.count().get()[0][0].value)
+
+
+@app.route("/api/dashboard-crm")
+def dashboard_crm_indicadores():
+    # Mesmo padrão de cache dos outros dashboards (ver _cache_api_obter) — a
+    # tela não precisa de dado ao segundo, e evita recontar tudo a cada abertura.
+    return jsonify(ok=True, **_cache_api_obter(
+        "dashboard-crm",
+        lambda: clientes_sql.estatisticas_dashboard_crm(ESTAGIOS_CLIENTE, ESTAGIO_CLIENTE_PADRAO),
+        ttl=300,
+    ))
 
 
 @app.route("/api/dashboard")

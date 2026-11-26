@@ -207,8 +207,11 @@ class Cliente(Base):
 
     decisor_nome: Mapped[str] = mapped_column(default="")
     decisor_whatsapp: Mapped[str] = mapped_column(default="")
-    decisor_estado: Mapped[str] = mapped_column(default="")
-    decisor_cidade: Mapped[str] = mapped_column(default="")
+    # Localização do CLIENTE (não do decisor) — nome de coluna corrigido em
+    # 2026-11-25 (ver docs/HISTORICO_DECISOES.md); antes se chamava
+    # decisor_estado/decisor_cidade por erro de nomenclatura.
+    estado: Mapped[str] = mapped_column(default="")
+    cidade: Mapped[str] = mapped_column(default="")
 
     implantado: Mapped[bool] = mapped_column(default=False)
     implantado_em: Mapped[str] = mapped_column(default="")

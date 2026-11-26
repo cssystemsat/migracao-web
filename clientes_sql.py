@@ -56,8 +56,8 @@ def _cliente_para_dict(c):
         "persona": c.persona,
         "decisor_nome": c.decisor_nome,
         "decisor_whatsapp": c.decisor_whatsapp,
-        "decisor_estado": c.decisor_estado,
-        "decisor_cidade": c.decisor_cidade,
+        "estado": c.estado,
+        "cidade": c.cidade,
         "implantado": c.implantado,
         "implantado_em": c.implantado_em,
         "implantado_por": c.implantado_por,
@@ -230,6 +230,49 @@ def contar_por_estagio(valores, padrao):
     contagem = {v: linhas.get(v, 0) for v in valores}
     contagem[padrao] = contagem.get(padrao, 0) + sum(c for v, c in linhas.items() if v not in valores)
     return contagem, total
+
+
+def estatisticas_dashboard_crm(valores_estagio, padrao_estagio):
+    """Totais gerais de todos os clientes (independente de estágio) pro
+    Dashboard CRM — contagem por estágio (reaproveita `contar_por_estagio`),
+    por CS e por Comercial responsável, soma de `valor_contrato` e contagem
+    por estado (`por_uf`, separado por estágio + "geral" com todos — mapa do
+    Dashboard CRM)."""
+    por_estagio, total = contar_por_estagio(valores_estagio, padrao_estagio)
+    with obter_sessao_leitura() as sessao:
+        por_csm = dict(
+            sessao.query(Cliente.csm_nome, func.count(Cliente.id)).group_by(Cliente.csm_nome).all()
+        )
+        por_vendedor = dict(
+            sessao.query(Cliente.vendedor_nome, func.count(Cliente.id)).group_by(Cliente.vendedor_nome).all()
+        )
+        valor_contrato_total = sessao.query(func.coalesce(func.sum(Cliente.valor_contrato), 0)).scalar() or 0
+        linhas_uf = (
+            sessao.query(Cliente.estagio, Cliente.estado, func.count(Cliente.id))
+            .group_by(Cliente.estagio, Cliente.estado)
+            .all()
+        )
+    por_csm = {(nome or "Sem CS definido"): qtd for nome, qtd in por_csm.items()}
+    por_vendedor = {(nome or "Sem comercial definido"): qtd for nome, qtd in por_vendedor.items()}
+
+    por_uf = {v: {} for v in valores_estagio}
+    por_uf["geral"] = {}
+    for estagio, estado, qtd in linhas_uf:
+        if not estado:
+            continue
+        estagio = estagio if estagio in valores_estagio else padrao_estagio
+        por_uf.setdefault(estagio, {})
+        por_uf[estagio][estado] = por_uf[estagio].get(estado, 0) + qtd
+        por_uf["geral"][estado] = por_uf["geral"].get(estado, 0) + qtd
+
+    return dict(
+        total=total,
+        por_estagio=por_estagio,
+        por_csm=por_csm,
+        por_vendedor=por_vendedor,
+        valor_contrato_total=float(valor_contrato_total),
+        por_uf=por_uf,
+    )
 
 
 def contar_por_etapa_implantacao(valores, padrao):

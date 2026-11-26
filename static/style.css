@@ -3390,6 +3390,73 @@ input:disabled, select:disabled, input.input-travado {
    cabeçalho do cliente — precisa saltar mais aos olhos que o Red Flag (que é
    um estado, não uma contagem correndo). Cor fixa (igual às outras tags). */
 .tag-atrasado-solido { background: #ba1a1a; color: #ffffff; border-color: transparent; font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.tag-estagio-implantacao { background: #fffbeb; color: #b45309; border-color: transparent; }
+.tag-estagio-onboarding { background: #f5f3ff; color: #5b21b6; border-color: transparent; }
+.tag-estagio-ongoing { background: #ecfdf5; color: #166534; border-color: transparent; }
+
+/* Tela Clientes (CRM): filtros + tabela clicável — mesmo padrão de tabela
+   das demais telas (table.tabela-saida), só que a linha inteira é clicável
+   pra abrir a ficha, em vez de um botão de ação por coluna. */
+.crm-clientes-filtros { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.crm-clientes-busca { flex: 1 1 240px; min-width: 200px; }
+.crm-clientes-filtros select { min-width: 160px; }
+.crm-clientes-tabela-wrap { overflow: auto; }
+table.crm-clientes-tabela .crm-clientes-linha { cursor: pointer; }
+table.crm-clientes-tabela .crm-clientes-linha:hover td { background: var(--cinza-100); }
+:root[data-theme="dark"] table.crm-clientes-tabela .crm-clientes-linha:hover td { background: #1e2a42; }
+
+/* Dashboard CRM: mapa de clientes por estado — bolhas posicionadas por
+   coordenada aproximada do centro de cada UF (ver CRM_UF_CENTROIDES em
+   script.js), sem contorno fiel do Brasil (mapa simplificado, não um SVG
+   geográfico preciso). */
+.crm-mapa-card { grid-column: 1 / -1; }
+.crm-mapa-abas { display: flex; gap: 8px; margin-bottom: 12px; }
+.crm-mapa-aba {
+  border: 1px solid var(--cinza-200);
+  background: var(--cinza-100);
+  color: var(--cinza-700, #374151);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.crm-mapa-aba.ativa { background: var(--verde); border-color: var(--verde); color: #ffffff; }
+.crm-mapa-tiles { margin-bottom: 16px; }
+.crm-mapa-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
+  background: linear-gradient(180deg, #f0fdf4, #ecfdf5);
+  border-radius: 12px;
+  border: 1px solid var(--cinza-200);
+}
+:root[data-theme="dark"] .crm-mapa-wrap { background: linear-gradient(180deg, #0f2318, #0b1f17); }
+.crm-mapa-bolha {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+}
+.crm-mapa-bolha-circulo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--verde);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.72rem;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.crm-mapa-bolha-uf { font-size: 0.68rem; font-weight: 700; color: var(--cinza-700, #374151); background: #ffffff; padding: 0 4px; border-radius: 4px; }
+:root[data-theme="dark"] .crm-mapa-bolha-uf { color: #e5e7eb; background: #1e2a42; }
 
 .marco-linha {
   display: flex;

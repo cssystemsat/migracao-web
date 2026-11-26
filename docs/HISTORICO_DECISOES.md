@@ -383,6 +383,23 @@ Decisão do usuário: não ativar onboarding/ongoing nesta rodada — fica para
 quando houver definição mais completa do fluxo de pós-vendas. Não
 interpretar isso como funcionalidade esquecida/bug.
 
+**Revisão parcial (2026-11-25): módulo CRM criado, mas ainda sem controle de
+onboarding/ongoing.** Pedido explícito do usuário: novo grupo "CRM" no
+sidebar com 3 sub-telas — Dashboard CRM, Clientes e Churn (placeholder vazio,
+"em construção"). A tela Clientes lista TODOS os clientes (qualquer
+`estagio`) com CS responsável, Comercial responsável, etapa atual, busca e
+filtros, e abre a Ficha ao clicar. Isso dá visibilidade ao `estagio` pela
+primeira vez numa tela, mas **não é a ativação de onboarding/ongoing**
+decidida acima — onboarding e ongoing continuam sem nenhum controle próprio
+(sem Kanban, sem marcos, sem objetivos equivalentes ao de Implantação); só
+aparecem como rótulo na lista. O próprio usuário confirmou que montar esse
+controle (nos mesmos moldes do Controle de Implantação) é a "próxima etapa",
+ainda não deste pedido. Implementação: reaproveitou `/api/clientes`
+(já existente, sem filtro de estágio) pra lista, e uma função nova
+`clientes_sql.estatisticas_dashboard_crm` (rota `/api/dashboard-crm`) pros
+totais do Dashboard CRM — nenhuma rota/coleção nova precisou ser criada só
+pra isso.
+
 ## Log de auditoria e histórico do cliente em banco relacional paralelo
 
 Decisão: criar um banco relacional (Postgres em produção, SQLite em dev) só

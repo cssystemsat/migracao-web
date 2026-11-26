@@ -7,10 +7,12 @@
 ## Regra de negócio central: Cliente / Implantação / Migração
 
 - Todo cliente tem um **ID Central único** e uma etapa de relacionamento
-  (`estagio`): `implantacao`, `onboarding` ou `ongoing`. Hoje o sistema só
-  controla operacionalmente a Implantação por tela própria — `onboarding` e
-  `ongoing` existem no cadastro mas sem tela que os ative ainda (dormentes,
-  por decisão deliberada).
+  (`estagio`): `implantacao`, `onboarding` ou `ongoing`. A tela CRM →
+  Clientes mostra esse `estagio` pra todo cliente, qualquer que seja (ver
+  seção "CRM" abaixo), mas **continua sem controle operacional por tela
+  própria** pra `onboarding`/`ongoing` — não há ainda um "Controle de
+  Onboarding" ou "Controle de Ongoing" equivalente ao de Implantação; isso é
+  a próxima etapa planejada, não implementada nesta rodada.
 - **Implantação e Migração são processos paralelos e independentes**, não um
   sub-estágio um do outro. Um cliente pode estar em qualquer etapa de
   relacionamento e, paralelamente, ter ou não um processo de Migração.
@@ -33,6 +35,28 @@
 
 Tela inicial com acesso rápido às três grandes áreas: Controle de
 Implantação, Controle de Migração e Ferramentas Auxiliares.
+
+## CRM
+
+Novo grupo no sidebar, com 3 sub-telas (`/crm/dashboard`, `/crm/clientes`,
+`/crm/churn`). Visão de cliente que cruza todos os estágios de uma vez (ao
+contrário de Implantação/Migração, que olham só o processo específico).
+
+- **Dashboard CRM** (`/crm/dashboard`): visão geral de TODOS os clientes da
+  empresa, independente do estágio — total de clientes, distribuição por
+  estágio (implantação/onboarding/ongoing), ranking por CS responsável e por
+  Comercial responsável, e valor total em contrato. Dado vem de
+  `/api/dashboard-crm` (`clientes_sql.estatisticas_dashboard_crm`).
+- **Clientes** (`/crm/clientes`): lista única com todos os clientes de
+  qualquer estágio (reaproveita `/api/clientes`, já usado por outras telas) —
+  nome, IdCentral, CS responsável, Comercial responsável e etapa atual, com
+  busca por nome/IdCentral e filtro por etapa/CS/Comercial. Clicar na linha
+  abre a Ficha do cliente (mesma função `irParaFicha` das outras listas).
+  Onboarding e ongoing aparecem aqui só como o nome da etapa — ainda não têm
+  um controle próprio (equivalente ao Controle de Implantação) por trás; ver
+  decisão acima e `docs/HISTORICO_DECISOES.md`.
+- **Churn** (`/crm/churn`): placeholder, ainda "em construção" — sem
+  funcionalidade real nesta rodada.
 
 ## Dashboard de Implantação
 
