@@ -848,7 +848,7 @@ const inputImplantacaoClienteData = el("implantacao-cliente-data");
 const inputImplantacaoClienteObjetivo = el("implantacao-cliente-objetivo");
 const inputImplantacaoClienteValor = el("implantacao-cliente-valor");
 const inputImplantacaoClienteCsm = el("implantacao-cliente-csm");
-const inputImplantacaoClienteTemMigracao = el("implantacao-cliente-tem-migracao");
+const inputImplantacaoClienteEstagio = el("implantacao-cliente-estagio");
 const inputImplantacaoClienteMomento = el("implantacao-cliente-momento");
 const inputImplantacaoClienteFlag = el("implantacao-cliente-flag");
 const inputImplantacaoClienteVendedor = el("implantacao-cliente-vendedor");
@@ -934,16 +934,18 @@ async function carregarEstadosBrasil() {
 }
 
 const cacheMunicipiosPorUf = {};
-async function carregarMunicipiosDoEstado(uf, cidadeAtual) {
-  comboClienteCidade.limpar();
+// `combo` padrão é o do modal de cliente; a Ficha cadastral (modo edição)
+// passa o próprio combobox de Cidade.
+async function carregarMunicipiosDoEstado(uf, cidadeAtual, combo = comboClienteCidade) {
+  combo.limpar();
   if (!uf) {
-    comboClienteCidade.setOpcoes([]);
-    comboClienteCidade.input.disabled = true;
-    comboClienteCidade.input.placeholder = "Escolha o estado primeiro";
+    combo.setOpcoes([]);
+    combo.input.disabled = true;
+    combo.input.placeholder = "Escolha o estado primeiro";
     return;
   }
-  comboClienteCidade.input.disabled = true;
-  comboClienteCidade.input.placeholder = "Carregando cidades...";
+  combo.input.disabled = true;
+  combo.input.placeholder = "Carregando cidades...";
   try {
     if (!cacheMunicipiosPorUf[uf]) {
       const r = await fetch(`/api/localidades/municipios/${uf}`);
@@ -951,19 +953,19 @@ async function carregarMunicipiosDoEstado(uf, cidadeAtual) {
       if (!data.ok) throw new Error(data.error || "Falha ao carregar cidades.");
       cacheMunicipiosPorUf[uf] = data.municipios.map((nome) => ({ value: nome, label: nome }));
     }
-    comboClienteCidade.setOpcoes(cacheMunicipiosPorUf[uf]);
-    comboClienteCidade.input.disabled = false;
-    comboClienteCidade.input.placeholder = "Digite a cidade...";
-    if (cidadeAtual) comboClienteCidade.setValor(cidadeAtual);
+    combo.setOpcoes(cacheMunicipiosPorUf[uf]);
+    combo.input.disabled = false;
+    combo.input.placeholder = "Digite a cidade...";
+    if (cidadeAtual) combo.setValor(cidadeAtual);
   } catch (err) {
     // Fallback: API do IBGE fora do ar agora — deixa como texto livre pra
     // não travar o cadastro por causa de um serviço externo.
-    comboClienteCidade.setOpcoes([]);
-    comboClienteCidade.modoLivre = true;
-    comboClienteCidade.input.disabled = false;
-    comboClienteCidade.input.placeholder = "Digite a cidade (busca indisponível agora)";
-    comboClienteCidade.input.value = cidadeAtual || "";
-    comboClienteCidade.valor = cidadeAtual || "";
+    combo.setOpcoes([]);
+    combo.modoLivre = true;
+    combo.input.disabled = false;
+    combo.input.placeholder = "Digite a cidade (busca indisponível agora)";
+    combo.input.value = cidadeAtual || "";
+    combo.valor = cidadeAtual || "";
   }
 }
 
@@ -975,7 +977,6 @@ comboClienteEstado.aoSelecionar = (uf) => carregarMunicipiosDoEstado(uf, "");
 // ativa ainda); os detalhes (plataforma, planilha, etc.) ficam separados, em
 // "Configurações de Migração" — acessível só pelo sidebar da Ficha (engrenagem
 // > Migração), não daqui, pra não duplicar o mesmo caminho de duas formas.
-let implantacaoClienteMigracaoAtual = null;
 
 let implantacaoClienteEditandoId = null;
 // Guarda o objeto do cliente sendo editado (não só o id) — o campo
@@ -1532,7 +1533,7 @@ async function mostrarTabelaImplantacaoClientes() {
   const btnAdicionar = document.createElement("button");
   btnAdicionar.className = "btn-primary";
   btnAdicionar.textContent = "+ Adicionar cliente";
-  btnAdicionar.addEventListener("click", () => abrirModalImplantacaoCliente(null));
+  btnAdicionar.addEventListener("click", () => abrirModalNovoCliente("implantacao"));
   toolbar.appendChild(btnAdicionar);
 
   const btnImportarPlanilha = document.createElement("button");
@@ -1690,7 +1691,10 @@ async function popularSelectUsuariosPorArea(select, valorAtual, queryString) {
   select.value = valorAtual || "";
 }
 
-async function abrirModalImplantacaoCliente(cliente) {
+// `opcoes.estagio`: fase de vida já marcada ao CRIAR cliente, conforme a
+// lista de onde veio o "+ Adicionar cliente" (Implantação, Onboarding,
+// Ongoing, CRM com filtro de etapa) — ver abrirModalNovoCliente.
+async function abrirModalImplantacaoCliente(cliente, opcoes = {}) {
   // Sidebar (Implantação/Migração, troca de modal) só aparece quando o
   // contexto de Ficha é realmente deste mesmo cliente — evita usar um
   // contexto antigo/de outro cliente que tenha ficado em memória. Os marcos
@@ -1736,6 +1740,7 @@ async function abrirModalImplantacaoCliente(cliente) {
   inputImplantacaoClienteNome.value = cliente ? cliente.cliente : "";
   inputImplantacaoClienteData.value = cliente ? cliente.data_entrada || "" : "";
   await popularSelectUsuariosPorArea(inputImplantacaoClienteCsm, cliente ? cliente.csm || "" : "", "area_prefix=CS");
+  inputImplantacaoClienteEstagio.value = cliente ? (cliente.estagio || "implantacao") : (opcoes.estagio || "implantacao");
   btnSalvarImplantacaoCliente.textContent = cliente ? "Salvar edição" : "Adicionar";
 
   // Cadastro rápido (criar) só mostra o essencial; campos complementares só
@@ -1755,37 +1760,14 @@ async function abrirModalImplantacaoCliente(cliente) {
   comboClienteCidade.input.disabled = true;
   comboClienteCidade.input.placeholder = "Escolha o estado primeiro";
 
-  // Migração é uma condição à parte do cliente (não uma etapa) — só esse campo
-  // (Sim/Não) trava quando já há uma ativa: não dá pra "excluir" a migração
-  // pelo cadastro — cancelar e editar detalhes (plataforma, planilha, etc.) é
-  // só em Configurações de Migração (sidebar da Ficha, engrenagem > Migração).
-  implantacaoClienteMigracaoAtual = null;
-  inputImplantacaoClienteTemMigracao.value = "nao";
-  inputImplantacaoClienteTemMigracao.disabled = false;
-  inputImplantacaoClienteTemMigracao.title = "";
-
-  // Mostra o modal JÁ (síncrono) — a checagem de migração em andamento roda
-  // em seguida, em segundo plano, só refinando o toggle quando chegar. Buscar
-  // isso antes de exibir o modal é o que causava o "abre e fecha" ao navegar
-  // pelo sidebar da Ficha (o modal ficava esperando a resposta pra aparecer).
+  // Mostra o modal JÁ (síncrono) — Estado/Cidade carregam em seguida, em
+  // segundo plano. (Migração saiu do cadastro do cliente em 2026-11-26: é
+  // criada pelo "+ Adicionar migração" do Controle ou pela aba Migração da
+  // Ficha.)
   overlayImplantacaoCliente.classList.remove("hidden");
   inputImplantacaoClienteNome.focus();
 
   if (cliente) {
-    try {
-      const r = await fetch(`/api/clientes/${cliente.id}/migracoes`);
-      const data = await parseJsonResponse(r);
-      const atual = data.ok ? (data.migracoes || []).find((m) => m.status === "em_andamento") : null;
-      if (atual) {
-        implantacaoClienteMigracaoAtual = atual;
-        inputImplantacaoClienteTemMigracao.value = "sim";
-        inputImplantacaoClienteTemMigracao.disabled = true;
-        inputImplantacaoClienteTemMigracao.title = "Migração já em andamento — pra cancelar ou editar detalhes, use Configurações de Migração.";
-      }
-    } catch (err) {
-      // silencioso: não bloqueia a edição do cliente por falha nessa consulta
-    }
-
     // Estado/Cidade do cliente — carrega em segundo plano, igual à checagem
     // de migração acima (o modal já está visível, isso só popula os campos).
     await carregarEstadosBrasil();
@@ -1815,6 +1797,23 @@ implantacaoClienteSidebarConfig.querySelectorAll(".modal-sidebar-config-item").f
   });
 });
 
+// Criar cliente a partir de qualquer lista — a fase de vida já vem marcada
+// de acordo com a lista (Implantação/Onboarding/Ongoing). Cliente criado em
+// Onboarding/Ongoing nasce sem Implantação (tem_implantacao=false, decidido
+// no backend) e fica fora dos KPIs de Implantação.
+function abrirModalNovoCliente(estagio) {
+  abrirModalImplantacaoCliente(null, { estagio });
+}
+
+// Depois de criar/editar pelo modal fora da Ficha: recarrega a lista da tela
+// em que a pessoa está (antes era sempre a da Implantação).
+async function recarregarListaClientesTelaAtual() {
+  if (telaNavAtual === "clientes-crm") return carregarClientesCrm();
+  if (telaNavAtual === "clientes-onboarding") return carregarClientesFase("onboarding");
+  if (telaNavAtual === "clientes-ongoing") return carregarClientesFase("ongoing");
+  return carregarImplantacaoClientes();
+}
+
 formImplantacaoCliente.addEventListener("submit", async (e) => {
   e.preventDefault();
   const payload = {
@@ -1824,6 +1823,7 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     objetivo: inputImplantacaoClienteObjetivo.value.trim(),
     valor_contrato: inputImplantacaoClienteValor.value,
     csm: inputImplantacaoClienteCsm.value.trim(),
+    estagio: inputImplantacaoClienteEstagio.value,
     momento: inputImplantacaoClienteMomento.value,
     flag: inputImplantacaoClienteFlag.value,
     vendedor: inputImplantacaoClienteVendedor.value.trim(),
@@ -1852,26 +1852,11 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
     const data = await parseJsonResponse(r);
     if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
 
-    // "Tem Migração?" — só inicia uma tentativa nova quando marcou "Sim" e não
-    // tinha nenhuma em andamento ainda. Se já tinha uma ativa, o campo veio
-    // travado (disabled) lá em abrirModalImplantacaoCliente — não mexe em nada
-    // aqui; cancelar é ação própria, feita na Ficha (Configurações de Migração).
     const clienteId = data.cliente.id;
-    const querMigracaoNova = !implantacaoClienteMigracaoAtual && inputImplantacaoClienteTemMigracao.value === "sim";
-    if (querMigracaoNova) {
-      try {
-        await fetch(`/api/clientes/${clienteId}/migracoes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-      } catch (err) {
-        alert(`Cliente salvo, mas houve erro ao iniciar a migração: ${String(err)}`);
-      }
-    }
-
     overlayImplantacaoCliente.classList.add("hidden");
     fichaConfigContexto = null;
+    // Cadastro salvo pelo modal vence um rascunho aberto na Ficha cadastral.
+    if (fichaCadastroEdicao && fichaCadastroEdicao.clienteId === clienteId) fichaCadastroEdicao = null;
 
     // Se veio da Ficha (editando o cliente que ela já está mostrando), volta
     // pra Ficha atualizada em vez de voltar pro Kanban — mesmo racional do
@@ -1883,7 +1868,7 @@ formImplantacaoCliente.addEventListener("submit", async (e) => {
       // de um admin trocar o IdCentral durante essa mesma edição.
       await carregarFichaCliente(data.cliente.idcentral);
     } else {
-      await carregarImplantacaoClientes();
+      await recarregarListaClientesTelaAtual();
     }
   } catch (err) {
     alert(`Erro ao salvar: ${String(err)}`);
@@ -2923,31 +2908,20 @@ async function carregarClientesMigracao() {
 }
 
 // Monta só o <table> — mesmo padrão de construirTabelaImplantacao.
-// "Excluir" na tela de Migração tem 3 casos, conforme a origem do item (ver
-// GET /api/migracao/clientes):
-// - legado: apaga o doc da coleção solta antiga, igual sempre foi.
-// - unificado + tem_implantacao=false: cliente só existe por causa dessa
-//   migração (criado pelo "+ Adicionar Cliente" sem IdCentral já existente)
-//   — exclui o cliente inteiro.
-// - unificado + tem_implantacao=true: cliente "de verdade" da Implantação
-//   que também tem migração — não dá pra apagar o cliente por aqui, só
-//   cancela a tentativa (mesma ação que a Ficha usa).
+// "Excluir" na tela de Migração = CANCELAR a migração ativa (vai pro
+// Histórico da Ficha como "Cancelada"). Nunca apaga o cliente: migração não
+// cria mais cliente (2026-11-26) — o cadastro sempre existe por conta própria.
 async function excluirClienteMigracao(c) {
-  const unificado = c.origem === "unificado";
-  const apagaClienteTodo = !unificado || c.tem_implantacao === false;
-  const aviso = apagaClienteTodo
-    ? `Excluir o cliente "${c.nome}" e todos os veículos dele? Essa ação não pode ser desfeita.`
-    : `Remover a migração de "${c.nome}"? O cadastro dele na Implantação continua existindo — só a migração é cancelada.`;
-  if (!confirm(aviso)) return;
+  if (!confirm(`Cancelar a migração de "${c.nome}"? O cadastro do cliente continua existindo — a migração vai pro histórico como cancelada.`)) return;
+  const motivo = prompt("Motivo do cancelamento (opcional):", "") || "";
   try {
-    const url = !unificado
-      ? `/api/migracao/clientes/${c.id}`
-      : apagaClienteTodo
-        ? `/api/clientes/${c.cliente_id}`
-        : `/api/clientes/${c.cliente_id}/migracoes/${c.migracao_id}/cancelar`;
-    const r = await fetch(url, { method: !unificado || apagaClienteTodo ? "DELETE" : "POST" });
+    const r = await fetch(`/api/clientes/${c.cliente_id}/migracoes/${c.migracao_id}/cancelar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ motivo }),
+    });
     const data = await parseJsonResponse(r);
-    if (!data.ok) return mostrarErro(data.error || "Falha ao excluir.");
+    if (!data.ok) return mostrarErro(data.error || "Falha ao cancelar.");
     await carregarClientesMigracao();
   } catch (err) {
     mostrarErro(String(err));
@@ -2974,7 +2948,7 @@ function construirTabelaMigracao(clientes) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = headers.length;
-    td.textContent = "Nenhum cliente ainda. Clique em \"+ Adicionar Cliente\" pra começar.";
+    td.textContent = "Nenhuma migração ativa. Clique em \"+ Adicionar migração\" pra começar.";
     td.style.color = "#6b7280";
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -3180,8 +3154,8 @@ async function mostrarTabelaMigracao() {
   toolbar.className = "migracao-toolbar saida-view-toolbar";
   const btnAdicionarCliente = document.createElement("button");
   btnAdicionarCliente.className = "btn-primary";
-  btnAdicionarCliente.textContent = "+ Adicionar Cliente";
-  btnAdicionarCliente.addEventListener("click", abrirModalMigracaoNovo);
+  btnAdicionarCliente.textContent = "+ Adicionar migração";
+  btnAdicionarCliente.addEventListener("click", abrirModalAdicionarMigracao);
   toolbar.appendChild(btnAdicionarCliente);
 
   toolbar.appendChild(criarCampoFiltroLista(migracaoFiltroTexto, (valor) => {
@@ -3272,10 +3246,6 @@ let migracaoConfigBaseUrl = null;
 // true quando aberta via cliente da lista única (esconde IdCentral/Responsável,
 // que agora vivem no cadastro do cliente, não na tentativa de migração).
 let migracaoConfigModoNovo = false;
-// true só enquanto cria um cliente do zero (botão "+ Adicionar Cliente") —
-// mostra o campo Nome e esconde Modelos de rastreador (só existe depois que o
-// cliente é criado). Ver formMigracao.addEventListener("submit").
-let migracaoConfigModoCriar = false;
 const wrapMigracaoModelos = el("migracao-modelos-bloco");
 
 // Depois que o link da planilha é salvo uma vez, trava o campo (evita trocar
@@ -3311,7 +3281,6 @@ async function abrirModalMigracao(cliente) {
     ? `/api/clientes/${cliente.cliente_id}/migracoes/${cliente.migracao_id}`
     : `/api/migracao/clientes/${cliente.id}`;
   migracaoConfigModoNovo = false;
-  migracaoConfigModoCriar = false;
   clienteMigracaoAtualId = cliente.id;
   wrapMigracaoNome.classList.add("hidden");
   wrapMigracaoModelos.classList.remove("hidden");
@@ -3338,44 +3307,6 @@ async function abrirModalMigracao(cliente) {
   carregarMigracaoModelos();
 }
 
-// Abre o mesmo modal de configuração, mas vazio e em modo criação — troca o
-// prompt() nativo que existia antes por um formulário de verdade, igual ao
-// "+ Adicionar cliente" da Implantação. O cliente só é criado de fato (POST)
-// no submit; até lá nada é gravado.
-async function abrirModalMigracaoNovo() {
-  migracaoSidebarConfig.classList.add("hidden");
-  modalMigracaoEl.classList.remove("tem-sidebar-config");
-  migracaoConfigBaseUrl = null;
-  migracaoConfigModoNovo = false;
-  migracaoConfigModoCriar = true;
-  clienteMigracaoAtualId = null;
-  wrapMigracaoNome.classList.remove("hidden");
-  wrapMigracaoModelos.classList.add("hidden");
-  inputMigracaoNome.value = "";
-  el("migracao-idcentral-wrap").classList.remove("hidden");
-  el("migracao-cs-wrap").classList.remove("hidden");
-  migracaoModalTitulo.textContent = "Adicionar cliente";
-  inputMigracaoIdcentral.value = "";
-  inputMigracaoIdcentral.disabled = false;
-  inputMigracaoIdcentral.title = "";
-  await popularSelectUsuariosPorArea(inputMigracaoCs, "", "area_prefix=CS");
-  inputMigracaoEtapa.value = "analise";
-  inputMigracaoPlataforma.value = "";
-  inputMigracaoLinkAcessoOrigem.value = "";
-  inputMigracaoLoginAcessoOrigem.value = "";
-  inputMigracaoSenhaAcessoOrigem.value = "";
-  inputMigracaoLinkPlanilha.value = "";
-  inputMigracaoQtdClientes.value = 0;
-  inputMigracaoQtdPlacas.value = 0;
-  inputMigracaoPercentual.value = 0;
-  // Só dá pra copiar a planilha-modelo depois que a migração existir de fato
-  // (o endpoint grava o link nela) — esconde até o cliente ser criado, e o
-  // campo começa destravado (nada foi salvo ainda).
-  aplicarEstadoLinkPlanilha("");
-  btnCriarPlanilhaMigracao.classList.add("hidden");
-  overlayMigracao.classList.remove("hidden");
-  inputMigracaoNome.focus();
-}
 
 // Ponto de entrada novo: "Configurações de Migração" de uma tentativa pendurada
 // num cliente da lista única — chamada pela Ficha (Migração > engrenagem) e
@@ -3385,7 +3316,6 @@ function abrirConfigMigracaoCliente(implantacao, migracao) {
   modalMigracaoEl.classList.remove("tem-sidebar-config");
   migracaoConfigBaseUrl = `/api/clientes/${implantacao.id}/migracoes/${migracao.id}`;
   migracaoConfigModoNovo = true;
-  migracaoConfigModoCriar = false;
   clienteMigracaoAtualId = implantacao.id;
   wrapMigracaoNome.classList.add("hidden");
   wrapMigracaoModelos.classList.remove("hidden");
@@ -3416,29 +3346,6 @@ el("migracao-modal-fechar").addEventListener("click", () => {
 migracaoSidebarConfig.querySelectorAll(".modal-sidebar-config-item").forEach((btn) => {
   btn.addEventListener("click", () => mostrarConfigFichaAba(btn.dataset.aba));
 });
-
-// --- Confirmação "Vincular cliente" (checarVinculoMigracao) ---
-// Ao criar um cliente de Migração, o IdCentral pode já pertencer a um cliente
-// de Implantação — nesse caso perguntamos antes de criar qualquer coisa, pra
-// não duplicar cliente (ver formMigracao submit, modo criar). Modal próprio
-// em vez de confirm() nativo, pra não quebrar a identidade visual do app.
-const overlayVincularMigracao = el("overlay-vincular-migracao");
-const textoVincularMigracao = el("vincular-migracao-texto");
-let resolverVinculoMigracao = null;
-function fecharVincularMigracao(vincular) {
-  overlayVincularMigracao.classList.add("hidden");
-  const resolve = resolverVinculoMigracao;
-  resolverVinculoMigracao = null;
-  if (resolve) resolve(vincular);
-}
-function confirmarVincularMigracao(nomeCliente) {
-  textoVincularMigracao.textContent = `Encontramos um cliente${nomeCliente ? ` (${nomeCliente})` : ""} com este IdCentral na Implantação. Deseja vincular esta migração a ele?`;
-  overlayVincularMigracao.classList.remove("hidden");
-  return new Promise((resolve) => { resolverVinculoMigracao = resolve; });
-}
-el("vincular-migracao-fechar").addEventListener("click", () => fecharVincularMigracao(false));
-el("btn-vincular-migracao-sim").addEventListener("click", () => fecharVincularMigracao(true));
-el("btn-vincular-migracao-nao").addEventListener("click", () => fecharVincularMigracao(false));
 
 // Copia a planilha-modelo de cronograma de migração (Drive) e preenche o
 // campo "Link da planilha" com a cópia nova — só disponível depois que a
@@ -3512,69 +3419,6 @@ formMigracao.addEventListener("submit", async (e) => {
     inputMigracaoIdcentral.focus();
     return;
   }
-  if (migracaoConfigModoCriar) {
-    const nome = inputMigracaoNome.value.trim();
-    if (!nome) {
-      inputMigracaoNome.focus();
-      return;
-    }
-    const idcentral = inputMigracaoIdcentral.value.trim();
-
-    // Todo cliente de Migração vive no modelo único (clientes + migracoes) —
-    // nunca cria mais na coleção solta antiga. Primeiro checa se o IdCentral
-    // já é de um cliente de Implantação (GET /api/ficha/<idcentral> é o mesmo
-    // lookup que a Ficha usa).
-    let existente = null;
-    try {
-      const rFicha = await fetch(`/api/ficha/${encodeURIComponent(idcentral)}`);
-      const dataFicha = await parseJsonResponse(rFicha);
-      if (dataFicha.ok) existente = dataFicha.implantacao;
-    } catch (err) {
-      return alert(`Erro ao checar IdCentral: ${String(err)}`);
-    }
-
-    if (existente) {
-      const vincular = await confirmarVincularMigracao(existente.cliente || idcentral);
-      if (!vincular) {
-        alert('Cliente não criado — para evitar clientes duplicados, não é possível criar esse cliente com o mesmo IdCentral de um já existente na Implantação.');
-        return;
-      }
-      try {
-        const rIniciar = await fetch(`/api/clientes/${existente.id}/migracoes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        const dataIniciar = await parseJsonResponse(rIniciar);
-        if (!dataIniciar.ok) return alert(`Erro ao vincular migração: ${dataIniciar.error || "falha desconhecida"}`);
-        migracaoConfigBaseUrl = `/api/clientes/${existente.id}/migracoes/${dataIniciar.migracao.id}`;
-      } catch (err) {
-        return alert(`Erro ao vincular migração: ${String(err)}`);
-      }
-    } else {
-      try {
-        const rCriar = await fetch("/api/clientes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            idcentral, cliente: nome, csm: inputMigracaoCs.value.trim(), tem_implantacao: false,
-          }),
-        });
-        const dataCriar = await parseJsonResponse(rCriar);
-        if (!dataCriar.ok) return alert(`Erro ao criar cliente: ${dataCriar.error || "falha desconhecida"}`);
-        const rIniciar = await fetch(`/api/clientes/${dataCriar.cliente.id}/migracoes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        const dataIniciar = await parseJsonResponse(rIniciar);
-        if (!dataIniciar.ok) return alert(`Erro ao iniciar migração: ${dataIniciar.error || "falha desconhecida"}`);
-        migracaoConfigBaseUrl = `/api/clientes/${dataCriar.cliente.id}/migracoes/${dataIniciar.migracao.id}`;
-      } catch (err) {
-        return alert(`Erro ao criar cliente: ${String(err)}`);
-      }
-    }
-  }
   if (!migracaoConfigBaseUrl) return;
   const payload = {
     idcentral: inputMigracaoIdcentral.value.trim(),
@@ -3599,8 +3443,7 @@ formMigracao.addEventListener("submit", async (e) => {
     if (!data.ok) return alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
     overlayMigracao.classList.add("hidden");
     fichaConfigContexto = null;
-    migracaoConfigModoCriar = false;
-    if (migracaoConfigModoNovo) {
+      if (migracaoConfigModoNovo) {
       if (fichaClienteAtual && fichaClienteAtual.idcentral) {
         await carregarFichaCliente(fichaClienteAtual.idcentral);
         mostrarFichaAba("migracao");
@@ -3825,7 +3668,12 @@ async function carregarModelosCacheParaVeiculos(baseUrl) {
   }
 }
 
-async function abrirVeiculosPorBaseUrl(baseUrl, clienteId, titulo) {
+// `somenteLeitura`: migração encerrada (aberta pelo Histórico da Ficha) —
+// esconde as ações (verificar/enviar/selecionar), não cria linhas em branco e
+// trava a edição da tabela. O backend também recusa qualquer gravação numa
+// migração encerrada (_bloquear_escrita_em_migracao_encerrada).
+async function abrirVeiculosPorBaseUrl(baseUrl, clienteId, titulo, somenteLeitura = false) {
+  overlayVeiculosMigracao.classList.toggle("veiculos-somente-leitura", somenteLeitura);
   veiculosMigracaoBaseUrl = baseUrl;
   veiculosMigracaoClienteIdAtual = clienteId;
   veiculosMigracaoTitulo.textContent = `Veículos — ${titulo}`;
@@ -3844,7 +3692,7 @@ async function abrirVeiculosPorBaseUrl(baseUrl, clienteId, titulo) {
   inputVeiculosMigracaoBusca.value = "";
   overlayVeiculosMigracao.classList.remove("hidden");
   await carregarModelosCacheParaVeiculos(baseUrl);
-  await recarregarVeiculosMigracao(true);
+  await recarregarVeiculosMigracao(!somenteLeitura);
 }
 
 // Ponto de entrada da tela de Migração — roteia pro container certo conforme
@@ -3861,8 +3709,8 @@ async function abrirVeiculosMigracao(cliente) {
 
 // Ponto de entrada novo: uma tentativa de migração pendurada num cliente da
 // lista única (Ficha do Cliente > Migração).
-async function abrirVeiculosCliente(clienteId, migracaoId, nomeCliente) {
-  await abrirVeiculosPorBaseUrl(`/api/clientes/${clienteId}/migracoes/${migracaoId}`, clienteId, nomeCliente);
+async function abrirVeiculosCliente(clienteId, migracaoId, nomeCliente, somenteLeitura = false) {
+  await abrirVeiculosPorBaseUrl(`/api/clientes/${clienteId}/migracoes/${migracaoId}`, clienteId, nomeCliente, somenteLeitura);
 }
 
 let contadorLinhaBrancoVeiculo = 0;
@@ -4680,105 +4528,7 @@ async function esperarJobConcluir(urlStatus, { intervaloMs = 1200, limiteMs = 10
   }
 }
 
-const btnSincronizarVeiculosSsx = el("veiculos-migracao-sincronizar-ssx");
 const btnVerificarComunicacaoSsx = el("veiculos-migracao-verificar-comunicacao");
-const overlaySincVei = el("overlay-sincronizar-veiculos-ssx");
-const sincveiResumoTexto = el("sincvei-resumo-texto");
-const sincveiLog = el("sincvei-log");
-let sincveiJobIdAtual = null;
-let sincveiInfoAtual = null;
-
-function fecharOverlaySincVei() {
-  overlaySincVei.classList.add("hidden");
-  sincveiJobIdAtual = null;
-  sincveiInfoAtual = null;
-}
-el("btn-sincvei-cancelar").addEventListener("click", fecharOverlaySincVei);
-el("sincvei-fechar-x").addEventListener("click", fecharOverlaySincVei);
-
-btnSincronizarVeiculosSsx.addEventListener("click", async () => {
-  const info = infoMigracaoUnificadaAtual();
-  if (!info) return alert("Sincronização com a SSX só está disponível para migrações vinculadas a um cliente.");
-
-  btnSincronizarVeiculosSsx.disabled = true;
-  veiculosMigracaoEnvioStatus.textContent = "Consultando SSX; clientes grandes podem levar alguns minutos...";
-  try {
-    const base = `/api/clientes/${info.clienteId}/migracoes/${info.migracaoId}/veiculos`;
-    const rInicio = await fetch(`${base}/sincronizar`, { method: "POST" });
-    const dataInicio = await parseJsonResponse(rInicio);
-    if (!dataInicio.ok) throw new Error(dataInicio.error || "falha ao iniciar sincronização");
-
-    const job = await esperarJobConcluir(`${base}/sincronizar/status/${dataInicio.job_id}`);
-    if (job.status === "erro") throw new Error(job.erro || "falha desconhecida");
-
-    const diff = job.diff;
-    sincveiJobIdAtual = dataInicio.job_id;
-    sincveiInfoAtual = info;
-
-    const partes = [];
-    if (diff.a_criar.length > 0) {
-      partes.push(`${diff.a_criar.length} veículo(s) novo(s) serão criados a partir da SSX.`);
-    }
-    if (diff.a_atualizar.length > 0) {
-      partes.push(`${diff.a_atualizar.length} veículo(s) já existentes serão atualizados.`);
-    }
-    if (diff.nao_cadastrados.length > 0) {
-      partes.push(`${diff.nao_cadastrados.length} veículo(s) não encontrados na SSX (rastreador ainda não cadastrado lá).`);
-    }
-    partes.push(`${diff.sem_mudanca} já estavam em dia.`);
-    sincveiResumoTexto.textContent = partes.join(" ");
-
-    sincveiLog.innerHTML = "";
-    const limiteDetalhes = 50;
-    diff.a_criar.slice(0, limiteDetalhes).forEach((item) => {
-      const linha = document.createElement("div");
-      linha.textContent = `Novo: ${item.campos.cliente_ssx || item.campos.cliente} — ${item.campos.veiculo} (rastreador ${item.campos.id_equipamento})`;
-      sincveiLog.appendChild(linha);
-    });
-    diff.a_atualizar.slice(0, limiteDetalhes).forEach((item) => {
-      const linha = document.createElement("div");
-      const camposTexto = Object.entries(item.campos)
-        .map(([campo, [atual, novo]]) => `${campo}: "${atual || ""}" → "${novo || ""}"`)
-        .join("; ");
-      linha.textContent = `Veículo #${item.veiculo_id}: ${camposTexto}`;
-      sincveiLog.appendChild(linha);
-    });
-    const detalhesOcultos =
-      Math.max(0, diff.a_criar.length - limiteDetalhes) +
-      Math.max(0, diff.a_atualizar.length - limiteDetalhes);
-    if (detalhesOcultos > 0) {
-      const aviso = document.createElement("div");
-      aviso.textContent = `Exibindo até ${limiteDetalhes} itens de cada tipo; ${detalhesOcultos} detalhes adicionais foram omitidos. Os totais completos estão no resumo.`;
-      sincveiLog.appendChild(aviso);
-    }
-
-    el("btn-sincvei-confirmar").disabled = diff.a_criar.length === 0 && diff.a_atualizar.length === 0;
-    overlaySincVei.classList.remove("hidden");
-  } catch (err) {
-    alert(`Erro ao sincronizar com a SSX: ${String(err.message || err)}`);
-  } finally {
-    btnSincronizarVeiculosSsx.disabled = false;
-    veiculosMigracaoEnvioStatus.textContent = "";
-  }
-});
-
-el("btn-sincvei-confirmar").addEventListener("click", async () => {
-  if (!sincveiJobIdAtual || !sincveiInfoAtual) return;
-  const { clienteId, migracaoId } = sincveiInfoAtual;
-  const jobId = sincveiJobIdAtual;
-  try {
-    const base = `/api/clientes/${clienteId}/migracoes/${migracaoId}/veiculos`;
-    const r = await fetch(`${base}/sincronizar/aplicar/${jobId}`, { method: "POST" });
-    const data = await parseJsonResponse(r);
-    if (!data.ok) throw new Error(data.error || "falha ao aplicar sincronização");
-    fecharOverlaySincVei();
-    await recarregarVeiculosMigracao(true);
-    alert(`${data.criadas} veículo(s) criados e ${data.atualizados} atualizados com dados da SSX.`);
-  } catch (err) {
-    alert(`Erro ao aplicar sincronização: ${String(err.message || err)}`);
-  }
-});
-
 btnVerificarComunicacaoSsx.addEventListener("click", async () => {
   const info = infoMigracaoUnificadaAtual();
   if (!info) return alert("Verificação de comunicação só está disponível para migrações vinculadas a um cliente.");
@@ -6693,7 +6443,7 @@ function baixarConversaoComoArquivo(fatia, formato, parte) {
 
 // Confirmação antes de baixar quando a parte selecionada tem registro(s) com erro —
 // modal próprio em vez de confirm() nativo, pra não quebrar a identidade visual do app
-// (mesmo padrão de confirmarVincularMigracao/confirmarLiberarPlanilha).
+// (mesmo padrão de confirmarLiberarPlanilha).
 const overlayConversorBaixarErro = el("overlay-conversor-baixar-erro");
 const textoConversorBaixarErro = el("conversor-baixar-erro-texto");
 let resolverConversorBaixarErro = null;
@@ -20171,34 +19921,46 @@ sidebarToggle.addEventListener("click", () => {
   const recolhida = !sidebarEl.classList.contains("recolhida");
   aplicarEstadoSidebar(recolhida);
   localStorage.setItem("sidebar_state", recolhida ? "collapsed" : "expanded");
+  // Abrir/recolher a sidebar fecha todos os grupos (pedido da usuária).
+  fecharTodosGruposSidebar();
 });
 
 const SIDEBAR_GRUPOS = {
   implantacao: { botao: el("sidebar-grupo-implantacao"), submenu: el("sidebar-subnav-implantacao") },
   migracao: { botao: el("sidebar-grupo-migracao"), submenu: el("sidebar-subnav-migracao") },
   crm: { botao: el("sidebar-grupo-crm"), submenu: el("sidebar-subnav-crm") },
+  onboarding: { botao: el("sidebar-grupo-onboarding"), submenu: el("sidebar-subnav-onboarding") },
+  ongoing: { botao: el("sidebar-grupo-ongoing"), submenu: el("sidebar-subnav-ongoing") },
   ferramentas: { botao: el("sidebar-grupo-ferramentas"), submenu: el("sidebar-subnav-ferramentas") },
 };
 
-function definirGrupoSidebar(nome, expandido, persistir) {
+// Grupos do sidebar (CRM, Implantação, Onboarding...) NÃO lembram mais se
+// estavam abertos: sempre começam fechados ao carregar a página e fecham
+// todos ao abrir/recolher a sidebar (pedido da usuária). O grupo da tela
+// atual também não abre sozinho — só fica destacado (.ativo).
+function definirGrupoSidebar(nome, expandido) {
   const grupo = SIDEBAR_GRUPOS[nome];
   grupo.botao.setAttribute("aria-expanded", String(expandido));
   grupo.submenu.classList.toggle("hidden", !expandido);
-  if (persistir) localStorage.setItem(`sidebar_group_${nome}`, expandido ? "expanded" : "collapsed");
+}
+
+function fecharTodosGruposSidebar() {
+  Object.keys(SIDEBAR_GRUPOS).forEach((nome) => definirGrupoSidebar(nome, false));
 }
 
 Object.entries(SIDEBAR_GRUPOS).forEach(([nome, grupo]) => {
-  // Padrão agora é retraído — só fica expandido se o usuário já abriu antes
-  // (persistido) ou se tiver aberto nesta sessão.
-  definirGrupoSidebar(nome, localStorage.getItem(`sidebar_group_${nome}`) === "expanded", false);
+  // Limpa o estado salvo pela versão antiga (que lembrava grupo aberto).
+  localStorage.removeItem(`sidebar_group_${nome}`);
+  definirGrupoSidebar(nome, false);
   grupo.botao.addEventListener("click", () => {
     if (sidebarEl.classList.contains("recolhida")) {
       aplicarEstadoSidebar(false);
       localStorage.setItem("sidebar_state", "expanded");
-      definirGrupoSidebar(nome, true, true);
+      fecharTodosGruposSidebar();
+      definirGrupoSidebar(nome, true);
       return;
     }
-    definirGrupoSidebar(nome, grupo.botao.getAttribute("aria-expanded") !== "true", true);
+    definirGrupoSidebar(nome, grupo.botao.getAttribute("aria-expanded") !== "true");
   });
 });
 
@@ -20215,6 +19977,8 @@ const TELAS_NAV = {
   "dashboard-crm": el("tela-dashboard-crm"),
   "clientes-crm": el("tela-clientes-crm"),
   "churn-crm": el("tela-churn-crm"),
+  "clientes-onboarding": el("tela-clientes-onboarding"),
+  "clientes-ongoing": el("tela-clientes-ongoing"),
   ferramentas: el("tela-ferramentas"),
   ficha: el("tela-ficha-cliente"),
   "minha-conta": el("tela-minha-conta"),
@@ -20230,6 +19994,8 @@ const NAV_BOTOES = {
   "dashboard-crm": el("nav-sub-dashboard-crm"),
   "clientes-crm": el("nav-sub-clientes-crm"),
   "churn-crm": el("nav-sub-churn-crm"),
+  "clientes-onboarding": el("nav-sub-clientes-onboarding"),
+  "clientes-ongoing": el("nav-sub-clientes-ongoing"),
 };
 // Telas que pertencem ao mesmo grupo do sidebar, mas não têm o mesmo nome do
 // grupo (ex.: "dashboard-implantacao" mora dentro do grupo "implantacao") —
@@ -20241,6 +20007,8 @@ const TELA_PARA_GRUPO_SIDEBAR = {
   "dashboard-crm": "crm",
   "clientes-crm": "crm",
   "churn-crm": "crm",
+  "clientes-onboarding": "onboarding",
+  "clientes-ongoing": "ongoing",
   ferramentas: "ferramentas",
 };
 const NAV_BOTOES_FERRAMENTAS = {
@@ -20266,6 +20034,8 @@ const CAMINHO_POR_TELA = {
   "dashboard-crm": "/crm/dashboard",
   "clientes-crm": "/crm/clientes",
   "churn-crm": "/crm/churn",
+  "clientes-onboarding": "/onboarding",
+  "clientes-ongoing": "/ongoing",
   ferramentas: "/ferramentas",
   "minha-conta": "/minha-conta",
   configuracoes: "/configuracoes",
@@ -20279,6 +20049,8 @@ const TELA_POR_CAMINHO_RAIZ = {
   "/crm/dashboard": "dashboard-crm",
   "/crm/clientes": "clientes-crm",
   "/crm/churn": "churn-crm",
+  "/onboarding": "clientes-onboarding",
+  "/ongoing": "clientes-ongoing",
   "/ferramentas": "ferramentas",
   "/minha-conta": "minha-conta",
   "/configuracoes": "configuracoes",
@@ -20554,6 +20326,11 @@ const TITULO_TOPBAR_POR_TELA = {
   "dashboard-implantacao": "Dashboard de Implantação",
   implantacao: "Controle de Implantação",
   migracao: "Controle de Migração",
+  "dashboard-crm": "Dashboard CRM",
+  "clientes-crm": "Clientes",
+  "churn-crm": "Churn",
+  "clientes-onboarding": "Clientes em Onboarding",
+  "clientes-ongoing": "Clientes em Ongoing",
   ferramentas: "Ferramentas Auxiliares",
   ficha: "Ficha do cliente",
   "minha-conta": "Minha conta",
@@ -20660,7 +20437,6 @@ function irParaTela(tela, opcoes) {
   Object.entries(SIDEBAR_GRUPOS).forEach(([nome, grupo]) => {
     const ativo = nome === (TELA_PARA_GRUPO_SIDEBAR[tela] || tela);
     grupo.botao.classList.toggle("ativo", ativo);
-    if (ativo) definirGrupoSidebar(nome, true, true);
   });
 
   const naFicha = tela === "ficha";
@@ -20707,6 +20483,9 @@ function irParaTela(tela, opcoes) {
   if (tela === "dashboard-implantacao") carregarDashboardImplantacao();
   if (tela === "dashboard-crm") carregarDashboardCrm();
   if (tela === "clientes-crm") carregarClientesCrm();
+  if (tela === "churn-crm") carregarChurn();
+  if (tela === "clientes-onboarding") carregarClientesFase("onboarding");
+  if (tela === "clientes-ongoing") carregarClientesFase("ongoing");
   if (tela === "feed") carregarFeed();
   if (tela === "ficha") carregarFichaCliente(opcoes.idcentral, abaFichaSolicitada);
   if (tela === "minha-conta") { carregarMinhaConta(); carregarMinhasTarefas(); }
@@ -21209,12 +20988,18 @@ el("topbar-central-crc").addEventListener("click", () => {
   if (telaNavAtual === "ficha" && !podeSairDaAbaFicha()) return;
   irParaTela("dashboard");
 });
+el("sidebar-marca-btn").addEventListener("click", () => {
+  if (telaNavAtual === "ficha" && !podeSairDaAbaFicha()) return;
+  irParaTela("dashboard");
+});
 NAV_BOTOES.dashboard.addEventListener("click", () => irParaTela("dashboard"));
 NAV_BOTOES["dashboard-implantacao"].addEventListener("click", () => irParaTela("dashboard-implantacao"));
 NAV_BOTOES.implantacao.addEventListener("click", () => irParaTela("implantacao"));
 NAV_BOTOES.migracao.addEventListener("click", () => irParaTela("migracao"));
 NAV_BOTOES["dashboard-crm"].addEventListener("click", () => irParaTela("dashboard-crm"));
 NAV_BOTOES["clientes-crm"].addEventListener("click", () => irParaTela("clientes-crm"));
+NAV_BOTOES["clientes-onboarding"].addEventListener("click", () => irParaTela("clientes-onboarding"));
+NAV_BOTOES["clientes-ongoing"].addEventListener("click", () => irParaTela("clientes-ongoing"));
 NAV_BOTOES["churn-crm"].addEventListener("click", () => irParaTela("churn-crm"));
 
 const PREPARAR_FERRAMENTA_PARA_ABRIR = {
@@ -21508,6 +21293,7 @@ window.addEventListener("popstate", (e) => {
 function podeSairDaAbaFicha() {
   if (fichaAbaAtual === "marcos") return confirmarDescartarMarcos();
   if (fichaAbaAtual === "implantacao") return confirmarDescartarObjetivosImplantacao();
+  if (fichaAbaAtual === "geral") return confirmarDescartarFichaCadastro();
   return true;
 }
 ["geral", "implantacao", "marcos", "migracao", "historico"].forEach((aba) => {
@@ -22162,20 +21948,19 @@ async function carregarDashboardCrm() {
 }
 
 // --- Mapa "Clientes por estado" do Dashboard CRM ---
-// Posição de cada UF é aproximada (centro geográfico da sigla, projeção
-// equiretangular simples) — não é um contorno fiel do Brasil, só um mapa de
-// bolhas posicionado pela localização real de cada estado.
-const CRM_UF_CENTROIDES = {
-  AC: [-9.0, -70.5], AL: [-9.6, -36.2], AP: [1.4, -51.8], AM: [-5.0, -65.0],
-  BA: [-12.5, -41.7], CE: [-5.2, -39.3], DF: [-15.8, -47.9], ES: [-19.5, -40.5],
-  GO: [-15.8, -49.8], MA: [-5.0, -45.5], MT: [-12.8, -56.0], MS: [-20.5, -54.6],
-  MG: [-18.5, -44.5], PA: [-4.0, -52.0], PB: [-7.2, -36.5], PR: [-24.5, -51.5],
-  PE: [-8.5, -37.5], PI: [-7.5, -42.5], RJ: [-22.0, -43.0], RN: [-5.7, -36.6],
-  RS: [-29.8, -53.0], RO: [-10.9, -62.8], RR: [2.0, -61.5], SC: [-27.3, -50.0],
-  SP: [-22.2, -48.5], SE: [-10.6, -37.3], TO: [-10.2, -48.3],
+// Posição de cada UF vem dos pontos de rótulo reais do SVG
+// (static/brasil-estados.svg, grupo <g id="label_points">, cx/cy no viewBox
+// 1000x912 do mapa) — mantido em sincronia manual com esse arquivo.
+const CRM_UF_LABEL_POINTS = {
+  RS: [461.1, 773.3], RR: [300.5, 101], PA: [461.3, 259.6], AC: [136.5, 345.5],
+  AP: [492.7, 124], MS: [430.2, 562.7], PR: [489.8, 658.5], SC: [528, 718.5],
+  AM: [215.2, 233.1], RO: [259.8, 363.7], MT: [409.9, 419.8], MA: [622.9, 254.2],
+  PI: [671.2, 311], CE: [741, 247.1], RN: [798, 263.9], PB: [811.1, 291.7],
+  PE: [759.9, 315.3], AL: [800.6, 345.3], SE: [784.8, 359.8], BA: [697.6, 397.7],
+  ES: [724.2, 542.5], RJ: [680.3, 610], SP: [560.9, 605], GO: [526.6, 487.8],
+  DF: [573.7, 469.3], MG: [644.1, 527], TO: [562.1, 361.7],
 };
-const CRM_MAPA_LON_RANGE = [-74, -34];
-const CRM_MAPA_LAT_RANGE = [-34, 6];
+const CRM_MAPA_VIEWBOX = [1000, 912];
 
 let crmMapaPorUfCache = {};
 let crmMapaAbaAtual = "geral";
@@ -22193,7 +21978,6 @@ function renderCrmMapa(estagio) {
   const maiorUf = ufs.reduce((maior, uf) => (!maior || contagens[uf] > contagens[maior] ? uf : maior), null);
 
   el("crm-mapa-total").textContent = total || "–";
-  el("crm-mapa-estados").textContent = ufs.length || "–";
   el("crm-mapa-maior").textContent = maiorUf || "–";
 
   const wrap = el("crm-mapa-wrap");
@@ -22203,12 +21987,12 @@ function renderCrmMapa(estagio) {
 
   const maiorQtd = Math.max(...ufs.map((uf) => contagens[uf]));
   ufs.forEach((uf) => {
-    const centroide = CRM_UF_CENTROIDES[uf];
-    if (!centroide) return;
+    const ponto = CRM_UF_LABEL_POINTS[uf];
+    if (!ponto) return;
     const qtd = contagens[uf];
-    const [lat, lon] = centroide;
-    const xPct = ((lon - CRM_MAPA_LON_RANGE[0]) / (CRM_MAPA_LON_RANGE[1] - CRM_MAPA_LON_RANGE[0])) * 100;
-    const yPct = ((CRM_MAPA_LAT_RANGE[1] - lat) / (CRM_MAPA_LAT_RANGE[1] - CRM_MAPA_LAT_RANGE[0])) * 100;
+    const [cx, cy] = ponto;
+    const xPct = (cx / CRM_MAPA_VIEWBOX[0]) * 100;
+    const yPct = (cy / CRM_MAPA_VIEWBOX[1]) * 100;
 
     const bolha = document.createElement("div");
     bolha.className = "crm-mapa-bolha";
@@ -22230,7 +22014,7 @@ function renderCrmMapa(estagio) {
 
     const circulo = document.createElement("div");
     circulo.className = "crm-mapa-bolha-circulo";
-    const tamanho = 22 + Math.round((qtd / maiorQtd) * 26);
+    const tamanho = 20 + Math.round((qtd / maiorQtd) * 22);
     circulo.style.width = `${tamanho}px`;
     circulo.style.height = `${tamanho}px`;
     circulo.textContent = String(qtd);
@@ -22314,6 +22098,12 @@ function renderClientesCrmTabela() {
   el("crm-clientes-vazio").classList.toggle("hidden", filtrados.length > 0);
 }
 
+// "+ Adicionar cliente" da CRM > Clientes: fase = filtro de etapa escolhido
+// na lista (sem filtro, Implantação, o padrão).
+el("crm-clientes-adicionar").addEventListener("click", () => {
+  abrirModalNovoCliente(el("crm-clientes-filtro-etapa").value || "implantacao");
+});
+
 async function carregarClientesCrm() {
   try {
     const r = await fetch("/api/clientes");
@@ -22333,6 +22123,422 @@ async function carregarClientesCrm() {
     }
 
     renderClientesCrmTabela();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// --- ONBOARDING / ONGOING: lista de clientes por fase de vida ---
+// Por enquanto cada time (Onboarding, Ongoing) só tem a lista dos clientes
+// naquela fase — mesmo formato da CRM > Clientes. O controle próprio de cada
+// time (equivalente ao Controle de Implantação) vem depois; a tela já existe
+// pra começar a mover clientes pra fase certa (campo "Fase de vida" do
+// cadastro = `estagio`).
+const clientesFaseFiltrosPreparados = new Set();
+let clientesFaseCache = [];
+
+function renderClientesFaseTabela(fase) {
+  const busca = el(`${fase}-clientes-busca`).value.trim().toLowerCase();
+  const csm = el(`${fase}-clientes-filtro-csm`).value;
+  const vendedor = el(`${fase}-clientes-filtro-vendedor`).value;
+  const filtrados = clientesFaseCache.filter((c) => {
+    if (c.estagio !== fase) return false;
+    if (csm && (c.csm || "") !== csm) return false;
+    if (vendedor && (c.vendedor || "") !== vendedor) return false;
+    if (busca) {
+      const alvo = `${c.cliente || ""} ${c.idcentral || ""} ${c.estado || ""}`.toLowerCase();
+      if (!alvo.includes(busca)) return false;
+    }
+    return true;
+  }).sort((a, b) => String(a.cliente || "").localeCompare(String(b.cliente || ""), "pt-BR"));
+
+  const corpo = el(`${fase}-clientes-corpo`);
+  corpo.innerHTML = "";
+  filtrados.forEach((c) => {
+    const tr = document.createElement("tr");
+    tr.className = "crm-clientes-linha";
+    tr.tabIndex = 0;
+    tr.addEventListener("click", () => irParaFicha(c.idcentral));
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter") irParaFicha(c.idcentral); });
+    [c.cliente, c.idcentral, c.csm, c.vendedor, c.momento].forEach((valor) => {
+      const td = document.createElement("td");
+      td.textContent = valor || "—";
+      tr.appendChild(td);
+    });
+    corpo.appendChild(tr);
+  });
+  el(`${fase}-clientes-vazio`).classList.toggle("hidden", filtrados.length > 0);
+}
+
+["onboarding", "ongoing"].forEach((fase) => {
+  el(`${fase}-clientes-adicionar`).addEventListener("click", () => abrirModalNovoCliente(fase));
+});
+
+async function carregarClientesFase(fase) {
+  try {
+    const r = await fetch("/api/clientes");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return;
+    clientesFaseCache = data.clientes || [];
+    const daFase = clientesFaseCache.filter((c) => c.estagio === fase);
+    crmPopularSelectDistinto(el(`${fase}-clientes-filtro-csm`), daFase.map((c) => c.csm), "Todos os CS");
+    crmPopularSelectDistinto(el(`${fase}-clientes-filtro-vendedor`), daFase.map((c) => c.vendedor), "Todos os comerciais");
+    if (!clientesFaseFiltrosPreparados.has(fase)) {
+      clientesFaseFiltrosPreparados.add(fase);
+      const render = () => renderClientesFaseTabela(fase);
+      el(`${fase}-clientes-busca`).addEventListener("input", render);
+      el(`${fase}-clientes-filtro-csm`).addEventListener("change", render);
+      el(`${fase}-clientes-filtro-vendedor`).addEventListener("change", render);
+    }
+    renderClientesFaseTabela(fase);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// --- CRM: Churn (aba CHURNS da planilha de CS) ---
+// Mesma inspiração visual da tela Churn de outro projeto interno (KPIs +
+// gráficos de barra por tempo de casa/tipo/persona + tabela filtrável +
+// exportar Excel) — aqui sem o botão de análise por IA nem edição de
+// motivo/persona/boleto (escreveriam de volta na planilha do Google, decisão
+// de deixar fora desta rodada, ver docs/HISTORICO_DECISOES.md).
+const CHURN_MESES_LABELS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+let churnDataCache = [];
+let churnFiltrosPreparados = false;
+let churnSelectedMonths = new Set(CHURN_MESES_LABELS.map((_, i) => i + 1));
+let churnSelectedYear = new Date().getFullYear();
+let churnShowAllYears = false;
+let churnActiveTimeRange = "thisYear";
+
+function churnInferirPeriodo(months, year, allYears) {
+  if (allYears) return "";
+  const agora = new Date();
+  const anoAtual = agora.getFullYear();
+  const mesAtual = agora.getMonth() + 1;
+  if (year !== anoAtual) return "";
+  if (months.size === 12) return "thisYear";
+  if (months.size === 1 && months.has(mesAtual)) return "currentMonth";
+  for (const [faixa, mesesAtras] of [["last3Months", 2], ["last6Months", 5]]) {
+    const esperado = new Set();
+    const inicio = new Date(anoAtual, mesAtual - 1 - mesesAtras, 1);
+    for (let i = 0; i < 12; i++) {
+      if (new Date(anoAtual, i, 1) >= inicio) esperado.add(i + 1);
+    }
+    if (esperado.size === months.size && [...esperado].every((m) => months.has(m))) return faixa;
+  }
+  return "";
+}
+
+function churnAplicarPeriodo(faixa) {
+  const agora = new Date();
+  const anoAtual = agora.getFullYear();
+  const mesAtual = agora.getMonth() + 1;
+  const mesesAtras = faixa === "last3Months" ? 2 : faixa === "last6Months" ? 5 : 0;
+  const inicio = new Date(anoAtual, mesAtual - 1 - mesesAtras, 1);
+  const meses = new Set();
+  for (let i = 0; i < 12; i++) {
+    const candidato = new Date(anoAtual, i, 1);
+    if (faixa === "currentMonth" ? i + 1 === mesAtual : faixa === "thisYear" || candidato >= inicio) {
+      meses.add(i + 1);
+    }
+  }
+  churnSelectedYear = anoAtual;
+  churnSelectedMonths = faixa === "currentMonth" ? new Set([mesAtual])
+    : faixa === "thisYear" ? new Set(CHURN_MESES_LABELS.map((_, i) => i + 1))
+    : meses;
+  churnShowAllYears = false;
+  churnActiveTimeRange = faixa;
+  churnRenderChipsMeses();
+  renderChurn();
+}
+
+function churnRenderChipsMeses() {
+  const todosSelecionados = churnSelectedMonths.size === CHURN_MESES_LABELS.length;
+  const wrap = el("churn-chips-meses");
+  wrap.innerHTML = "";
+  const botaoTodos = document.createElement("button");
+  botaoTodos.type = "button";
+  botaoTodos.className = `churn-chip${todosSelecionados ? " ativo" : ""}`;
+  botaoTodos.textContent = "Todos";
+  botaoTodos.addEventListener("click", () => {
+    churnSelectedMonths = new Set(CHURN_MESES_LABELS.map((_, i) => i + 1));
+    churnShowAllYears = false;
+    churnActiveTimeRange = churnInferirPeriodo(churnSelectedMonths, churnSelectedYear, false);
+    el("churn-filtro-periodo").value = churnActiveTimeRange;
+    churnRenderChipsMeses();
+    renderChurn();
+  });
+  wrap.appendChild(botaoTodos);
+  CHURN_MESES_LABELS.forEach((label, i) => {
+    const mes = i + 1;
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = `churn-chip${churnSelectedMonths.has(mes) ? " ativo" : ""}`;
+    botao.textContent = label;
+    botao.addEventListener("click", () => {
+      const todos = churnSelectedMonths.size === CHURN_MESES_LABELS.length;
+      churnSelectedMonths = todos
+        ? new Set(CHURN_MESES_LABELS.map((_, j) => j + 1).filter((v) => v !== mes))
+        : new Set(churnSelectedMonths);
+      if (!todos) {
+        if (churnSelectedMonths.has(mes)) churnSelectedMonths.delete(mes); else churnSelectedMonths.add(mes);
+      }
+      churnShowAllYears = false;
+      churnActiveTimeRange = churnInferirPeriodo(churnSelectedMonths, churnSelectedYear, false);
+      el("churn-filtro-periodo").value = churnActiveTimeRange;
+      churnRenderChipsMeses();
+      renderChurn();
+    });
+    wrap.appendChild(botao);
+  });
+}
+
+function churnRotuloPeriodo() {
+  const labels = { currentMonth: "Mês atual", last3Months: "Últimos 3 meses", last6Months: "Últimos 6 meses", thisYear: "Esse ano" };
+  if (churnActiveTimeRange && labels[churnActiveTimeRange]) return labels[churnActiveTimeRange];
+  if (churnShowAllYears) return "Todos os anos";
+  if (churnSelectedMonths.size === CHURN_MESES_LABELS.length) return `Todos os meses de ${churnSelectedYear}`;
+  if (churnSelectedMonths.size === 1) return `${CHURN_MESES_LABELS[[...churnSelectedMonths][0] - 1]} de ${churnSelectedYear}`;
+  return `${churnSelectedMonths.size} meses de ${churnSelectedYear}`;
+}
+
+function churnEscapeXml(str) {
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Passo "redondo" pro eixo numérico (1/2/5 x potência de 10), mesmo espírito
+// dos ticks automáticos do recharts — sem depender da lib.
+function churnPassoEixo(maior, metas) {
+  if (maior <= 0) return 1;
+  const cru = maior / (metas || 4);
+  const mag = 10 ** Math.floor(Math.log10(cru));
+  const norm = cru / mag;
+  const passo = norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10;
+  return passo * mag;
+}
+
+// Gráfico de barras HORIZONTAL (categoria no eixo Y, valor cresce pra
+// direita) — usado em tipo/persona/comercial/CSM, como no dashboard de
+// referência. SVG desenhado à mão (grade + eixo), sem lib de gráfico.
+function churnGraficoHorizontal(containerId, itens, cor) {
+  const wrap = el(containerId);
+  wrap.innerHTML = "";
+  if (!itens.length) {
+    wrap.textContent = "Sem dados.";
+    return;
+  }
+  const alturaLinha = 28, margemEsq = 110, margemDir = 16, margemTopo = 8, margemBase = 20, largura = 480;
+  const alturaGrafico = itens.length * alturaLinha;
+  const alturaTotal = alturaGrafico + margemTopo + margemBase;
+  const maior = Math.max(...itens.map((i) => i.valor), 1);
+  const passo = churnPassoEixo(maior);
+  const maxEixo = Math.ceil(maior / passo) * passo || passo;
+  const larguraPlot = largura - margemEsq - margemDir;
+  const numTicks = Math.round(maxEixo / passo);
+
+  let svg = `<svg class="churn-grafico-svg" viewBox="0 0 ${largura} ${alturaTotal}" preserveAspectRatio="xMinYMin meet">`;
+  for (let t = 0; t <= numTicks; t++) {
+    const valor = t * passo;
+    const x = margemEsq + (valor / maxEixo) * larguraPlot;
+    svg += `<line class="churn-grade-linha" x1="${x}" y1="${margemTopo}" x2="${x}" y2="${margemTopo + alturaGrafico}"></line>`;
+    svg += `<text class="churn-eixo-texto" x="${x}" y="${alturaTotal - 4}" text-anchor="middle">${valor}</text>`;
+  }
+  itens.forEach((item, i) => {
+    const y = margemTopo + i * alturaLinha + 4;
+    const altura = alturaLinha - 8;
+    const larguraBarra = Math.max((item.valor / maxEixo) * larguraPlot, item.valor > 0 ? 2 : 0);
+    svg += `<text class="churn-eixo-texto" x="${margemEsq - 6}" y="${y + altura / 2 + 3}" text-anchor="end">${churnEscapeXml(item.nome)}</text>`;
+    svg += `<rect x="${margemEsq}" y="${y}" width="${larguraBarra}" height="${altura}" rx="3" fill="${cor}"></rect>`;
+    svg += `<text class="churn-barra-rotulo" x="${margemEsq + larguraBarra + 6}" y="${y + altura / 2 + 4}">${item.valor}</text>`;
+  });
+  svg += `</svg>`;
+  wrap.innerHTML = svg;
+}
+
+// Gráfico de barras VERTICAL (categoria no eixo X, valor cresce pra cima) —
+// usado só em "tempo de casa" (faixas fixas), como no dashboard de referência.
+function churnGraficoVertical(containerId, itens, cor) {
+  const wrap = el(containerId);
+  wrap.innerHTML = "";
+  if (!itens.length) {
+    wrap.textContent = "Sem dados.";
+    return;
+  }
+  const largura = 480, alturaTotal = 220, margemEsq = 28, margemDir = 8, margemTopo = 14, margemBase = 34;
+  const larguraPlot = largura - margemEsq - margemDir;
+  const alturaPlot = alturaTotal - margemTopo - margemBase;
+  const maior = Math.max(...itens.map((i) => i.valor), 1);
+  const passo = churnPassoEixo(maior);
+  const maxEixo = Math.ceil(maior / passo) * passo || passo;
+  const numTicks = Math.round(maxEixo / passo);
+  const passoCategoria = larguraPlot / itens.length;
+  const larguraBarra = passoCategoria * 0.55;
+
+  let svg = `<svg class="churn-grafico-svg" viewBox="0 0 ${largura} ${alturaTotal}" preserveAspectRatio="xMinYMin meet">`;
+  for (let t = 0; t <= numTicks; t++) {
+    const valor = t * passo;
+    const y = margemTopo + alturaPlot - (valor / maxEixo) * alturaPlot;
+    svg += `<line class="churn-grade-linha" x1="${margemEsq}" y1="${y}" x2="${largura - margemDir}" y2="${y}"></line>`;
+    svg += `<text class="churn-eixo-texto" x="${margemEsq - 6}" y="${y + 3}" text-anchor="end">${valor}</text>`;
+  }
+  itens.forEach((item, i) => {
+    const alturaBarra = (item.valor / maxEixo) * alturaPlot;
+    const x = margemEsq + i * passoCategoria + (passoCategoria - larguraBarra) / 2;
+    const y = margemTopo + alturaPlot - alturaBarra;
+    svg += `<rect x="${x}" y="${y}" width="${larguraBarra}" height="${Math.max(alturaBarra, 0)}" rx="3" fill="${cor}"></rect>`;
+    if (item.valor > 0) svg += `<text class="churn-barra-rotulo" x="${x + larguraBarra / 2}" y="${y - 4}" text-anchor="middle">${item.valor}</text>`;
+    svg += `<text class="churn-eixo-texto" x="${x + larguraBarra / 2}" y="${alturaTotal - margemBase + 14}" text-anchor="middle">${churnEscapeXml(item.nome)}</text>`;
+  });
+  svg += `</svg>`;
+  wrap.innerHTML = svg;
+}
+
+function churnFiltrarRegistros() {
+  const busca = el("churn-filtro-cliente").value.trim().toLowerCase();
+  const csm = el("churn-filtro-csm").value;
+  const vendedor = el("churn-filtro-vendedor").value;
+  const persona = el("churn-filtro-persona").value;
+  const agora = new Date();
+  const mesAtual = agora.getMonth() + 1;
+  const anoAtual = agora.getFullYear();
+
+  return churnDataCache.filter((item) => {
+    if (!item.data_saida_iso) return false;
+    const [ano, mes] = item.data_saida_iso.split("-").map(Number);
+    if (churnActiveTimeRange) {
+      if (churnActiveTimeRange === "currentMonth" && (mes !== mesAtual || ano !== anoAtual)) return false;
+      if (churnActiveTimeRange === "thisYear" && ano !== anoAtual) return false;
+      if (churnActiveTimeRange === "last3Months" || churnActiveTimeRange === "last6Months") {
+        const mesesAtras = churnActiveTimeRange === "last3Months" ? 2 : 5;
+        const inicio = new Date(anoAtual, mesAtual - 1 - mesesAtras, 1);
+        const data = new Date(item.data_saida_iso);
+        if (data < inicio || data > agora) return false;
+      }
+    } else {
+      if (!churnShowAllYears && ano !== churnSelectedYear) return false;
+      if (!churnShowAllYears && churnSelectedMonths.size !== 12 && !churnSelectedMonths.has(mes)) return false;
+    }
+    if (busca && !item.nome.toLowerCase().includes(busca)) return false;
+    if (csm && item.csm !== csm) return false;
+    if (vendedor && item.vendedor !== vendedor) return false;
+    if (persona && item.persona !== persona) return false;
+    return true;
+  }).sort((a, b) => {
+    const porSaida = (b.data_saida_iso || "").localeCompare(a.data_saida_iso || "");
+    return porSaida;
+  });
+}
+
+function renderChurn() {
+  const filtrados = churnFiltrarRegistros();
+  const periodo = churnRotuloPeriodo();
+
+  el("churn-kpi-cancelamentos-label").textContent = `Cancelamentos · ${periodo}`;
+  el("churn-kpi-cancelamentos").textContent = String(filtrados.length);
+
+  const mediaTempo = filtrados.length
+    ? Math.round(filtrados.reduce((soma, i) => soma + i.meses_casa, 0) / filtrados.length)
+    : 0;
+  el("churn-kpi-media-tempo").textContent = `${mediaTempo} meses`;
+
+  const maisAntigo = filtrados.reduce((maior, i) => (!maior || i.meses_casa > maior.meses_casa ? i : maior), null);
+  el("churn-kpi-mais-antigo").textContent = maisAntigo ? `${maisAntigo.meses_casa} meses` : "–";
+  el("churn-kpi-mais-antigo-nome").textContent = maisAntigo ? maisAntigo.nome : "";
+
+  const totalBoleto = filtrados.reduce((soma, i) => soma + (i.boleto_valor || 0), 0);
+  el("churn-kpi-boletos").textContent = formatarMoedaBRL(totalBoleto);
+
+  const faixasTempo = [["0–3 meses", 0, 3], ["3–6 meses", 3, 6], ["6–12 meses", 6, 12], ["12–24 meses", 12, 24], ["24+ meses", 24, Infinity]];
+  churnGraficoVertical("churn-grafico-tempo", faixasTempo.map(([nome, min, max]) => ({
+    nome, valor: filtrados.filter((i) => i.meses_casa >= min && i.meses_casa < max).length,
+  })), "var(--vermelho)");
+
+  const contarPor = (campo) => {
+    const contagem = new Map();
+    filtrados.forEach((i) => {
+      const chave = i[campo] || "Sem valor";
+      contagem.set(chave, (contagem.get(chave) || 0) + 1);
+    });
+    return [...contagem].map(([nome, valor]) => ({ nome, valor })).sort((a, b) => b.valor - a.valor);
+  };
+  churnGraficoHorizontal("churn-grafico-tipo", contarPor("tipo"), "var(--violeta)");
+  churnGraficoHorizontal("churn-grafico-persona", contarPor("persona"), "var(--turquesa)");
+  churnGraficoHorizontal("churn-grafico-vendedor", contarPor("vendedor"), "var(--laranja)");
+  churnGraficoHorizontal("churn-grafico-csm", contarPor("csm"), "var(--azul)");
+
+  const corpo = el("churn-corpo");
+  corpo.innerHTML = "";
+  filtrados.forEach((item) => {
+    const tr = document.createElement("tr");
+    [
+      item.nome, item.tipo || "—", item.persona || "—", item.data_entrada || "—", item.data_saida || "—",
+      String(item.meses_casa), item.motivo_cliente || "—", item.motivo_csm || "—",
+      item.motivo_financeiro || "—", item.motivo_comercial || "—",
+      item.boleto_valor ? formatarMoedaBRL(item.boleto_valor) : "—",
+    ].forEach((texto) => {
+      const td = document.createElement("td");
+      td.textContent = texto;
+      tr.appendChild(td);
+    });
+    corpo.appendChild(tr);
+  });
+  el("churn-vazio").classList.toggle("hidden", filtrados.length > 0);
+}
+
+async function carregarChurn() {
+  try {
+    const r = await fetch("/api/churn");
+    const data = await parseJsonResponse(r);
+    if (!data.ok) return;
+    churnDataCache = data.registros || [];
+
+    crmPopularSelectDistinto(el("churn-filtro-csm"), churnDataCache.map((c) => c.csm), "Todos");
+    crmPopularSelectDistinto(el("churn-filtro-vendedor"), churnDataCache.map((c) => c.vendedor), "Todos");
+    crmPopularSelectDistinto(el("churn-filtro-persona"), churnDataCache.map((c) => c.persona), "Todas");
+
+    const anoSelect = el("churn-filtro-ano");
+    const anos = [...new Set(churnDataCache.filter((c) => c.data_saida_iso).map((c) => Number(c.data_saida_iso.slice(0, 4))))]
+      .sort((a, b) => b - a);
+    anoSelect.innerHTML = "";
+    (anos.length ? anos : [churnSelectedYear]).forEach((ano) => {
+      const opt = document.createElement("option");
+      opt.value = String(ano);
+      opt.textContent = String(ano);
+      anoSelect.appendChild(opt);
+    });
+    anoSelect.value = String(churnSelectedYear);
+
+    churnRenderChipsMeses();
+
+    if (!churnFiltrosPreparados) {
+      churnFiltrosPreparados = true;
+      el("churn-filtro-periodo").addEventListener("change", (e) => {
+        if (e.target.value) churnAplicarPeriodo(e.target.value);
+      });
+      el("churn-ano-todos").addEventListener("click", () => {
+        churnShowAllYears = !churnShowAllYears;
+        churnActiveTimeRange = churnInferirPeriodo(churnSelectedMonths, churnSelectedYear, churnShowAllYears);
+        el("churn-filtro-periodo").value = churnActiveTimeRange;
+        el("churn-ano-todos").classList.toggle("ativo", churnShowAllYears);
+        el("churn-filtro-ano").disabled = churnShowAllYears;
+        renderChurn();
+      });
+      el("churn-filtro-ano").addEventListener("change", (e) => {
+        churnSelectedYear = Number(e.target.value);
+        churnShowAllYears = false;
+        churnActiveTimeRange = churnInferirPeriodo(churnSelectedMonths, churnSelectedYear, false);
+        el("churn-filtro-periodo").value = churnActiveTimeRange;
+        el("churn-ano-todos").classList.remove("ativo");
+        renderChurn();
+      });
+      el("churn-filtro-cliente").addEventListener("input", renderChurn);
+      el("churn-filtro-csm").addEventListener("change", renderChurn);
+      el("churn-filtro-vendedor").addEventListener("change", renderChurn);
+      el("churn-filtro-persona").addEventListener("change", renderChurn);
+    }
+
+    el("churn-filtro-periodo").value = churnActiveTimeRange;
+    renderChurn();
   } catch (err) {
     console.error(err);
   }
@@ -23161,7 +23367,7 @@ async function carregarChamadosFicha(clienteId) {
   // misturados nos acontecimentos, ver construirEventosSinteticosChamados).
   const AREAS_HISTORICO_COM_CHAMADOS = ["suporte", "timeline", "detalhado"];
   if (fichaChamadosClienteId === clienteId
-    && (fichaAbaAtual === "geral" || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_CHAMADOS.includes(fichaHistoricoAreaAtual)))) {
+    && ((fichaAbaAtual === "geral" && fichaSubAbaAtual !== "informacoes") || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_CHAMADOS.includes(fichaHistoricoAreaAtual)))) {
     mostrarFichaAba(fichaAbaAtual);
   }
 }
@@ -23208,7 +23414,7 @@ async function carregarWootricFicha(clienteId) {
   // nos acontecimentos, ver construirEventosSinteticosWootric).
   const AREAS_HISTORICO_COM_WOOTRIC = ["timeline", "detalhado", "nps"];
   if (fichaWootricClienteId === clienteId
-    && (fichaAbaAtual === "geral" || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_WOOTRIC.includes(fichaHistoricoAreaAtual)))) {
+    && ((fichaAbaAtual === "geral" && fichaSubAbaAtual !== "informacoes") || (fichaAbaAtual === "historico" && AREAS_HISTORICO_COM_WOOTRIC.includes(fichaHistoricoAreaAtual)))) {
     mostrarFichaAba(fichaAbaAtual);
   }
 }
@@ -24479,7 +24685,12 @@ function construirFichaCredencialCompacta(idcentral, credencialConfigurada, cred
 // Bloco de menor prioridade visual (recolhível) com credencial + indicadores
 // da planilha de CS — informação técnica/operacional que nem sempre precisa
 // estar aberta, mas continua disponível sem sumir da tela.
-function construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin) {
+// `incluirCredencial` = false na Visão Geral: a credencial SSX fica só na
+// sub-aba Informações do Cliente (ficha cadastral). Sem credencial e sem
+// indicadores da planilha, o card não tem conteúdo e volta null.
+function construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin, incluirCredencial = true) {
+  const indicadores = construirFichaIndicadoresPlanilha(implantacao, true);
+  if (!incluirCredencial && !indicadores) return null;
   const det = document.createElement("details");
   det.className = "ficha-painel ficha-operacional";
   det.open = true;
@@ -24487,44 +24698,46 @@ function construirFichaOperacionalCard(idcentral, implantacao, credencialConfigu
   summary.textContent = "Informações operacionais";
   det.appendChild(summary);
 
-  det.appendChild(construirFichaCredencialCompacta(idcentral, credencialConfigurada, credencialLogin));
-
-  // Indicadores que só existem depois de uma Sincronizar Planilha (Ferramentas
-  // Auxiliares) — cliente que nunca sincronizou não tem "dados_planilha" no
-  // cadastro, então essa seção simplesmente não aparece (nada de placeholder
-  // vazio). Valor "-" da planilha (célula sem preenchimento) também não conta
-  // como dado de verdade, então não vira item aqui.
-  if (implantacao && implantacao.dados_planilha) {
-    const dp = implantacao.dados_planilha;
-    const valorUtil = (v) => (v && v !== "-" ? v : null);
-    const itensIndicadores = [
-      ["Cidade/Estado", [implantacao.cidade, implantacao.estado].filter(Boolean).join(" - ") || null],
-      ["% Veículos desatualizados", valorUtil(dp["9 - % veiculos desatualizados"])],
-      ["Rastreadores desatualizados", valorUtil(dp["10 - Rasteadores desatualizados"])],
-      ["Último boleto", valorUtil(dp["6 - Ultimo boleto"])],
-      ["Consumo", valorUtil(dp["57 - consumo"])],
-      ["Delta uso x paga", valorUtil(dp["Delta Uso x paga"])],
-      ["Dias desde último contato (planilha)", (() => {
-        const d = valorUtil(dp["13 - Dias do ultimo contato"]);
-        return d === null ? null : `${d} dia${d === "1" ? "" : "s"}`;
-      })()],
-    ].filter(([, valor]) => valor !== null);
-
-    if (itensIndicadores.length) {
-      const secIndicadores = document.createElement("div");
-      secIndicadores.className = "ficha-operacional-bloco";
-      const hInd = document.createElement("h4");
-      hInd.textContent = "Indicadores (planilha de CS)";
-      secIndicadores.appendChild(hInd);
-      const gridInd = document.createElement("div");
-      gridInd.className = "info-grid";
-      itensIndicadores.forEach(([label, valor]) => gridInd.appendChild(criarInfoItem(label, valor)));
-      secIndicadores.appendChild(gridInd);
-      det.appendChild(secIndicadores);
-    }
-  }
+  if (incluirCredencial) det.appendChild(construirFichaCredencialCompacta(idcentral, credencialConfigurada, credencialLogin));
+  if (indicadores) det.appendChild(indicadores);
 
   return det;
+}
+
+// Indicadores que só existem depois de uma Sincronizar Planilha (Ferramentas
+// Auxiliares) — cliente que nunca sincronizou não tem "dados_planilha" no
+// cadastro, então a seção simplesmente não aparece (null, nada de placeholder
+// vazio). Valor "-" da planilha (célula sem preenchimento) também não conta
+// como dado de verdade, então não vira item aqui. `incluirLocalizacao` fica
+// false na Ficha cadastral, que já mostra Estado/Cidade na própria seção.
+function construirFichaIndicadoresPlanilha(implantacao, incluirLocalizacao) {
+  if (!implantacao || !implantacao.dados_planilha) return null;
+  const dp = implantacao.dados_planilha;
+  const valorUtil = (v) => (v && v !== "-" ? v : null);
+  const itensIndicadores = [
+    ["Cidade/Estado", incluirLocalizacao ? ([implantacao.cidade, implantacao.estado].filter(Boolean).join(" - ") || null) : null],
+    ["% Veículos desatualizados", valorUtil(dp["9 - % veiculos desatualizados"])],
+    ["Rastreadores desatualizados", valorUtil(dp["10 - Rasteadores desatualizados"])],
+    ["Último boleto", valorUtil(dp["6 - Ultimo boleto"])],
+    ["Consumo", valorUtil(dp["57 - consumo"])],
+    ["Delta uso x paga", valorUtil(dp["Delta Uso x paga"])],
+    ["Dias desde último contato (planilha)", (() => {
+      const d = valorUtil(dp["13 - Dias do ultimo contato"]);
+      return d === null ? null : `${d} dia${d === "1" ? "" : "s"}`;
+    })()],
+  ].filter(([, valor]) => valor !== null);
+  if (!itensIndicadores.length) return null;
+
+  const secIndicadores = document.createElement("div");
+  secIndicadores.className = "ficha-operacional-bloco";
+  const hInd = document.createElement("h4");
+  hInd.textContent = "Indicadores (planilha de CS)";
+  secIndicadores.appendChild(hInd);
+  const gridInd = document.createElement("div");
+  gridInd.className = "info-grid";
+  itensIndicadores.forEach(([label, valor]) => gridInd.appendChild(criarInfoItem(label, valor)));
+  secIndicadores.appendChild(gridInd);
+  return secIndicadores;
 }
 
 // --- DOCUMENTOS DA FICHA (ficha de entrada assinada, contrato) ---
@@ -24668,6 +24881,578 @@ function construirFichaDocumentosCard(implantacao, documentos) {
   return card;
 }
 
+// --- FICHA CADASTRAL (sub-aba "Informações do Cliente" da Visão Geral) ---
+// Ficha do cliente no formato CRM/ERP: mesmas seções e campos do formulário
+// de cadastro (modal Adicionar/Editar cliente), em modo leitura por padrão.
+// Um botão "Editar" põe a PÁGINA TODA em modo edição (decisão da usuária,
+// sem lápis por seção) e "Salvar alterações" grava tudo de uma vez pelo
+// mesmo PUT /api/clientes/<id> do modal (que já trava IdCentral/Código
+// IdCentral pra quem não é admin). Fora do modo edição nada é editável.
+//
+// O rascunho vive aqui (fichaCadastroEdicao), não nos inputs: a Visão Geral
+// pode ser redesenhada por outros motivos e o que foi digitado não pode
+// sumir nesses redesenhos.
+let fichaCadastroEdicao = null; // { clienteId, valores, original, migracaoAtiva, salvando }
+
+// Campos que contam no indicador "Cadastro" — todos opcionais no cadastro
+// (só o IdCentral é obrigatório); o indicador é só informativo. Flag fica
+// de fora (vazio = sem flag, que é o estado bom).
+const FICHA_CADASTRO_CAMPOS_COMPLETUDE = [
+  ["cliente", "Nome"], ["data_entrada", "Data de entrada"], ["persona", "Persona"],
+  ["csm", "Responsável (CSM)"], ["vendedor", "Consultor Comercial"],
+  ["decisor_nome", "Nome do Decisor"], ["decisor_whatsapp", "WhatsApp do Decisor"],
+  ["valor_contrato", "Valor de contrato"], ["objetivo", "Objetivo"], ["momento", "Momento do Cliente"],
+  ["estado", "Estado"], ["cidade", "Cidade"],
+];
+
+function fichaCadastroMigracaoAtiva(migracoes) {
+  return (migracoes || []).find((m) => m.status === "em_andamento") || null;
+}
+
+function valoresFichaCadastro(c, migracaoAtiva) {
+  return {
+    cliente: c.cliente || "",
+    idcentral: c.idcentral || "",
+    codigo_idcentral: c.codigo_idcentral || "",
+    data_entrada: c.data_entrada || "",
+    persona: c.persona || "",
+    csm: c.csm || "",
+    vendedor: c.vendedor || "",
+    decisor_nome: c.decisor_nome || "",
+    decisor_whatsapp: c.decisor_whatsapp || "",
+    valor_contrato: Number(c.valor_contrato) ? String(c.valor_contrato) : "",
+    objetivo: c.objetivo || "",
+    momento: c.momento || "",
+    flag: c.flag || "",
+    estado: c.estado || "",
+    cidade: c.cidade || "",
+    implantado: c.implantado ? "sim" : "nao",
+    estagio: c.estagio || "implantacao",
+  };
+}
+
+function fichaCadastroEmEdicao(implantacao) {
+  return !!(fichaCadastroEdicao && implantacao && fichaCadastroEdicao.clienteId === implantacao.id);
+}
+
+function fichaCadastroAlterado() {
+  if (!fichaCadastroEdicao) return false;
+  return JSON.stringify(fichaCadastroEdicao.valores) !== JSON.stringify(fichaCadastroEdicao.original);
+}
+
+// Chamado antes de sair da Visão Geral/da Ficha (ver podeSairDaAbaFicha) e
+// ao trocar de sub-aba — o rascunho só existe em memória.
+function confirmarDescartarFichaCadastro() {
+  if (!fichaCadastroEdicao) return true;
+  if (fichaCadastroEdicao.salvando) {
+    alert("Aguarde o salvamento da ficha cadastral terminar.");
+    return false;
+  }
+  if (fichaCadastroAlterado() && !confirm("Há alterações na ficha cadastral que ainda não foram salvas. Descartar?")) return false;
+  fichaCadastroEdicao = null;
+  return true;
+}
+
+function entrarEdicaoFichaCadastro(implantacao, migracoes) {
+  const migracaoAtiva = fichaCadastroMigracaoAtiva(migracoes);
+  const valores = valoresFichaCadastro(implantacao, migracaoAtiva);
+  fichaCadastroEdicao = {
+    clienteId: implantacao.id, valores, original: { ...valores }, migracaoAtiva, salvando: false,
+  };
+  mostrarFichaAba("geral");
+}
+
+function cancelarEdicaoFichaCadastro() {
+  if (fichaCadastroEdicao?.salvando) return;
+  if (fichaCadastroAlterado() && !confirm("Descartar as alterações feitas na ficha cadastral?")) return;
+  fichaCadastroEdicao = null;
+  mostrarFichaAba("geral");
+}
+
+async function salvarFichaCadastro() {
+  const ed = fichaCadastroEdicao;
+  if (!ed || ed.salvando) return;
+  const v = ed.valores;
+  if (!v.idcentral.trim()) return alert("Informe o IdCentral do cliente.");
+  if (!fichaCadastroAlterado()) {
+    fichaCadastroEdicao = null;
+    mostrarFichaAba("geral");
+    return;
+  }
+  // Mesmo payload do formulário do modal (formImplantacaoCliente) — o PUT
+  // espera o cadastro completo, não só o que mudou.
+  const payload = {
+    idcentral: v.idcentral.trim(),
+    cliente: v.cliente.trim(),
+    data_entrada: v.data_entrada,
+    objetivo: v.objetivo.trim(),
+    valor_contrato: v.valor_contrato,
+    csm: v.csm.trim(),
+    momento: v.momento,
+    flag: v.flag,
+    vendedor: v.vendedor.trim(),
+    persona: v.persona,
+    decisor_nome: v.decisor_nome.trim(),
+    decisor_whatsapp: v.decisor_whatsapp.trim(),
+    estado: v.estado,
+    cidade: v.cidade.trim(),
+    codigo_idcentral: v.codigo_idcentral.trim(),
+    estagio: v.estagio,
+  };
+  ed.salvando = true;
+  mostrarFichaAba("geral");
+  try {
+    const r = await fetch(`/api/clientes/${ed.clienteId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      alert(`Erro ao salvar: ${data.error || "falha desconhecida"}`);
+      return;
+    }
+    // "Implantado" tem endpoint próprio (grava data/quem e histórico) — só
+    // chama se mudou; recarregar=false porque a Ficha recarrega logo abaixo.
+    if (v.implantado !== ed.original.implantado) {
+      await salvarImplantadoCliente({ id: ed.clienteId }, v.implantado === "sim", false);
+    }
+    fichaCadastroEdicao = null;
+    // idcentral recém-salvo (um admin pode ter trocado nesta edição).
+    await carregarFichaCliente(data.cliente.idcentral, "geral");
+  } catch (err) {
+    alert(`Erro ao salvar: ${String(err)}`);
+  } finally {
+    // Erro: continua em modo edição, com o rascunho intacto, pra tentar de novo.
+    if (fichaCadastroEdicao === ed) {
+      ed.salvando = false;
+      mostrarFichaAba("geral");
+    }
+  }
+}
+
+function opcoesDoSelectModal(select) {
+  return Array.from(select.options).filter((o) => o.value).map((o) => ({ value: o.value, label: o.textContent }));
+}
+
+// Um campo da ficha: rótulo + valor (leitura) ou rótulo + input (edição).
+// `campo`: { chave, rotulo, tipo, opcoes, query, exibir, travado, ajuda, full, placeholder }.
+// `travado` (texto) = continua só leitura mesmo em modo edição, com o motivo
+// como dica (ex.: IdCentral pra quem não é admin).
+function construirFichaCadastroCampo(campo, valores, emEdicao) {
+  const item = document.createElement("div");
+  item.className = "ficha-cad-campo" + (campo.full ? " ficha-cad-campo-full" : "");
+  const rot = document.createElement("label");
+  rot.className = "ficha-cad-rotulo";
+  rot.textContent = campo.rotulo;
+  item.appendChild(rot);
+
+  const valor = valores[campo.chave] ?? "";
+  const editavel = emEdicao && !campo.travado && campo.tipo !== "leitura";
+  if (!editavel) {
+    const v = document.createElement("div");
+    v.className = "ficha-cad-valor";
+    const texto = campo.exibir ? campo.exibir(valor) : valor;
+    if (texto === null || texto === undefined || texto === "") {
+      v.classList.add("vazio");
+      v.textContent = "—";
+    } else {
+      v.textContent = String(texto);
+    }
+    if (emEdicao && campo.travado) {
+      v.classList.add("travado");
+      const ajuda = document.createElement("small");
+      ajuda.className = "ficha-cad-ajuda";
+      ajuda.textContent = campo.travado;
+      item.appendChild(v);
+      item.appendChild(ajuda);
+      return item;
+    }
+    item.appendChild(v);
+    return item;
+  }
+
+  const id = `ficha-cad-${campo.chave}`;
+  rot.htmlFor = id;
+  const atualizar = (novo) => { valores[campo.chave] = novo; };
+  let controle;
+  if (campo.tipo === "select" || campo.tipo === "usuario") {
+    controle = document.createElement("select");
+    if (campo.tipo === "usuario") {
+      // Mesma lista de usuários do modal (por área); assíncrona — até chegar,
+      // mostra só o valor atual pra não "apagar" o campo.
+      const opt = document.createElement("option");
+      opt.value = valor;
+      opt.textContent = valor || "Selecione...";
+      controle.appendChild(opt);
+      popularSelectUsuariosPorArea(controle, valor, campo.query);
+    } else {
+      if (!campo.semVazio) {
+        const vazio = document.createElement("option");
+        vazio.value = "";
+        vazio.textContent = "Selecione...";
+        controle.appendChild(vazio);
+      }
+      (campo.opcoes || []).forEach((o) => {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        controle.appendChild(opt);
+      });
+      if (valor && !(campo.opcoes || []).some((o) => o.value === valor)) {
+        const opt = document.createElement("option");
+        opt.value = valor;
+        opt.textContent = `${valor} (fora da lista)`;
+        controle.appendChild(opt);
+      }
+      controle.value = valor;
+    }
+    controle.addEventListener("change", () => atualizar(controle.value));
+  } else if (campo.tipo === "textarea") {
+    controle = document.createElement("textarea");
+    controle.rows = 2;
+    controle.value = valor;
+    controle.addEventListener("input", () => atualizar(controle.value));
+  } else {
+    controle = document.createElement("input");
+    controle.type = { data: "date", moeda: "number", tel: "tel" }[campo.tipo] || "text";
+    if (campo.tipo === "moeda") { controle.min = "0"; controle.step = "0.01"; }
+    if (campo.placeholder) controle.placeholder = campo.placeholder;
+    controle.value = valor;
+    controle.addEventListener("input", () => atualizar(controle.value));
+  }
+  controle.id = id;
+  controle.className = "ficha-cad-input";
+  item.appendChild(controle);
+  if (campo.ajuda) {
+    const ajuda = document.createElement("small");
+    ajuda.className = "ficha-cad-ajuda";
+    ajuda.textContent = campo.ajuda;
+    item.appendChild(ajuda);
+  }
+  return item;
+}
+
+// Estado + Cidade em modo edição: comboboxes pesquisáveis próprios (o par
+// comboClienteEstado/comboClienteCidade é do modal), com a mesma carga de
+// estados/municípios do IBGE (carregarEstadosBrasil/carregarMunicipiosDoEstado).
+function construirFichaCadastroLocalizacaoEdicao(valores) {
+  const frag = document.createDocumentFragment();
+  const comboEstado = criarComboboxPesquisavel("Digite o estado...");
+  const comboCidade = criarComboboxPesquisavel("Escolha o estado primeiro");
+  comboCidade.input.disabled = true;
+  const sincronizarCidade = () => {
+    valores.cidade = comboCidade.valor || (comboCidade.modoLivre ? comboCidade.input.value.trim() : "");
+  };
+  comboCidade.aoSelecionar = sincronizarCidade;
+  comboCidade.input.addEventListener("input", sincronizarCidade);
+  comboEstado.aoSelecionar = (uf) => {
+    valores.estado = uf;
+    valores.cidade = "";
+    carregarMunicipiosDoEstado(uf, "", comboCidade);
+  };
+  comboEstado.input.addEventListener("input", () => {
+    if (!comboEstado.valor && valores.estado) {
+      valores.estado = "";
+      valores.cidade = "";
+      carregarMunicipiosDoEstado("", "", comboCidade);
+    }
+  });
+
+  [["Estado", comboEstado], ["Cidade", comboCidade]].forEach(([rotulo, combo]) => {
+    const item = document.createElement("div");
+    item.className = "ficha-cad-campo";
+    const rot = document.createElement("span");
+    rot.className = "ficha-cad-rotulo";
+    rot.textContent = rotulo;
+    item.appendChild(rot);
+    combo.wrap.classList.add("ficha-cad-combo");
+    item.appendChild(combo.wrap);
+    frag.appendChild(item);
+  });
+
+  (async () => {
+    const estados = await carregarEstadosBrasil();
+    comboEstado.setOpcoes(estados);
+    if (valores.estado) {
+      comboEstado.setValor(valores.estado);
+      await carregarMunicipiosDoEstado(valores.estado, valores.cidade, comboCidade);
+    }
+  })();
+  return frag;
+}
+
+function construirFichaCadastroSecaoCabecalho(titulo, selo) {
+  const cab = document.createElement("div");
+  cab.className = "ficha-cad-secao-cabecalho";
+  const h = document.createElement("h4");
+  h.textContent = titulo;
+  cab.appendChild(h);
+  if (selo) {
+    const s = document.createElement("span");
+    s.className = "ficha-cad-selo";
+    s.textContent = selo;
+    cab.appendChild(s);
+  }
+  return cab;
+}
+
+function construirFichaCadastroSecao(titulo, campos, valores, emEdicao, opcoes = {}) {
+  const sec = document.createElement("section");
+  sec.className = "ficha-cad-secao";
+  sec.appendChild(construirFichaCadastroSecaoCabecalho(titulo, opcoes.selo));
+  const grid = document.createElement("div");
+  grid.className = "ficha-cad-grid";
+  campos.forEach((campo) => grid.appendChild(construirFichaCadastroCampo(campo, valores, emEdicao)));
+  if (opcoes.extra) grid.appendChild(opcoes.extra);
+  sec.appendChild(grid);
+  return sec;
+}
+
+function construirFichaCadastroContatos(implantacao) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel ficha-cad-lateral-card";
+  const h = document.createElement("h3");
+  h.textContent = "Contatos rápidos";
+  card.appendChild(h);
+  const lista = document.createElement("div");
+  lista.className = "ficha-cad-contatos";
+  [
+    ["CSM", implantacao.csm, implantacao.csm_whatsapp],
+    ["Comercial", implantacao.vendedor, implantacao.vendedor_whatsapp],
+    ["Decisor", implantacao.decisor_nome, implantacao.decisor_whatsapp],
+  ].forEach(([rotulo, nome, whatsapp]) => {
+    const linha = document.createElement("div");
+    linha.className = "ficha-cad-contato";
+    const textos = document.createElement("div");
+    textos.className = "ficha-cad-contato-textos";
+    const r = document.createElement("span");
+    r.className = "ficha-cad-rotulo";
+    r.textContent = rotulo;
+    const n = document.createElement("span");
+    n.className = "ficha-cad-contato-nome" + (nome ? "" : " vazio");
+    n.textContent = nome || "não definido";
+    n.title = nome || "";
+    textos.appendChild(r);
+    textos.appendChild(n);
+    linha.appendChild(textos);
+    const link = linkWhatsapp(whatsapp);
+    if (link) {
+      const a = document.createElement("a");
+      a.className = "ficha-cad-contato-wpp";
+      a.href = link;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.title = "Abrir conversa no WhatsApp";
+      a.setAttribute("aria-label", `WhatsApp: ${rotulo}`);
+      a.innerHTML = ICONE_WHATSAPP_SVG;
+      linha.appendChild(a);
+    }
+    lista.appendChild(linha);
+  });
+  card.appendChild(lista);
+  return card;
+}
+
+function construirFichaCadastroCompletude(valores) {
+  const faltando = FICHA_CADASTRO_CAMPOS_COMPLETUDE.filter(([chave]) => (chave === "valor_contrato"
+    ? !Number(valores[chave]) : !String(valores[chave] || "").trim()));
+  const total = FICHA_CADASTRO_CAMPOS_COMPLETUDE.length;
+  const feitos = total - faltando.length;
+  const card = document.createElement("div");
+  card.className = "ficha-painel ficha-cad-lateral-card ficha-cad-completude";
+  const topo = document.createElement("div");
+  topo.className = "ficha-cad-completude-topo";
+  const h = document.createElement("h3");
+  h.textContent = "Cadastro";
+  const n = document.createElement("span");
+  n.className = "ficha-cad-completude-num";
+  n.textContent = `${feitos}/${total}`;
+  topo.appendChild(h);
+  topo.appendChild(n);
+  card.appendChild(topo);
+  const trilho = document.createElement("div");
+  trilho.className = "ficha-cad-completude-trilho";
+  const barra = document.createElement("div");
+  barra.className = "ficha-cad-completude-barra" + (feitos === total ? " completo" : "");
+  barra.style.width = `${Math.round((feitos / total) * 100)}%`;
+  trilho.appendChild(barra);
+  card.appendChild(trilho);
+  const p = document.createElement("p");
+  p.className = "ficha-cad-completude-falta";
+  p.textContent = faltando.length
+    ? `Falta: ${faltando.map(([, rotulo]) => rotulo).join(", ")}.`
+    : "Todos os campos principais preenchidos.";
+  card.appendChild(p);
+  return card;
+}
+
+function construirFichaCadastro(idcentral, implantacao, migracao, migracoes, credencialConfigurada, credencialLogin, documentos) {
+  const emEdicao = fichaCadastroEmEdicao(implantacao);
+  // Rascunho de outro cliente (a Ficha trocou) não vale aqui.
+  if (fichaCadastroEdicao && !emEdicao) fichaCadastroEdicao = null;
+  const salvando = emEdicao && fichaCadastroEdicao.salvando;
+  const migracaoAtiva = fichaCadastroMigracaoAtiva(migracoes);
+  const valores = emEdicao ? fichaCadastroEdicao.valores : valoresFichaCadastro(implantacao, migracaoAtiva);
+  const ehAdmin = USUARIO_PERFIL_ATUAL === "adm";
+
+  const wrap = document.createElement("div");
+  wrap.className = "ficha-cad" + (emEdicao ? " editando" : "");
+
+  // Barra de ações — Editar (leitura) / Cancelar + Salvar (edição).
+  const barra = document.createElement("div");
+  barra.className = "ficha-cad-barra";
+  const tit = document.createElement("div");
+  tit.className = "ficha-cad-barra-titulo";
+  const h3 = document.createElement("h3");
+  h3.textContent = "Ficha cadastral";
+  tit.appendChild(h3);
+  if (emEdicao) {
+    const sub = document.createElement("span");
+    sub.textContent = "Modo edição — as alterações só valem depois de salvar.";
+    tit.appendChild(sub);
+  }
+  barra.appendChild(tit);
+  const acoes = document.createElement("div");
+  acoes.className = "ficha-cad-barra-acoes";
+  if (emEdicao) {
+    const cancelar = document.createElement("button");
+    cancelar.type = "button";
+    cancelar.className = "btn-secondary";
+    cancelar.textContent = "Cancelar";
+    cancelar.disabled = salvando;
+    cancelar.addEventListener("click", cancelarEdicaoFichaCadastro);
+    const salvar = document.createElement("button");
+    salvar.type = "button";
+    salvar.className = "btn-primary";
+    salvar.textContent = salvando ? "Salvando..." : "Salvar alterações";
+    salvar.disabled = salvando;
+    salvar.addEventListener("click", salvarFichaCadastro);
+    acoes.appendChild(cancelar);
+    acoes.appendChild(salvar);
+  } else {
+    const editar = document.createElement("button");
+    editar.type = "button";
+    editar.className = "btn-secondary ficha-cad-btn-editar";
+    editar.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg><span>Editar</span>';
+    editar.addEventListener("click", () => entrarEdicaoFichaCadastro(implantacao, migracoes));
+    acoes.appendChild(editar);
+  }
+  barra.appendChild(acoes);
+  wrap.appendChild(barra);
+
+  const layout = document.createElement("div");
+  layout.className = "ficha-cad-layout";
+  const principal = document.createElement("div");
+  principal.className = "ficha-painel ficha-cad-principal";
+
+  const travadoAdmin = ehAdmin ? null : "Só administradores alteram este campo.";
+  const exibirData = (v) => formatarDataBRSimples(v) || v;
+
+  principal.appendChild(construirFichaCadastroSecao("Identificação", [
+    { chave: "cliente", rotulo: "Cliente", tipo: "texto", full: true, placeholder: "Nome da central" },
+    { chave: "idcentral", rotulo: "IdCentral", tipo: "texto", travado: travadoAdmin },
+    { chave: "codigo_idcentral", rotulo: "Código IdCentral", tipo: "texto", travado: travadoAdmin },
+    { chave: "data_entrada", rotulo: "Data de entrada", tipo: "data", exibir: exibirData },
+    {
+      chave: "estagio", rotulo: "Fase de vida", tipo: "select", semVazio: true,
+      opcoes: Object.entries(CRM_ESTAGIO_LABELS).map(([value, label]) => ({ value, label })),
+      exibir: (v) => CRM_ESTAGIO_LABELS[v] || v,
+    },
+    {
+      chave: "fase_entrada", rotulo: "Fase de entrada", tipo: "leitura",
+      exibir: () => CRM_ESTAGIO_LABELS[implantacao.fase_entrada] || implantacao.fase_entrada || "",
+    },
+    { chave: "persona", rotulo: "Persona", tipo: "select", opcoes: opcoesDoSelectModal(inputImplantacaoClientePersona) },
+  ], valores, emEdicao));
+
+  principal.appendChild(construirFichaCadastroSecao("Relacionamento", [
+    { chave: "csm", rotulo: "Responsável (CSM)", tipo: "usuario", query: "area_prefix=CS" },
+    { chave: "vendedor", rotulo: "Consultor Comercial", tipo: "usuario", query: "area=Comercial" },
+    { chave: "decisor_nome", rotulo: "Nome do Decisor", tipo: "texto" },
+    { chave: "decisor_whatsapp", rotulo: "WhatsApp do Decisor", tipo: "tel", placeholder: "(00) 00000-0000" },
+  ], valores, emEdicao));
+
+  const implantadoInfo = implantacao.implantado && implantacao.implantado_em
+    ? ` · desde ${formatarDataBRSimples(implantacao.implantado_em)}${implantacao.implantado_por ? ` · ${implantacao.implantado_por}` : ""}`
+    : "";
+  principal.appendChild(construirFichaCadastroSecao("Contrato & momento", [
+    { chave: "valor_contrato", rotulo: "Valor de contrato", tipo: "moeda", exibir: (v) => (Number(v) ? formatarMoeda(v) : "") },
+    { chave: "momento", rotulo: "Momento do Cliente", tipo: "select", opcoes: opcoesDoSelectModal(inputImplantacaoClienteMomento) },
+    { chave: "flag", rotulo: "Flag", tipo: "select", opcoes: opcoesDoSelectModal(inputImplantacaoClienteFlag), exibir: (v) => v || "Sem flag" },
+    {
+      chave: "implantado", rotulo: "Cliente implantado?", tipo: "select",
+      opcoes: [{ value: "nao", label: "Não" }, { value: "sim", label: "Sim" }],
+      exibir: (v) => (v === "sim" ? `Sim${implantadoInfo}` : "Não"),
+    },
+    {
+      // Só leitura: migração não é mais campo do cadastro — é criada pelo
+      // "+ Adicionar migração" do Controle ou pela aba Migração da Ficha.
+      chave: "migracao", rotulo: "Migração", tipo: "leitura",
+      exibir: () => {
+        if (!migracaoAtiva) return "Nenhuma ativa";
+        const origem = migracaoAtiva.plataforma_origem;
+        return `Em andamento${origem ? ` · ${origem}` : ""}`;
+      },
+    },
+    { chave: "objetivo", rotulo: "Objetivo", tipo: "textarea", full: true },
+  ], valores, emEdicao));
+
+  principal.appendChild(construirFichaCadastroSecao("Localização",
+    emEdicao ? [] : [
+      { chave: "estado", rotulo: "Estado", tipo: "texto" },
+      { chave: "cidade", rotulo: "Cidade", tipo: "texto" },
+    ],
+    valores, emEdicao,
+    emEdicao ? { extra: construirFichaCadastroLocalizacaoEdicao(valores) } : {}));
+
+  // Situação — tudo calculado (nunca editável aqui). Só faz sentido pra quem
+  // tem jornada de Implantação (cliente só de Migração não tem marcos).
+  if (implantacao.tem_implantacao !== false) {
+    const status = statusImplantacaoCard(implantacao);
+    const dias = diasDesdeEntrada(implantacao.data_entrada);
+    const diasSemAcao = diasSemAtividade(implantacao);
+    const calculados = {
+      status: status ? status.label : "",
+      etapa: implantacao.etapa === "concluido" ? IMPLANTACAO_ETAPA_LABELS.concluido : nomeCompletoMarco(implantacao.etapa),
+      dias: dias === null ? "" : `${dias} dia${dias === 1 ? "" : "s"}`,
+      sem_acao: diasSemAcao === null ? "Sem registro" : `${diasSemAcao} dia${diasSemAcao === 1 ? "" : "s"}`,
+    };
+    principal.appendChild(construirFichaCadastroSecao("Situação da implantação", [
+      { chave: "status", rotulo: "Status", tipo: "leitura" },
+      { chave: "etapa", rotulo: "Etapa atual", tipo: "leitura" },
+      { chave: "dias", rotulo: "Dias desde a entrada", tipo: "leitura" },
+      { chave: "sem_acao", rotulo: "Dias sem atividade", tipo: "leitura" },
+    ], calculados, false, { selo: "Calculado" }));
+  }
+
+  const indicadores = construirFichaIndicadoresPlanilha(implantacao, false);
+  if (indicadores) {
+    indicadores.className = "ficha-cad-secao ficha-cad-indicadores";
+    const h4 = indicadores.querySelector("h4");
+    if (h4) h4.replaceWith(construirFichaCadastroSecaoCabecalho("Indicadores", "Fonte: planilha de CS"));
+    principal.appendChild(indicadores);
+  }
+
+  const lateral = document.createElement("div");
+  lateral.className = "ficha-cad-lateral";
+  lateral.appendChild(construirFichaCadastroContatos(implantacao));
+  lateral.appendChild(construirFichaCadastroCompletude(valores));
+  lateral.appendChild(construirFichaDocumentosCard(implantacao, documentos));
+  const credCard = document.createElement("div");
+  credCard.className = "ficha-painel ficha-cad-lateral-card";
+  const hCred = document.createElement("h3");
+  hCred.textContent = "Credencial SSX";
+  credCard.appendChild(hCred);
+  credCard.appendChild(construirFichaCredencialCompacta(idcentral, credencialConfigurada, credencialLogin));
+  lateral.appendChild(credCard);
+
+  layout.appendChild(principal);
+  layout.appendChild(lateral);
+  wrap.appendChild(layout);
+  return wrap;
+}
+
 // Sub-abas acima do nome do cliente, dentro da Visão Geral. Cada uma mostra um
 // recorte: "Geral" é o painel completo; as outras separam o que é cadastro e
 // andamento (Histórico tem aba própria no sidebar, fora da Visão Geral).
@@ -24691,6 +25476,7 @@ function construirFichaSubAbas(ativa) {
     btn.setAttribute("aria-selected", String(chave === ativa));
     btn.addEventListener("click", () => {
       if (chave === fichaSubAbaAtual) return;
+      if (!confirmarDescartarFichaCadastro()) return;
       fichaSubAbaAtual = chave;
       mostrarFichaAba("geral");
     });
@@ -25969,14 +26755,19 @@ function construirFichaHistorico(implantacao, migracao) {
   return wrap;
 }
 
-function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin, subAba = "geral", documentos) {
+function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialConfigurada, credencialLogin, subAba = "geral", documentos, migracoes) {
   const wrap = document.createElement("div");
   wrap.appendChild(construirFichaSubAbas(subAba));
 
   if (subAba === "informacoes") {
-    if (implantacao) wrap.appendChild(construirFichaLinhaContato(implantacao));
+    // Ficha cadastral (CRM/ERP) com modo edição — ver construirFichaCadastro.
+    // Sem registro de cliente (só Migração órfã) não há o que editar: cai no
+    // resumo antigo, só leitura.
+    if (implantacao) {
+      wrap.appendChild(construirFichaCadastro(idcentral, implantacao, migracao, migracoes, credencialConfigurada, credencialLogin, documentos));
+      return wrap;
+    }
     wrap.appendChild(construirFichaResumoCard(implantacao, migracao));
-    if (implantacao) wrap.appendChild(construirFichaDocumentosCard(implantacao, documentos));
     wrap.appendChild(construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin));
     return wrap;
   }
@@ -26034,7 +26825,8 @@ function construirFichaVisaoGeral(idcentral, implantacao, migracao, credencialCo
   const colDireita = document.createElement("div");
   colDireita.className = "ficha-coluna";
   colDireita.appendChild(construirFichaResumoCard(implantacao, migracao));
-  colDireita.appendChild(construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin));
+  const operacional = construirFichaOperacionalCard(idcentral, implantacao, credencialConfigurada, credencialLogin, false);
+  if (operacional) colDireita.appendChild(operacional);
 
   colunas.appendChild(colEsquerda);
   colunas.appendChild(colDireita);
@@ -26060,9 +26852,10 @@ function construirFichaImplantacao(implantacao, migracao) {
   const grid = document.createElement("div");
   grid.className = "info-grid";
   grid.appendChild(criarInfoItemStatusImplantacao(implantacao));
-  grid.appendChild(criarInfoItem("IdCentral", implantacao.idcentral));
+  // IdCentral já aparece na tag do cabeçalho da Ficha; Etapa só com o número
+  // do marco ("Marco 1"), sem o nome — pedido da usuária pra enxugar os cards.
   grid.appendChild(criarInfoItem("Etapa", implantacao.etapa === "concluido"
-    ? IMPLANTACAO_ETAPA_LABELS.concluido : nomeCompletoMarco(implantacao.etapa)));
+    ? IMPLANTACAO_ETAPA_LABELS.concluido : String(implantacao.etapa || "").replace("marco-", "Marco ")));
   grid.appendChild(criarInfoItem("Responsável", implantacao.csm));
   const itemScore = criarInfoItem("Score de implantação", "Carregando...");
   grid.appendChild(itemScore);
@@ -27686,67 +28479,177 @@ function renderResumoModelos(container, resumo) {
   container.appendChild(table);
 }
 
+// --- ABA MIGRAÇÃO DA FICHA: Ativa | Histórico (2026-11-26) ---
+// Só UMA migração ativa por cliente. Enquanto ela está ativa, tudo que o
+// cliente mandar entra nela. Ao finalizar (formulário de finalização) ou
+// cancelar, ela vira um card no Histórico, com os números congelados no
+// encerramento (snapshot_encerramento, gravado pelo backend) — e não pode
+// mais ser alterada. Migração é criada a partir de um cliente já cadastrado:
+// "+ Adicionar migração" (Controle de Migração) ou "Iniciar migração" aqui.
+let fichaMigracaoSubAba = "ativa";
+let fichaMigracaoSubAbaClienteId = null;
+
+const MIGRACAO_RESULTADO_LABELS = {
+  concluida: "Concluída",
+  concluida_pendencias: "Concluída com pendências",
+};
+
+async function iniciarMigracaoParaCliente(clienteId) {
+  const r = await fetch(`/api/clientes/${clienteId}/migracoes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const data = await parseJsonResponse(r);
+  if (!data.ok) throw new Error(data.error || "falha desconhecida");
+  return data.migracao;
+}
+
+// Recarrega a Ficha (sem trocar de tela) e volta pra aba Migração na
+// sub-aba pedida — usado depois de iniciar/finalizar/cancelar.
+async function recarregarFichaNaMigracao(idcentral, subAba) {
+  const rf = await fetch(`/api/ficha/${encodeURIComponent(idcentral)}`);
+  const dataFicha = await parseJsonResponse(rf);
+  if (!dataFicha.ok) return;
+  fichaClienteAtual = dataFicha;
+  fichaClienteCache.set(idcentral, dataFicha);
+  aplicarVisibilidadeAbasFicha(dataFicha);
+  // Cabeçalho também muda (tag "Migração" some quando não há mais ativa).
+  const cabecalho = el("ficha-cliente-cabecalho");
+  cabecalho.innerHTML = "";
+  cabecalho.appendChild(construirFichaHeader(dataFicha.implantacao, dataFicha.migracao, true));
+  fichaMigracaoSubAba = subAba;
+  mostrarFichaAba("migracao");
+}
+
+function construirFichaMigracaoSubAbas(ativa, totalHistorico) {
+  const nav = document.createElement("div");
+  nav.className = "ficha-subabas";
+  nav.setAttribute("role", "tablist");
+  [["ativa", "Ativa"], ["historico", `Histórico${totalHistorico ? ` (${totalHistorico})` : ""}`]].forEach(([chave, rotulo]) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ficha-subaba" + (chave === ativa ? " ativo" : "");
+    btn.textContent = rotulo;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", String(chave === ativa));
+    btn.addEventListener("click", () => {
+      if (chave === fichaMigracaoSubAba) return;
+      fichaMigracaoSubAba = chave;
+      mostrarFichaAba("migracao");
+    });
+    nav.appendChild(btn);
+  });
+  return nav;
+}
+
 function construirFichaMigracao(implantacao, migracao, migracoes) {
   const wrap = document.createElement("div");
-
-  if (!migracao) {
+  if (!implantacao) {
     const p = document.createElement("p");
     p.className = "placeholder";
-    p.textContent = "Esse cliente ainda não tem nenhum processo de migração registrado. "
-      + 'Marque "Tem Migração? Sim" no cadastro do cliente pra iniciar um.';
+    p.textContent = "Esse cliente não tem cadastro — não há migração pra mostrar.";
     wrap.appendChild(p);
     return wrap;
   }
+  // Trocou de cliente: sempre começa na sub-aba Ativa.
+  if (fichaMigracaoSubAbaClienteId !== implantacao.id) {
+    fichaMigracaoSubAbaClienteId = implantacao.id;
+    fichaMigracaoSubAba = "ativa";
+  }
+  const lista = migracoes || [];
+  const ativa = lista.find((m) => m.status === "em_andamento") || null;
+  const encerradas = lista
+    .filter((m) => m.status !== "em_andamento")
+    .sort((a, b) => String(b.data_fim || b.data_inicio || "").localeCompare(String(a.data_fim || a.data_inicio || "")));
 
+  wrap.appendChild(construirFichaMigracaoSubAbas(fichaMigracaoSubAba, encerradas.length));
+  if (fichaMigracaoSubAba === "historico") {
+    wrap.appendChild(construirFichaMigracaoHistorico(implantacao, encerradas));
+  } else if (ativa) {
+    wrap.appendChild(construirFichaMigracaoAtiva(implantacao, ativa));
+  } else {
+    wrap.appendChild(construirFichaMigracaoSemAtiva(implantacao, encerradas.length));
+  }
+  return wrap;
+}
+
+function construirFichaMigracaoSemAtiva(implantacao, totalHistorico) {
+  const card = document.createElement("div");
+  card.className = "ficha-painel ficha-migracao-vazia";
+  const titulo = document.createElement("h3");
+  titulo.textContent = "Nenhuma migração ativa no momento";
+  card.appendChild(titulo);
+  const texto = document.createElement("p");
+  texto.textContent = totalHistorico
+    ? `As migrações anteriores (${totalHistorico}) estão na aba Histórico.`
+    : "Esse cliente ainda não teve nenhuma migração.";
+  card.appendChild(texto);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn-primary ficha-migracao-iniciar";
+  btn.textContent = "Iniciar migração";
+  btn.addEventListener("click", async () => {
+    if (!confirm(`Iniciar uma nova migração para "${implantacao.cliente}"?`)) return;
+    btn.disabled = true;
+    try {
+      await iniciarMigracaoParaCliente(implantacao.id);
+      await recarregarFichaNaMigracao(implantacao.idcentral, "ativa");
+    } catch (err) {
+      alert(`Erro ao iniciar migração: ${String(err.message || err)}`);
+      btn.disabled = false;
+    }
+  });
+  card.appendChild(btn);
+  return card;
+}
+
+function construirFichaMigracaoAtiva(implantacao, migracao) {
+  const wrap = document.createElement("div");
   const sec = document.createElement("div");
   sec.className = "ficha-secao";
   const grid = document.createElement("div");
   grid.className = "info-grid";
-  // Dias em migração: enquanto está rodando, conta até hoje; depois de
-  // concluída/cancelada, fica fixo na duração real do processo (início → fim).
-  const diasMigracao = migracao.data_fim
-    ? diasEntre(migracao.data_inicio, migracao.data_fim)
-    : diasDesdeEntrada(migracao.data_inicio);
-  grid.appendChild(criarInfoItem("Status", MIGRACAO_STATUS_LABELS[migracao.status] || migracao.status));
+  const diasMigracao = diasDesdeEntrada(migracao.data_inicio);
   grid.appendChild(criarInfoItem("Etapa", MIGRACAO_ETAPA_LABELS[migracao.etapa] || migracao.etapa));
   grid.appendChild(criarInfoItem("Plataforma de origem", migracao.plataforma_origem));
-  // Referência guardada pra "Importar da planilha" atualizar o número na
-  // hora (percentual_migracao é recalculado a cada importação — ver abaixo).
+  // Referência guardada pra "Importar da planilha" atualizar o número na hora.
   const itemProgressoMigracao = criarInfoItem("Progresso da migração", `${migracao.percentual_migracao || 0}%`);
   grid.appendChild(itemProgressoMigracao);
   grid.appendChild(criarInfoItem(
     "Dias em migração",
     diasMigracao === null ? "-" : `${diasMigracao} dia${diasMigracao === 1 ? "" : "s"}`
   ));
-  grid.appendChild(criarInfoItem("Início", migracao.data_inicio));
-  if (migracao.data_fim) grid.appendChild(criarInfoItem("Fim", migracao.data_fim));
+  grid.appendChild(criarInfoItem("Início", formatarDataBRSimples(migracao.data_inicio) || migracao.data_inicio));
   sec.appendChild(grid);
 
   const acoes = document.createElement("div");
   acoes.className = "ficha-acoes";
-  const btn = document.createElement("button");
-  btn.className = "btn-secondary";
-  btn.textContent = "Ver veículos";
-  btn.addEventListener("click", () => abrirVeiculosCliente(implantacao.id, migracao.id, implantacao.cliente));
-  acoes.appendChild(btn);
-
-  const btnPlanilha = document.createElement("button");
-  btnPlanilha.className = "btn-secondary";
-  btnPlanilha.textContent = "Planilha de Migração";
-  btnPlanilha.addEventListener("click", () => {
+  const novoBotao = (texto, aoClicar, classe = "btn-secondary") => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = classe;
+    b.textContent = texto;
+    b.addEventListener("click", aoClicar);
+    acoes.appendChild(b);
+    return b;
+  };
+  novoBotao("Ver veículos", () => abrirVeiculosCliente(implantacao.id, migracao.id, implantacao.cliente));
+  novoBotao("Informações da migração", () => abrirConfigMigracaoCliente(implantacao, migracao));
+  novoBotao("Planilha de Migração", () => {
     if (!migracao.link_planilha) {
-      return alert("Nenhum link cadastrado ainda. Configure no cadastro do cliente.");
+      return alert('Nenhuma planilha vinculada ainda. Crie ou informe o link em "Informações da migração".');
     }
     window.open(migracao.link_planilha, "_blank", "noopener");
   });
-  acoes.appendChild(btnPlanilha);
+
+  // Resumo por modelo/progresso: calculado em cima de `migracao_veiculos`
+  // (local, pelo backend). Atualiza ao abrir a aba e após "Importar".
+  const resumoModelosDiv = document.createElement("div");
+  resumoModelosDiv.className = "resumo-modelos-planilha";
 
   if (migracao.link_planilha) {
-    const btnImportar = document.createElement("button");
-    btnImportar.className = "btn-secondary";
-    btnImportar.textContent = "Importar da planilha";
-    btnImportar.title = "Lê a aba \"Migração\" da planilha e atualiza os veículos aqui (cliente+veículo repetido só atualiza, não duplica).";
-    btnImportar.addEventListener("click", async () => {
+    const btnImportar = novoBotao("Importar da planilha", async () => {
       const textoOriginal = btnImportar.textContent;
       btnImportar.disabled = true;
       btnImportar.textContent = "Importando...";
@@ -27767,118 +28670,303 @@ function construirFichaMigracao(implantacao, migracao, migracoes) {
         btnImportar.textContent = textoOriginal;
       }
     });
-    acoes.appendChild(btnImportar);
+    btnImportar.title = "Lê a aba \"Migração\" da planilha e atualiza os veículos desta migração (cliente+veículo repetido só atualiza, não duplica).";
   }
 
-  // Finalizar/Cancelar só existem aqui (Ficha > Migração) — de propósito: o
-  // cadastro do cliente trava o campo assim que a migração está em
-  // andamento, então essa é a única forma de tirar uma migração do ar (não
-  // dá pra só "excluir").
-  if (migracao.status === "em_andamento") {
-    const btnFinalizar = document.createElement("button");
-    btnFinalizar.className = "btn-secondary";
-    btnFinalizar.textContent = "Finalizar migração";
-    btnFinalizar.addEventListener("click", async () => {
-      if (!confirm(`Finalizar a migração de "${implantacao.cliente}"? Marca o processo como concluído e move a planilha (se tiver) pra pasta "Finalizadas" no Drive.`)) return;
-      try {
-        const r = await fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/finalizar`, { method: "POST" });
-        const data = await parseJsonResponse(r);
-        if (!data.ok) return alert(`Erro ao finalizar: ${data.error || "falha desconhecida"}`);
-        if (data.aviso) alert(data.aviso);
-        const rf = await fetch(`/api/ficha/${encodeURIComponent(implantacao.idcentral)}`);
-        const dataFicha = await parseJsonResponse(rf);
-        if (dataFicha.ok) {
-          fichaClienteAtual = dataFicha;
-          fichaClienteCache.set(implantacao.idcentral, dataFicha);
-          aplicarVisibilidadeAbasFicha(dataFicha);
-          mostrarFichaAba("migracao");
-        }
-      } catch (err) {
-        alert(`Erro ao finalizar: ${String(err)}`);
-      }
-    });
-    acoes.appendChild(btnFinalizar);
-
-    const btnCancelar = document.createElement("button");
-    btnCancelar.className = "btn-secondary";
-    btnCancelar.textContent = "Cancelar migração";
-    btnCancelar.addEventListener("click", async () => {
-      if (!confirm(`Cancelar a migração de "${implantacao.cliente}"? Isso não exclui os veículos já cadastrados, só marca esse processo como cancelado.`)) return;
-      const motivo = prompt("Motivo do cancelamento (opcional):", "") || "";
-      try {
-        const r = await fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/cancelar`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ motivo }),
-        });
-        const data = await parseJsonResponse(r);
-        if (!data.ok) return alert(`Erro ao cancelar: ${data.error || "falha desconhecida"}`);
-        const rf = await fetch(`/api/ficha/${encodeURIComponent(implantacao.idcentral)}`);
-        const dataFicha = await parseJsonResponse(rf);
-        if (dataFicha.ok) {
-          fichaClienteAtual = dataFicha;
-          fichaClienteCache.set(implantacao.idcentral, dataFicha);
-          aplicarVisibilidadeAbasFicha(dataFicha);
-          mostrarFichaAba("migracao");
-        }
-      } catch (err) {
-        alert(`Erro ao cancelar: ${String(err)}`);
-      }
-    });
-    acoes.appendChild(btnCancelar);
-  }
+  // Encerrar: Finalizar (formulário) ou Cancelar (motivo) — os dois levam a
+  // migração pro Histórico.
+  const separador = document.createElement("span");
+  separador.className = "ficha-acoes-separador";
+  acoes.appendChild(separador);
+  novoBotao("Finalizar migração", () => abrirModalFinalizarMigracao(implantacao, migracao), "btn-primary ficha-migracao-finalizar");
+  novoBotao("Cancelar migração", async () => {
+    if (!confirm(`Cancelar a migração de "${implantacao.cliente}"? Os veículos continuam registrados e a migração vai pro Histórico como cancelada.`)) return;
+    const motivo = prompt("Motivo do cancelamento (opcional):", "") || "";
+    try {
+      const r = await fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/cancelar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo }),
+      });
+      const data = await parseJsonResponse(r);
+      if (!data.ok) return alert(`Erro ao cancelar: ${data.error || "falha desconhecida"}`);
+      await recarregarFichaNaMigracao(implantacao.idcentral, "historico");
+    } catch (err) {
+      alert(`Erro ao cancelar: ${String(err)}`);
+    }
+  });
 
   sec.appendChild(acoes);
-
-  // Resumo por modelo/progresso: calculado em cima de `migracao_veiculos`
-  // (local, pelo backend — não lê mais a planilha do Google aqui, ver
-  // resumo_planilha_migracao_cliente em app.py). Preenchida de dois jeitos:
-  // automático (toda vez que essa aba abre, logo abaixo) e manual, via
-  // "Importar da planilha" acima (que além de atualizar isso também grava
-  // os veículos no sistema).
-  const resumoModelosDiv = document.createElement("div");
-  resumoModelosDiv.className = "resumo-modelos-planilha";
   sec.appendChild(resumoModelosDiv);
-
   if (migracao.link_planilha) {
     fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/resumo-planilha`)
       .then(parseJsonResponse)
       .then((data) => {
-        if (!data.ok) return; // planilha instável/sem permissão nesse momento — não interrompe a Ficha
+        if (!data.ok) return;
         renderResumoModelos(resumoModelosDiv, data.resumo_modelos);
         if (data.percentual_migracao !== null && data.percentual_migracao !== undefined) {
           const valorProgresso = itemProgressoMigracao.querySelector(".info-item-valor");
           if (valorProgresso) valorProgresso.textContent = `${data.percentual_migracao}%`;
         }
       })
-      .catch(() => {}); // idem — falha silenciosa, é só um "a mais", a Ficha já carregou normalmente
+      .catch(() => {}); // só um "a mais" — a Ficha já carregou normalmente
   }
 
   wrap.appendChild(sec);
   wrap.appendChild(construirCardAcessoOrigem(migracao));
-
-  // Histórico de tentativas anteriores (a atual/mais recente já aparece acima).
-  const anteriores = (migracoes || []).filter((m) => m.id !== migracao.id);
-  if (anteriores.length > 0) {
-    const historico = document.createElement("div");
-    historico.className = "ficha-secao";
-    const h = document.createElement("h4");
-    h.className = "form-credencial-titulo";
-    h.textContent = "Processos anteriores";
-    historico.appendChild(h);
-    anteriores.forEach((m) => {
-      const linha = document.createElement("p");
-      linha.className = "placeholder";
-      const periodo = m.data_fim ? `${m.data_inicio} — ${m.data_fim}` : `desde ${m.data_inicio}`;
-      const motivo = m.motivo ? ` — ${m.motivo}` : "";
-      linha.textContent = `${MIGRACAO_STATUS_LABELS[m.status] || m.status} (${periodo})${motivo}`;
-      historico.appendChild(linha);
-    });
-    wrap.appendChild(historico);
-  }
-
   return wrap;
 }
+
+function construirFichaMigracaoHistorico(implantacao, encerradas) {
+  const wrap = document.createElement("div");
+  wrap.className = "ficha-migracao-historico";
+  if (!encerradas.length) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nenhuma migração encerrada ainda. Quando uma migração for finalizada ou cancelada, ela aparece aqui.";
+    wrap.appendChild(p);
+    return wrap;
+  }
+  encerradas.forEach((m, idx) => {
+    wrap.appendChild(construirCardHistoricoMigracao(implantacao, m, encerradas.length - idx));
+  });
+  return wrap;
+}
+
+function construirCardHistoricoMigracao(implantacao, m, numero) {
+  const snap = m.snapshot_encerramento || null;
+  const cancelada = m.status === "cancelada";
+  const card = document.createElement("article");
+  card.className = "ficha-painel ficha-migracao-hist-card" + (cancelada ? " cancelada" : "");
+
+  const topo = document.createElement("div");
+  topo.className = "ficha-migracao-hist-topo";
+  const titulo = document.createElement("h3");
+  const plataforma = (snap && snap.plataforma_origem) || m.plataforma_origem;
+  titulo.textContent = `Migração ${numero}${plataforma ? ` · ${plataforma}` : ""}`;
+  topo.appendChild(titulo);
+  const selo = document.createElement("span");
+  const chaveSelo = cancelada ? "cancelada" : (m.resultado || "concluida");
+  selo.className = `ficha-migracao-hist-selo selo-${chaveSelo}`;
+  selo.textContent = cancelada ? "Cancelada" : (MIGRACAO_RESULTADO_LABELS[m.resultado] || "Concluída");
+  topo.appendChild(selo);
+  card.appendChild(topo);
+
+  const meta = document.createElement("p");
+  meta.className = "ficha-migracao-hist-meta";
+  const inicio = formatarDataBRSimples(m.data_inicio) || m.data_inicio || "?";
+  const fim = formatarDataBRSimples(m.data_fim) || m.data_fim || "?";
+  const dias = m.data_inicio && m.data_fim ? diasEntre(m.data_inicio, m.data_fim) : null;
+  meta.textContent = `${inicio} → ${fim}${dias !== null ? ` (${dias} dia${dias === 1 ? "" : "s"})` : ""}`
+    + (m.encerrado_por ? ` · ${cancelada ? "cancelada" : "finalizada"} por ${m.encerrado_por}` : "");
+  card.appendChild(meta);
+
+  // Números congelados no encerramento. Migração encerrada antes desse
+  // registro existir (sem snapshot) só não mostra os números.
+  if (snap) {
+    const numeros = document.createElement("div");
+    numeros.className = "ficha-migracao-hist-numeros";
+    [
+      ["Veículos", snap.veiculos_validos],
+      ["Comunicando", snap.comunicando],
+      ["Não comunicando", snap.nao_comunicando],
+      ["Sem rastreador", snap.sem_rastreador],
+      ["Progresso", `${snap.percentual_migracao || 0}%`],
+    ].forEach(([rotulo, valor]) => {
+      const item = document.createElement("div");
+      item.className = "ficha-migracao-hist-numero";
+      const v = document.createElement("strong");
+      v.textContent = valor === undefined || valor === null ? "—" : String(valor);
+      const r = document.createElement("span");
+      r.textContent = rotulo;
+      item.append(v, r);
+      numeros.appendChild(item);
+    });
+    card.appendChild(numeros);
+  }
+
+  const blocoTexto = (rotulo, texto) => {
+    if (!texto) return;
+    const b = document.createElement("div");
+    b.className = "ficha-migracao-hist-texto";
+    const h = document.createElement("h4");
+    h.textContent = rotulo;
+    const p = document.createElement("p");
+    p.textContent = texto;
+    b.append(h, p);
+    card.appendChild(b);
+  };
+  if (cancelada) {
+    blocoTexto("Motivo do cancelamento", m.motivo || "Não informado.");
+  } else {
+    blocoTexto("O que aconteceu", m.resumo);
+    blocoTexto("Pendências / problemas", m.pendencias);
+  }
+
+  const acoes = document.createElement("div");
+  acoes.className = "ficha-acoes";
+  const btnVeiculos = document.createElement("button");
+  btnVeiculos.type = "button";
+  btnVeiculos.className = "btn-secondary";
+  btnVeiculos.textContent = "Ver veículos";
+  btnVeiculos.addEventListener("click", () => abrirVeiculosCliente(implantacao.id, m.id, `${implantacao.cliente} (Migração ${numero})`, true));
+  acoes.appendChild(btnVeiculos);
+  const link = (snap && snap.link_planilha) || m.link_planilha;
+  if (link) {
+    const a = document.createElement("a");
+    a.className = "btn-secondary ficha-migracao-hist-link";
+    a.href = link;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "Planilha usada";
+    acoes.appendChild(a);
+  }
+  card.appendChild(acoes);
+  return card;
+}
+
+// --- Formulário de finalização ---
+const overlayFinalizarMigracao = el("overlay-finalizar-migracao");
+const formFinalizarMigracao = el("form-finalizar-migracao");
+let finalizarMigracaoContexto = null; // { implantacao, migracao }
+
+function abrirModalFinalizarMigracao(implantacao, migracao) {
+  finalizarMigracaoContexto = { implantacao, migracao };
+  el("finalizar-migracao-titulo").textContent = `Finalizar migração — ${implantacao.cliente}`;
+  formFinalizarMigracao.reset();
+  el("finalizar-migracao-data").value = new Date().toLocaleDateString("sv-SE"); // AAAA-MM-DD local
+  el("finalizar-migracao-pendencias-obrig").classList.add("hidden");
+  el("finalizar-migracao-salvar").disabled = false;
+  overlayFinalizarMigracao.classList.remove("hidden");
+}
+
+function fecharModalFinalizarMigracao() {
+  overlayFinalizarMigracao.classList.add("hidden");
+  finalizarMigracaoContexto = null;
+}
+el("finalizar-migracao-fechar").addEventListener("click", fecharModalFinalizarMigracao);
+el("finalizar-migracao-cancelar").addEventListener("click", fecharModalFinalizarMigracao);
+formFinalizarMigracao.querySelectorAll('input[name="finalizar-migracao-resultado"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    el("finalizar-migracao-pendencias-obrig").classList.toggle("hidden", radio.value !== "concluida_pendencias" || !radio.checked);
+  });
+});
+
+formFinalizarMigracao.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!finalizarMigracaoContexto) return;
+  const { implantacao, migracao } = finalizarMigracaoContexto;
+  const marcado = formFinalizarMigracao.querySelector('input[name="finalizar-migracao-resultado"]:checked');
+  const resumo = el("finalizar-migracao-resumo").value.trim();
+  const pendencias = el("finalizar-migracao-pendencias").value.trim();
+  if (!marcado) return alert("Escolha o resultado da migração.");
+  if (!resumo) { el("finalizar-migracao-resumo").focus(); return alert("Descreva o que aconteceu na migração."); }
+  if (marcado.value === "concluida_pendencias" && !pendencias) {
+    el("finalizar-migracao-pendencias").focus();
+    return alert("Descreva as pendências encontradas.");
+  }
+  const btn = el("finalizar-migracao-salvar");
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/clientes/${implantacao.id}/migracoes/${migracao.id}/finalizar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resultado: marcado.value, resumo, pendencias, data_fim: el("finalizar-migracao-data").value,
+      }),
+    });
+    const data = await parseJsonResponse(r);
+    if (!data.ok) {
+      btn.disabled = false;
+      return alert(`Erro ao finalizar: ${data.error || "falha desconhecida"}`);
+    }
+    fecharModalFinalizarMigracao();
+    if (data.aviso) alert(data.aviso);
+    await recarregarFichaNaMigracao(implantacao.idcentral, "historico");
+  } catch (err) {
+    btn.disabled = false;
+    alert(`Erro ao finalizar: ${String(err)}`);
+  }
+});
+
+// --- "+ Adicionar migração" (Controle de Migração) ---
+// Escolhe um cliente JÁ cadastrado — não cria cliente. Quem já tem migração
+// ativa aparece desabilitado (só uma ativa por vez).
+const overlayAdicionarMigracao = el("overlay-adicionar-migracao");
+const inputAdicionarMigracaoBusca = el("adicionar-migracao-busca");
+const listaAdicionarMigracao = el("adicionar-migracao-lista");
+let adicionarMigracaoClientes = [];
+let adicionarMigracaoAtivos = new Set();
+
+function renderListaAdicionarMigracao() {
+  const termo = inputAdicionarMigracaoBusca.value.trim().toLowerCase();
+  listaAdicionarMigracao.innerHTML = "";
+  const filtrados = adicionarMigracaoClientes
+    .filter((c) => !termo || `${c.cliente || ""} ${c.idcentral || ""}`.toLowerCase().includes(termo))
+    .sort((a, b) => String(a.cliente || "").localeCompare(String(b.cliente || ""), "pt-BR"))
+    .slice(0, 100);
+  if (!filtrados.length) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = termo ? "Nenhum cliente encontrado. O cliente precisa estar cadastrado antes de receber uma migração." : "Nenhum cliente cadastrado.";
+    listaAdicionarMigracao.appendChild(p);
+    return;
+  }
+  filtrados.forEach((c) => {
+    const ativo = adicionarMigracaoAtivos.has(c.id);
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "adicionar-migracao-item";
+    item.disabled = ativo;
+    const textos = document.createElement("span");
+    textos.className = "adicionar-migracao-item-textos";
+    const nome = document.createElement("strong");
+    nome.textContent = c.cliente || "(sem nome)";
+    const sub = document.createElement("span");
+    sub.textContent = `IdCentral ${c.idcentral}${c.estagio ? ` · ${CRM_ESTAGIO_LABELS[c.estagio] || c.estagio}` : ""}`;
+    textos.append(nome, sub);
+    item.appendChild(textos);
+    if (ativo) {
+      const aviso = document.createElement("span");
+      aviso.className = "adicionar-migracao-item-aviso";
+      aviso.textContent = "Migração em andamento";
+      item.appendChild(aviso);
+    }
+    item.addEventListener("click", async () => {
+      if (!confirm(`Iniciar uma migração para "${c.cliente}"?`)) return;
+      item.disabled = true;
+      try {
+        await iniciarMigracaoParaCliente(c.id);
+        overlayAdicionarMigracao.classList.add("hidden");
+        await carregarClientesMigracao();
+      } catch (err) {
+        item.disabled = false;
+        alert(`Erro ao iniciar migração: ${String(err.message || err)}`);
+      }
+    });
+    listaAdicionarMigracao.appendChild(item);
+  });
+}
+
+async function abrirModalAdicionarMigracao() {
+  inputAdicionarMigracaoBusca.value = "";
+  listaAdicionarMigracao.innerHTML = '<p class="placeholder">Carregando clientes...</p>';
+  overlayAdicionarMigracao.classList.remove("hidden");
+  inputAdicionarMigracaoBusca.focus();
+  try {
+    const [rClientes, rMigracoes] = await Promise.all([fetch("/api/clientes"), fetch("/api/migracao/clientes")]);
+    const dataClientes = await parseJsonResponse(rClientes);
+    const dataMigracoes = await parseJsonResponse(rMigracoes);
+    adicionarMigracaoClientes = dataClientes.ok ? (dataClientes.clientes || []) : [];
+    adicionarMigracaoAtivos = new Set((dataMigracoes.ok ? dataMigracoes.clientes || [] : []).map((m) => m.cliente_id));
+    renderListaAdicionarMigracao();
+  } catch (err) {
+    listaAdicionarMigracao.innerHTML = "";
+    mostrarErroEmNode(listaAdicionarMigracao, String(err));
+  }
+}
+inputAdicionarMigracaoBusca.addEventListener("input", renderListaAdicionarMigracao);
+el("adicionar-migracao-fechar").addEventListener("click", () => overlayAdicionarMigracao.classList.add("hidden"));
 
 // "Ativo" + aria-current="page" (só nav-semântica: diz pra leitor de tela
 // qual aba da Ficha está aberta agora, igual a um link de página atual).
@@ -27940,7 +29028,7 @@ function mostrarFichaAba(aba, opcoes = {}) {
   );
   if (!fichaClienteAtual) return;
   const { idcentral, implantacao, migracao, migracoes, credencial_configurada, credencial_login, documentos } = fichaClienteAtual;
-  if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login, fichaSubAbaAtual, documentos));
+  if (aba === "geral") corpo.appendChild(construirFichaVisaoGeral(idcentral, implantacao, migracao, credencial_configurada, credencial_login, fichaSubAbaAtual, documentos, migracoes));
   if (aba === "implantacao") corpo.appendChild(construirFichaImplantacao(implantacao, migracao));
   if (aba === "marcos") corpo.appendChild(construirFichaMarcos(implantacao, migracao));
   if (aba === "migracao") corpo.appendChild(construirFichaMigracao(implantacao, migracao, migracoes));
@@ -27951,7 +29039,9 @@ function mostrarFichaAba(aba, opcoes = {}) {
 // preview otimista (com o dado em cache, antes do fetch) quanto pra resposta
 // de verdade (depois do fetch), pra nunca duplicar essa regra.
 function aplicarVisibilidadeAbasFicha(data) {
-  el("ficha-aba-migracao").classList.toggle("hidden", !data.migracao);
+  // Aba Migração sempre aparece pra quem tem cadastro: mesmo sem migração
+  // ativa ela mostra "Nenhuma migração ativa" + Histórico.
+  el("ficha-aba-migracao").classList.toggle("hidden", !data.implantacao);
   // Cliente criado pela tela de Migração sem par na Implantação
   // (tem_implantacao=false) tem menu enxuto: só Visão Geral, Migração e
   // Histórico — sem Implantação/Marcos, que não existem pra ele.
@@ -28006,7 +29096,7 @@ async function carregarFichaCliente(idcentral, aba = fichaAbaAtual || "geral") {
       ? rotaAtual.sub
       : aba;
     const abasEscondidas = semImplantacao ? ["implantacao", "marcos"] : [];
-    const abaFinal = (abaAtual === "migracao" && !data.migracao) || abasEscondidas.includes(abaAtual) ? "geral" : abaAtual;
+    const abaFinal = (abaAtual === "migracao" && !data.implantacao) || abasEscondidas.includes(abaAtual) ? "geral" : abaAtual;
     mostrarFichaAba(abaFinal, { semHistorico: abaFinal !== abaAtual });
     // Chamados do ssxdesk: busca em segundo plano, nunca atrasa a Ficha —
     // quando chegar, carregarChamadosFicha redesenha a aba sozinha se ainda

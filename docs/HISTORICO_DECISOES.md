@@ -375,6 +375,30 @@ cancelamento, título da lista de processos anteriores); comentários internos
 no código não foram alterados nessa rodada, por não serem visíveis ao
 usuário (diff mínimo).
 
+## Tela Churn do CRM inspirada em outro projeto interno (2026-11-26)
+
+Pedido explícito: deixar a tela Churn (`/crm/churn`, antes placeholder) igual
+à tela Churn de outro projeto interno da Systemsat
+(`github.com/cssystemsat/kanban_dashboard_dev`, React/tRPC). Esse projeto lê a
+aba "CHURNS" da MESMA planilha Google Sheets já usada pela Sincronização de
+Planilha de CS (`PLANILHA_CS_URL`), só que outra aba (gid diferente).
+
+Escopo combinado com a usuária, dividido em 2 rodadas:
+- **Feita agora**: KPIs (cancelamentos no período, média de tempo de casa,
+  cliente mais antigo, valor total de boletos), 3 gráficos de barra
+  (tempo de casa / tipo / persona — feitos com divs, sem lib de gráfico, nunca
+  recharts, mesmo padrão já usado no resto do projeto), tabela filtrável
+  (período com atalhos + seleção manual de mês/ano, cliente, CSM, vendedor,
+  persona) e exportar Excel. Rota `/api/churn` (leitura, cache 5 min) e
+  `/api/churn/exportar` (recebe os registros já filtrados pelo front e gera o
+  .xlsx com openpyxl, mesmo padrão de `/api/clientes/importar/modelo`).
+- **Fora desta rodada, explicitamente**: o botão "Gerar análise" (resumo por
+  IA dos cancelamentos filtrados) e a edição de motivo/persona/boleto direto
+  na tela (que no projeto de referência ESCREVE de volta na planilha do
+  Google, com sistema de permissão por usuário) — dependem de integração que
+  não existe neste projeto (LLM e escrita autenticada no Google Sheets).
+  Avaliar de novo se a usuária pedir.
+
 ## Campo `estagio` (onboarding/ongoing) mantido dormente
 
 O cadastro de cliente já tem o campo `estagio` com os valores `implantacao`,
@@ -534,3 +558,130 @@ Histórico da Ficha (setor/tag "NPS", mesmo padrão já usado pros chamados do
 ssxdesk e pras tentativas de migração — nunca um registro real em
 `cliente_eventos`, sempre montado em memória a partir da tabela de
 avaliações, igual a `construirEventosSinteticosChamados`).
+
+## Ficha cadastral com modo edição de página inteira (2026-11-26)
+
+A sub-aba "Informações do Cliente" da Visão Geral deixou de ser uma colagem
+dos cards da Visão Geral (contatos, Dados cadastrais, Informações
+operacionais — com CSM, vendedor e cidade/estado repetidos) e virou uma
+ficha cadastral no formato CRM/ERP, com as mesmas seções do formulário de
+cadastro e todos os campos dele (Persona, Implantado, Possui Migração e
+Código IdCentral não apareciam antes).
+
+Edição: a usuária escolheu **um botão "Editar" para a página toda + "Salvar
+alterações"**, em vez de lápis por seção ou edição inline por campo — fora
+do modo edição nada é editável. O salvamento usa o mesmo `PUT
+/api/clientes/<id>` do modal (payload completo, mesmas travas de admin no
+backend); "Implantado" continua indo pelo endpoint próprio
+(`PUT .../implantado`, que registra data/quem) só quando muda.
+
+O rascunho da edição fica em memória no JS (`fichaCadastroEdicao`), não nos
+inputs, porque a Visão Geral é redesenhada em segundo plano; além disso, a
+chegada de chamados/NPS não redesenha mais essa sub-aba (ela não mostra
+nenhum dos dois). O modal "Editar cliente" continua existindo (cabeçalho da
+Ficha e listas) — salvar por ele descarta um rascunho aberto na ficha do
+mesmo cliente.
+
+`descricao_implantacao` ficou fora da ficha cadastral de propósito: já tem
+lugar próprio na aba Implantação.
+
+## Fase de vida (Implantação / Onboarding / Ongoing) ativada no cadastro (2026-11-26)
+
+Revisão da decisão "Campo `estagio` (onboarding/ongoing) mantido dormente":
+pedido explícito da usuária pra começar a separar os clientes por time. O
+`estagio` virou o campo **"Fase de vida"** do cadastro (modal Adicionar/
+Editar cliente e Ficha cadastral), com as 3 opções, escolhido à mão. Cada
+time ganhou seu grupo no menu lateral — Onboarding e Ongoing — com, por
+enquanto, só a lista dos clientes na fase (rotas `/onboarding` e
+`/ongoing`, mesma fonte `/api/clientes` da CRM → Clientes, filtrada no
+front). É intencionalmente quase um placeholder: a ideia é cada time ter seu
+próprio controle depois; agora é só pra começar a colocar os clientes na
+fase certa. Nenhuma mudança de schema (a coluna já existia).
+
+**Bug latente corrigido junto:** o `PUT /api/clientes/<id>` caía no padrão
+`implantacao` quando o payload não trazia `estagio` (nenhum formulário
+mandava) — enquanto o campo era dormente não fazia diferença, mas com ele
+ativo qualquer edição devolveria um cliente de Onboarding/Ongoing pra
+Implantação. Agora o PUT mantém o `estagio` atual quando o campo não vem, e
+o modal e a Ficha cadastral passaram a mandá-lo.
+
+Em aberto: o Controle/Dashboard de Implantação continuam listando todos os
+clientes com Implantação, independente da fase de vida (não filtram por
+`estagio`) — decidir com a usuária se cliente em Onboarding/Ongoing deve
+sair de lá.
+
+## Fase de entrada do cliente — antigos não contam nas fases anteriores (2026-11-26)
+
+As fases de vida são sequenciais (Implantação → Onboarding → Ongoing) para
+quem entra hoje, mas clientes antigos são cadastrados direto em Onboarding
+ou Ongoing. Decisão da usuária: esses não podem interferir nos dados/KPIs das
+fases anteriores — Ongoing não conta em Implantação nem em Onboarding;
+Onboarding não conta em Implantação.
+
+Escolhido (com aprovação explícita, por envolver schema) **gravar a fase de
+entrada** numa coluna nova `clientes.fase_entrada` (migração
+`c7e2a4f8d913`, só `add_column` com `server_default 'implantacao'` — todos
+os clientes existentes entraram por Implantação). Preenchida na criação
+(`POST /api/clientes` copia a fase escolhida) e nunca alterada pelo PUT.
+Regra centralizada em `clientes_sql.fases_entrada_que_contam(fase)` — os
+KPIs de Onboarding/Ongoing, quando existirem, devem filtrar por ela. A
+alternativa (só documentar e criar a coluna quando houver KPIs de
+Onboarding) foi descartada porque os clientes cadastrados até lá ficariam
+sem o registro de por onde entraram.
+
+Implantação continua filtrando por `tem_implantacao` (não foi trocado): o
+`POST` grava `tem_implantacao=false` para quem nasce em Onboarding/Ongoing,
+o que dá o mesmo resultado sem mexer em nenhuma consulta de KPI existente, e
+o campo também cobre o caso antigo de cliente criado só pela Migração.
+
+Corrigido junto: o `PUT /api/clientes/<id>` reescrevia `tem_implantacao`
+para `True` quando o payload não trazia o campo (nenhum formulário traz) —
+editar um cliente nascido só pela Migração o colocava na Implantação. Agora
+o PUT preserva o valor atual. E a exclusão pela tela de Migração só apaga o
+cliente inteiro se ele for "só de migração" (`tem_implantacao=false` e fase
+Implantação); cliente sem Implantação em Onboarding/Ongoing tem só a
+migração cancelada.
+
+**Deploy:** a migração `c7e2a4f8d913` precisa rodar no Postgres antes (ou
+junto) do código novo — o model passa a ler `fase_entrada` em toda consulta
+de cliente.
+
+## Migração: uma ativa + Histórico, sem sincronização SSX (2026-11-26)
+
+Reestruturação pedida pela usuária. Decisões:
+
+- **Uma migração ativa por cliente** (regra que já existia), com **Histórico**
+  das anteriores — não projetos simultâneos. Enquanto a migração está ativa,
+  tudo que o cliente manda entra nela. A aba Migração da Ficha ganhou
+  sub-abas Ativa | Histórico; a aba aparece sempre (antes sumia sem
+  migração). `/api/ficha` passou a devolver em `migracao` só a ATIVA (antes
+  "a ativa ou a mais recente").
+- **Finalização com formulário** (resultado, o que aconteceu, pendências,
+  data) e **números congelados** no encerramento. Colunas novas em
+  `migracoes` (migração `e5b1d7c3a920`, só `add_column`): `resultado`,
+  `resumo`, `pendencias`, `encerrado_por`, `snapshot_encerramento` (JSON).
+  Cancelamento também grava snapshot e vai pro Histórico como "Cancelada".
+- **Migração encerrada é só leitura**: trava central em `app.py`
+  (`_bloquear_escrita_em_migracao_encerrada`, `before_request` sobre
+  `/api/clientes/<id>/migracoes/<id>/...`) — cobre todas as rotas de escrita
+  de uma vez, inclusive as que não buscavam a migração antes de gravar.
+- **Migração nunca cria cliente.** "+ Adicionar migração" escolhe um cliente
+  já cadastrado; "Possui Migração?" saiu do formulário do cliente e virou
+  só leitura na Ficha cadastral. Com isso, "Excluir" no Controle de Migração
+  passou a ser só cancelar (a regra "apaga o cliente inteiro se ele existir
+  só por causa da migração", ajustada mais cedo hoje, deixou de existir). O
+  único cliente de produção que nasceu pela Migração continua cadastrado
+  normalmente.
+- **Sincronização de veículos com a SSX removida** (botão, rotas, worker,
+  funções de diff e testes). Motivo: ao puxar da plataforma, misturava
+  veículos de outras migrações e o que o cliente preencheu sozinho. Veículos
+  entram só pela planilha; a conferência é pela Verificação de comunicação,
+  que só consulta. A tabela `migracao_ssx_sync_jobs` e o model ficaram
+  (desativados) pra não exigir migração destrutiva.
+- **Chave da verificação mantida**: ID do equipamento da planilha ==
+  `IdTracker` das listas de comunicação (a usuária falou em "códigos de
+  integração"; foi confirmado manter o IdTracker, porque traduzir código de
+  integração exigiria consultar o cadastro de veículos da SSX).
+
+**Deploy:** a migração `e5b1d7c3a920` precisa rodar no Postgres antes (ou
+junto) do código novo — o model passa a ler as colunas novas de `migracoes`.

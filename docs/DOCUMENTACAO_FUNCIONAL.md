@@ -6,13 +6,32 @@
 
 ## Regra de negócio central: Cliente / Implantação / Migração
 
-- Todo cliente tem um **ID Central único** e uma etapa de relacionamento
-  (`estagio`): `implantacao`, `onboarding` ou `ongoing`. A tela CRM →
-  Clientes mostra esse `estagio` pra todo cliente, qualquer que seja (ver
-  seção "CRM" abaixo), mas **continua sem controle operacional por tela
-  própria** pra `onboarding`/`ongoing` — não há ainda um "Controle de
-  Onboarding" ou "Controle de Ongoing" equivalente ao de Implantação; isso é
-  a próxima etapa planejada, não implementada nesta rodada.
+- Todo cliente tem um **ID Central único** e uma **fase de vida**
+  (`estagio`): `implantacao`, `onboarding` ou `ongoing`. É um campo do
+  cadastro ("Fase de vida", no formulário do cliente e na Ficha cadastral),
+  escolhido manualmente — não muda sozinho por marco/conclusão. Cliente novo
+  nasce em Implantação. Cada fase seguinte tem seu grupo no menu lateral
+  (Onboarding, Ongoing) com, por enquanto, só a lista dos clientes naquela
+  fase (mesmo formato da CRM → Clientes; clicar abre a Ficha). O controle
+  próprio de cada time (equivalente ao Controle de Implantação) é a próxima
+  etapa, ainda não implementada. A CRM → Clientes continua mostrando todas
+  as fases.
+- As fases são **sequenciais**: hoje o cliente entra por Implantação, vai pra
+  Onboarding e depois Ongoing. Clientes antigos (de antes desse fluxo) podem
+  ser cadastrados direto em Onboarding ou Ongoing — pelo "+ Adicionar
+  cliente" da lista da fase, ou da CRM → Clientes com o filtro de etapa
+  escolhido; a Fase de vida vem preenchida conforme a lista de origem.
+- **Fase de entrada** (`fase_entrada`): fase em que o cliente entrou no
+  sistema, gravada na criação e nunca alterada (aparece só leitura na Ficha
+  cadastral). Regra de dados/KPIs: **cada fase só conta clientes que
+  entraram nela ou numa fase anterior** — quem entrou em Ongoing não conta em
+  Implantação nem em Onboarding; quem entrou em Onboarding não conta em
+  Implantação. Cliente que entrou em Implantação e avançou continua contando
+  nas fases por onde passou.
+- Cliente criado direto em Onboarding/Ongoing nasce com `tem_implantacao =
+  false`: fica fora do Controle e do Dashboard de Implantação, não recebe o
+  objetivo universal "IMPLANTAÇÃO" e a Ficha não mostra as abas
+  Implantação/Marcos.
 - **Implantação e Migração são processos paralelos e independentes**, não um
   sub-estágio um do outro. Um cliente pode estar em qualquer etapa de
   relacionamento e, paralelamente, ter ou não um processo de Migração.
@@ -27,9 +46,9 @@
   de migração — nunca chamar isso de "tentativa" na interface. Se
   cancelado, o processo "ficou cancelado" (não foi "só uma tentativa"); se
   concluído, é um processo que chegou ao fim.
-- A estrutura já comporta múltiplos processos de migração no histórico de um
-  mesmo cliente (a subcoleção é uma lista), mesmo que hoje a tela só opere
-  com "o processo atual" (em andamento, ou o mais recente).
+- **Uma migração ativa por vez** por cliente; as anteriores ficam no
+  Histórico (ver "Controle de Migração"). Migração **nunca cria cliente**: é
+  sempre adicionada a um cliente já cadastrado.
 
 ## Dashboard
 
@@ -55,8 +74,15 @@ contrário de Implantação/Migração, que olham só o processo específico).
   Onboarding e ongoing aparecem aqui só como o nome da etapa — ainda não têm
   um controle próprio (equivalente ao Controle de Implantação) por trás; ver
   decisão acima e `docs/HISTORICO_DECISOES.md`.
-- **Churn** (`/crm/churn`): placeholder, ainda "em construção" — sem
-  funcionalidade real nesta rodada.
+- **Churn** (`/crm/churn`): lê a aba "CHURNS" da mesma planilha de CS
+  (`/api/churn`, cache de 5 min) — KPIs (cancelamentos no período, média de
+  tempo de casa, cliente mais antigo, total de boletos), 3 gráficos de barra
+  (tempo de casa/tipo/persona), tabela filtrável (período com atalhos ou
+  seleção manual de mês/ano, cliente, CSM, vendedor, persona) e exportar
+  Excel (`/api/churn/exportar`). Inspirada na tela Churn de outro projeto
+  interno (ver `docs/HISTORICO_DECISOES.md`) — sem o botão de análise por IA
+  nem edição de motivo/persona/boleto (que escreveriam na planilha), fora do
+  escopo combinado nesta rodada.
 
 ## Dashboard de Implantação
 
@@ -194,6 +220,20 @@ regra.
   novo substitui o anterior). Guardado em tabela própria (`cliente_documentos`),
   não na linha do cliente — mantém a consulta do cadastro leve mesmo com
   PDFs anexados (ver `docs/DOCUMENTACAO_TECNICA.md`).
+- Ficha cadastral (sub-aba "Informações do Cliente" da Visão Geral da Ficha):
+  cadastro do cliente no formato CRM/ERP, com as mesmas seções e campos do
+  formulário de cadastro (inclusive Fase de vida, em Identificação) — Identificação, Relacionamento, Contrato & momento,
+  Localização — mais Situação da implantação (calculada, só leitura) e
+  Indicadores da planilha de CS (só leitura, com a fonte indicada). Lateral
+  com contatos rápidos (WhatsApp), completude do cadastro (12 campos
+  principais, só informativo — nenhum é obrigatório além do IdCentral),
+  Documentos e Credencial SSX (a credencial fica só aqui, não aparece mais
+  na sub-aba Visão Geral). Abre em modo leitura; o botão "Editar" põe a
+  página inteira em modo edição e "Salvar alterações" grava tudo de uma vez
+  (sem edição por campo/seção). IdCentral e Código IdCentral continuam só
+  para administrador. "Migração" aparece só leitura (em andamento ou
+  nenhuma) — não é mais campo do cadastro. Sair da sub-aba/aba/cliente com alteração não salva
+  pede confirmação. A descrição da implantação continua na aba Implantação.
 
 ### Jornada de ativação (primeiros 30 dias) — virou checklist do objetivo universal
 
@@ -261,8 +301,32 @@ conclusão de objetivo.
 
 ## Controle de Migração
 
-- Lista de clientes com processo de migração ativo (mesclada com a lista de
-  Implantação pelo ID Central — ver regra de negócio acima).
+- **Criar migração:** "+ Adicionar migração" no Controle de Migração abre
+  uma busca de clientes **já cadastrados** (nome ou IdCentral) — não existe
+  mais criar cliente pela Migração. Cliente com migração ativa aparece
+  desabilitado. A migração nasce na etapa Análise e o resto (plataforma,
+  planilha, acesso à origem) é preenchido na aba Migração da Ficha. Também dá
+  pra criar pela Ficha ("Iniciar migração", quando não há ativa). O campo
+  "Possui Migração?" saiu do formulário do cliente.
+- **Controle de Migração (Kanban/lista):** só migrações **ativas**. "Excluir"
+  no Controle = cancelar a migração (nunca apaga o cliente).
+- **Aba Migração da Ficha — sub-abas Ativa | Histórico:**
+  - *Ativa:* a migração em andamento (veículos, informações, planilha,
+    importar, finalizar/cancelar). Tudo que o cliente mandar enquanto ela
+    está ativa entra nela. Sem ativa: "Nenhuma migração ativa no momento" +
+    "Iniciar migração".
+  - *Histórico:* um card por migração encerrada (concluída ou cancelada):
+    plataforma de origem, período, quem encerrou, planilha usada, números de
+    veículos (válidos, comunicando, não comunicando, sem rastreador,
+    progresso) **congelados no encerramento**, e o relatório de finalização
+    (ou o motivo do cancelamento). "Ver veículos" abre a lista só leitura.
+- **Formulário de finalização:** Resultado (Concluída / Concluída com
+  pendências), "O que aconteceu" (obrigatório), Pendências/problemas
+  (obrigatório se "com pendências") e Data de término (padrão hoje). Quem
+  finalizou, plataforma, planilha e números são automáticos. Cancelar pede só
+  o motivo (opcional) e também vai pro Histórico.
+- **Migração encerrada é só leitura:** o backend recusa qualquer alteração
+  (veículos, modelos, planilha, verificação, informações).
 - Ficha do cliente com aba de planilha de veículos: upsert por
   Cliente + Veículo, edição em lote, envio de comando por linha.
 - Modelos de comando por fabricante/modelo de rastreador, vinculados ao
@@ -278,19 +342,20 @@ conclusão de objetivo.
   `Cancelado` é preservado. Os status `Sem rastreador` e `Cancelado` não
   entram nos totais, no percentual de progresso nem no resumo por modelo da
   migração, mas continuam visíveis e filtráveis na lista de veículos.
-- Sincronizar com SSX também preenche Equipamento com o nome do modelo do
-  rastreador, resolvendo `IdModelTracker` pela listagem de modelos da API.
-  Quando faltam os códigos de integração, veículos existentes são
-  correspondidos pela placa para evitar duplicatas. A prévia fica salva no
-  servidor e pode ser aplicada mesmo após reinício; para listas grandes, a
-  confirmação mostra até 50 exemplos de cada tipo e informa os totais completos.
+- **Veículos entram só pela planilha** que o time envia (importação da
+  aba "Migração"). Não existe mais "Sincronizar com SSX" (puxar veículos da
+  plataforma): misturava veículos de outras migrações e o que o cliente
+  cadastrou sozinho. A conferência é feita pela **Verificação de
+  comunicação** (só consulta a SSX e marca os veículos da própria
+  migração).
 - A planilha de veículos exibe até 100 linhas por página, preservando busca,
   filtros e seleção entre páginas para reduzir travamentos em bases grandes.
 - Criação/consulta de planilha de migração no Google Drive por cliente
   (link salvo em `link_planilha`), e importação do que foi preenchido nela.
 - Autenticação na SSX em nome do cliente (sessão de uso avulso ou vinculada
   à credencial salva).
-- Finalizar ou cancelar o processo de migração.
+- Finalizar (com formulário) ou cancelar a migração — as duas levam ao
+  Histórico.
 
 ## Central de tarefas
 

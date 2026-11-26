@@ -26,10 +26,10 @@
       <button type="button" class="sidebar-toggle" id="sidebar-toggle" title="Recolher menu" aria-label="Recolher menu" aria-expanded="true">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
       </button>
-      <div class="sidebar-marca">
+      <button type="button" class="sidebar-marca" id="sidebar-marca-btn" title="Ir para o Dashboard" aria-label="Ir para o Dashboard">
         <img class="sidebar-marca-imagem sidebar-marca-clara" src="{{ url_for('static', filename='systemsat-logo-claro.png') }}" alt="Systemsat">
         <img class="sidebar-marca-imagem sidebar-marca-escura" src="{{ url_for('static', filename='systemsat-logo-escuro.png') }}" alt="Systemsat">
-      </div>
+      </button>
     </div>
     <button type="button" class="sidebar-voltar" id="sidebar-voltar" title="Voltar para o Dashboard" aria-label="Voltar para o Dashboard">
       <span class="material-symbols-outlined sidebar-item-icone">arrow_back</span>
@@ -84,6 +84,24 @@
           </button>
         </div>
       </div>
+      {# Onboarding e Ongoing: um grupo por time, como Implantação/Migração.
+         Por enquanto só a lista de clientes na fase — o controle próprio de
+         cada time vem depois (ver docs/HISTORICO_DECISOES.md). #}
+      {% for fase, rotulo, icone in [("onboarding", "Onboarding", "how_to_reg"), ("ongoing", "Ongoing", "autorenew")] %}
+      <div class="sidebar-grupo">
+        <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-{{ fase }}" data-sidebar-group="{{ fase }}" aria-controls="sidebar-subnav-{{ fase }}" aria-expanded="false" title="Expandir ou recolher {{ rotulo }}">
+          <span class="material-symbols-outlined sidebar-item-icone">{{ icone }}</span>
+          <span class="sidebar-item-texto">{{ rotulo }}</span>
+          <span class="material-symbols-outlined sidebar-grupo-seta">expand_more</span>
+        </button>
+        <div class="sidebar-subnav hidden" id="sidebar-subnav-{{ fase }}" role="group" aria-label="Páginas de {{ rotulo }}">
+          <button type="button" class="sidebar-item sidebar-subitem" id="nav-sub-clientes-{{ fase }}" title="Clientes em {{ rotulo }}">
+            <span class="material-symbols-outlined sidebar-item-icone">list</span>
+            <span class="sidebar-item-texto">Clientes em {{ rotulo }}</span>
+          </button>
+        </div>
+      </div>
+      {% endfor %}
       <div class="sidebar-grupo">
         <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-migracao" data-sidebar-group="migracao" aria-controls="sidebar-subnav-migracao" aria-expanded="false" title="Expandir ou recolher Migração">
           <span class="material-symbols-outlined sidebar-item-icone">sync_alt</span>
@@ -249,8 +267,6 @@
       <section id="tela-dashboard" class="panel">
         <div class="conteudo-header">
           <div>
-            <h2 class="conteudo-titulo">Dashboard</h2>
-            <p class="conteudo-subtitulo">Visão geral da operação de Implantação e Migração</p>
           </div>
         </div>
         <div class="dashboard-tiles">
@@ -277,7 +293,6 @@
       <section id="tela-dashboard-implantacao" class="panel hidden">
         <div class="conteudo-header">
           <div>
-            <h2 class="conteudo-titulo">Dashboard de Implantação</h2>
           </div>
         </div>
 
@@ -392,7 +407,6 @@
           </div>
           <div class="insight-card">
             <h3>Clientes com mais atraso por impedimento</h3>
-            <p class="conteudo-subtitulo">Dias corridos de impedimento ainda ativo — clique pra abrir a ficha.</p>
             <div id="di-impedimentos-clientes"></div>
           </div>
         </div>
@@ -400,7 +414,6 @@
         <div class="dashboard-insights">
           <div class="insight-card">
             <h3>Ativação e prevenção de churn</h3>
-            <p class="conteudo-subtitulo">Marco: sub-atividade "Primeiro valor percebido" do objetivo Implantação. Vencimento = entrada + 30 dias.</p>
             <div class="di-objetivos-resumo">
               <div class="di-objetivos-resumo-item">
                 <span class="di-objetivos-resumo-label">Já perceberam valor</span>
@@ -418,7 +431,6 @@
           </div>
           <div class="insight-card">
             <h3>Perto do vencimento sem ter percebido valor</h3>
-            <p class="conteudo-subtitulo">Risco de churn na 1ª mensalidade — clique pra abrir a ficha.</p>
             <div id="di-ativacao-risco-clientes"></div>
           </div>
         </div>
@@ -429,8 +441,6 @@
       <section id="tela-dashboard-crm" class="panel hidden">
         <div class="conteudo-header">
           <div>
-            <h2 class="conteudo-titulo">Dashboard CRM</h2>
-            <p class="conteudo-subtitulo">Visão geral de todos os clientes da empresa, em qualquer etapa.</p>
           </div>
         </div>
         <div class="dashboard-tiles">
@@ -483,25 +493,21 @@
               <div class="stat-tile-valor" id="crm-mapa-total">–</div>
             </div>
             <div class="stat-tile">
-              <div class="stat-tile-label">Estados</div>
-              <div class="stat-tile-valor" id="crm-mapa-estados">–</div>
-            </div>
-            <div class="stat-tile">
               <div class="stat-tile-label">Maior</div>
               <div class="stat-tile-valor" id="crm-mapa-maior">–</div>
             </div>
           </div>
           <div class="crm-mapa-wrap" id="crm-mapa-wrap">
+            <img src="{{ url_for('static', filename='br.svg') }}" class="crm-mapa-svg" alt="" aria-hidden="true">
             <p class="placeholder hidden" id="crm-mapa-vazio">Nenhum cliente com estado cadastrado nessa etapa ainda.</p>
           </div>
+          <p class="crm-mapa-legenda">Mapa: <a href="https://simplemaps.com" target="_blank" rel="noopener">simplemaps.com</a></p>
         </div>
       </section>
 
       <section id="tela-clientes-crm" class="panel hidden">
         <div class="conteudo-header">
           <div>
-            <h2 class="conteudo-titulo">Clientes</h2>
-            <p class="conteudo-subtitulo">Todos os clientes da empresa, em qualquer etapa — clique num cliente pra abrir a ficha.</p>
           </div>
         </div>
         <div class="crm-clientes-filtros">
@@ -518,6 +524,7 @@
           <select id="crm-clientes-filtro-vendedor">
             <option value="">Todos os comerciais</option>
           </select>
+          <button type="button" class="btn-primary crm-clientes-adicionar" id="crm-clientes-adicionar">+ Adicionar cliente</button>
         </div>
         <div class="crm-clientes-tabela-wrap">
           <table class="tabela-saida crm-clientes-tabela">
@@ -536,21 +543,128 @@
         </div>
       </section>
 
-      <section id="tela-churn-crm" class="panel hidden">
-        <div class="conteudo-header">
-          <div>
-            <h2 class="conteudo-titulo">Churn</h2>
-            <p class="conteudo-subtitulo">Acompanhamento de cancelamentos e risco de churn.</p>
+      {% for fase, rotulo in [("onboarding", "Onboarding"), ("ongoing", "Ongoing")] %}
+      <section id="tela-clientes-{{ fase }}" class="panel hidden">
+        <div class="crm-clientes-filtros">
+          <input type="search" id="{{ fase }}-clientes-busca" class="crm-clientes-busca" placeholder="Buscar por nome ou IdCentral...">
+          <select id="{{ fase }}-clientes-filtro-csm">
+            <option value="">Todos os CS</option>
+          </select>
+          <select id="{{ fase }}-clientes-filtro-vendedor">
+            <option value="">Todos os comerciais</option>
+          </select>
+          <button type="button" class="btn-primary crm-clientes-adicionar" id="{{ fase }}-clientes-adicionar">+ Adicionar cliente</button>
+        </div>
+        <div class="crm-clientes-tabela-wrap">
+          <table class="tabela-saida crm-clientes-tabela">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>IdCentral</th>
+                <th>CS responsável</th>
+                <th>Comercial responsável</th>
+                <th>Momento</th>
+              </tr>
+            </thead>
+            <tbody id="{{ fase }}-clientes-corpo"></tbody>
+          </table>
+          <p class="placeholder hidden" id="{{ fase }}-clientes-vazio">Nenhum cliente em {{ rotulo }} com esses filtros. Para mover um cliente pra cá, mude a Fase de vida no cadastro dele.</p>
+        </div>
+      </section>
+      {% endfor %}
+
+      <section id="tela-churn-crm" class="panel churn-panel hidden">
+        <div class="churn-topbar">
+          <label class="churn-filtro-campo">
+            <span>Período</span>
+            <select id="churn-filtro-periodo">
+              <option value="">Seleção manual</option>
+              <option value="currentMonth">Mês atual</option>
+              <option value="last3Months">Últimos 3 meses</option>
+              <option value="last6Months">Últimos 6 meses</option>
+              <option value="thisYear">Esse ano</option>
+            </select>
+          </label>
+          <div class="churn-filtro-campo churn-filtro-meses">
+            <span>Mês</span>
+            <div class="churn-chips" id="churn-chips-meses"></div>
+          </div>
+          <div class="churn-filtro-campo churn-filtro-ano">
+            <span>Ano</span>
+            <div class="churn-chips">
+              <button type="button" class="churn-chip" id="churn-ano-todos">Todos</button>
+              <select id="churn-filtro-ano"></select>
+            </div>
+          </div>
+          <label class="churn-filtro-campo">
+            <span>Cliente</span>
+            <input type="search" id="churn-filtro-cliente" placeholder="Buscar cliente...">
+          </label>
+          <label class="churn-filtro-campo">
+            <span>CSM</span>
+            <select id="churn-filtro-csm"><option value="">Todos</option></select>
+          </label>
+          <label class="churn-filtro-campo">
+            <span>Vendedor</span>
+            <select id="churn-filtro-vendedor"><option value="">Todos</option></select>
+          </label>
+          <label class="churn-filtro-campo">
+            <span>Persona</span>
+            <select id="churn-filtro-persona"><option value="">Todos</option></select>
+          </label>
+        </div>
+
+        <div class="churn-conteudo">
+          <div class="churn-kpis" id="churn-kpis">
+            <div class="churn-kpi-card" style="--kpi-cor: var(--vermelho);">
+              <div class="churn-kpi-label" id="churn-kpi-cancelamentos-label">Cancelamentos</div>
+              <div class="churn-kpi-valor" id="churn-kpi-cancelamentos">–</div>
+            </div>
+            <div class="churn-kpi-card" style="--kpi-cor: var(--azul);">
+              <div class="churn-kpi-label">Média de tempo</div>
+              <div class="churn-kpi-valor" id="churn-kpi-media-tempo">–</div>
+            </div>
+            <div class="churn-kpi-card" style="--kpi-cor: var(--verde);">
+              <div class="churn-kpi-label">Cliente mais antigo</div>
+              <div class="churn-kpi-valor" id="churn-kpi-mais-antigo">–</div>
+              <div class="churn-kpi-sub" id="churn-kpi-mais-antigo-nome"></div>
+            </div>
+            <div class="churn-kpi-card" style="--kpi-cor: var(--laranja);">
+              <div class="churn-kpi-label">Valor total dos boletos</div>
+              <div class="churn-kpi-valor" id="churn-kpi-boletos">–</div>
+            </div>
+          </div>
+
+          <div class="churn-graficos-grid">
+            <div class="churn-grafico-card"><h3>Cancelamento por tempo de casa</h3><div id="churn-grafico-tempo"></div></div>
+            <div class="churn-grafico-card"><h3>Cancelamento por tipo</h3><div id="churn-grafico-tipo"></div></div>
+            <div class="churn-grafico-card"><h3>Cancelamento por Persona</h3><div id="churn-grafico-persona"></div></div>
+            <div class="churn-grafico-card"><h3>Cancelamento por Comercial</h3><div id="churn-grafico-vendedor"></div></div>
+            <div class="churn-grafico-card"><h3>Cancelamento por CSM</h3><div id="churn-grafico-csm"></div></div>
+          </div>
+
+          <div class="churn-grafico-card">
+            <h3>Clientes cancelados</h3>
+            <div class="crm-clientes-tabela-wrap">
+              <table class="tabela-saida churn-tabela">
+                <thead>
+                  <tr>
+                    <th>Cliente</th><th>Tipo</th><th>Persona</th><th>Entrada</th><th>Saída</th>
+                    <th>Tempo (meses)</th><th>Motivo Cliente</th><th>Motivo CSM</th>
+                    <th>Motivo Financeiro</th><th>Motivo Comercial</th><th>Boleto</th>
+                  </tr>
+                </thead>
+                <tbody id="churn-corpo"></tbody>
+              </table>
+              <p class="placeholder hidden" id="churn-vazio">Nenhum cancelamento encontrado para os filtros atuais.</p>
+            </div>
           </div>
         </div>
-        <p class="placeholder">Em construção — essa tela ainda não está disponível.</p>
       </section>
 
       <section id="tela-ferramentas" class="panel hidden">
         <div class="conteudo-header" id="ferramentas-cards-header">
           <div>
-            <h2 class="conteudo-titulo">Ferramentas Auxiliares</h2>
-            <p class="conteudo-subtitulo">Consultas, importação, comandos e utilitários de apoio operacional</p>
           </div>
         </div>
         <div class="area-cards" id="ferramentas-cards">
@@ -603,8 +717,6 @@
         <div id="ferramentas-sub-importacao" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Área de Importação e Consulta</h2>
-              <p class="conteudo-subtitulo">Autentique-se, importe dados e consulte informações da SSX</p>
             </div>
           </div>
 
@@ -658,8 +770,6 @@
         <div id="ferramentas-sub-comandos" class="ferramentas-subtela hidden">
           <div class="conteudo-header conteudo-header-com-acao">
             <div>
-              <h2 class="conteudo-titulo">Envio de Comandos</h2>
-              <p class="conteudo-subtitulo">Gere e envie comandos SMS para rastreadores</p>
             </div>
             <button type="button" class="btn-engrenagem-pagina" id="btn-abrir-comandos-modelos" title="Gerenciar modelos de comando" data-icone="engrenagem"></button>
           </div>
@@ -775,8 +885,6 @@
         <div id="ferramentas-sub-sync-planilha" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Sincronizar Planilha</h2>
-              <p class="conteudo-subtitulo">Traz as atualizações da planilha de CS pros cadastros de cliente — nos campos em comum, a planilha manda.</p>
             </div>
           </div>
           <div class="ferramentas-secao">
@@ -792,8 +900,6 @@
         <div id="ferramentas-sub-conversor-kml" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor KML → SSX</h2>
-              <p class="conteudo-subtitulo">Converte um arquivo KML ou KMZ de áreas ou rotas em planilha pronta para importar na SSX</p>
             </div>
           </div>
           <div class="conversor-kml-layout">
@@ -846,8 +952,6 @@
         <div id="ferramentas-sub-central-importacao" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Central de Importação SSX</h2>
-              <p class="conteudo-subtitulo">Selecione o tipo de planilha que deseja preparar para importação na plataforma SSX.</p>
             </div>
           </div>
           <div class="area-cards" id="central-importacao-cards">
@@ -974,8 +1078,6 @@
         <div id="ferramentas-sub-conversor-clientes" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor de Clientes → SSX</h2>
-              <p class="conteudo-subtitulo">Importa planilha de clientes de outra plataforma, mapeia as colunas, corrige e valida os dados e exporta pronto pra importar na SSX</p>
             </div>
           </div>
 
@@ -1144,8 +1246,6 @@
         <div id="ferramentas-sub-conversor-veiculos" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor de Veículos → SSX</h2>
-              <p class="conteudo-subtitulo">Importa planilha de veículos de outra plataforma, mapeia as colunas, corrige e valida os dados e exporta pronto pra importar na SSX</p>
             </div>
           </div>
 
@@ -1319,8 +1419,6 @@
         <div id="ferramentas-sub-conversor-rastreadores" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor de Rastreadores → SSX</h2>
-              <p class="conteudo-subtitulo">Importa planilha de rastreadores de outra plataforma, mapeia as colunas, corrige e valida os dados e exporta pronto pra importar na SSX</p>
             </div>
           </div>
 
@@ -1462,8 +1560,6 @@
         <div id="ferramentas-sub-conversor-simcards" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor de SIM Cards → SSX</h2>
-              <p class="conteudo-subtitulo">Importa planilha de SIM cards de outra plataforma, mapeia as colunas, corrige e valida os dados e exporta pronto pra importar na SSX</p>
             </div>
           </div>
 
@@ -1589,8 +1685,6 @@
         <div id="ferramentas-sub-conversor-viagens" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor de Viagens → SSX</h2>
-              <p class="conteudo-subtitulo">Importação e preparação dos dados de viagens para a SSX.</p>
             </div>
           </div>
           <p class="placeholder">Em construção — essa tela ainda não está disponível.</p>
@@ -1599,8 +1693,6 @@
         <div id="ferramentas-sub-conversor-abastecimento" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor de Abastecimento → SSX</h2>
-              <p class="conteudo-subtitulo">Importação e preparação dos dados de abastecimento para a SSX.</p>
             </div>
           </div>
           <p class="placeholder">Em construção — essa tela ainda não está disponível.</p>
@@ -1609,8 +1701,6 @@
         <div id="ferramentas-sub-atalhos" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Operações em massa</h2>
-              <p class="conteudo-subtitulo">Exclusão em massa, Associação e Desassociação de Rastreadores — tudo direto pela API da SSX.</p>
             </div>
           </div>
           <div class="convcli-toolbar-validar">
@@ -1691,8 +1781,6 @@
         <div id="ferramentas-sub-conversor-colaboradores" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor de Colaboradores → SSX</h2>
-              <p class="conteudo-subtitulo">Importa planilha de colaboradores de outra plataforma, mapeia as colunas, corrige e valida os dados e exporta pronto pra importar na SSX</p>
             </div>
           </div>
 
@@ -1842,8 +1930,6 @@
         <div id="ferramentas-sub-conversor-uo" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Conversor de Unidades Organizacionais → SSX</h2>
-              <p class="conteudo-subtitulo">Importa planilha de Unidades Organizacionais de outra plataforma, mapeia as colunas, corrige e valida os dados e importa direto pela API da SSX — não existe arquivo de importação pra esse cadastro, só API.</p>
             </div>
           </div>
 
@@ -1955,8 +2041,6 @@
         <div id="ferramentas-sub-conversor-areas" class="ferramentas-subtela hidden">
           <div class="conteudo-header">
             <div>
-              <h2 class="conteudo-titulo">Planilha de Áreas → SSX</h2>
-              <p class="conteudo-subtitulo">Importa planilha de áreas, rotas e pontos de outra fonte, mapeia as colunas, corrige e valida os dados e exporta pronto pra importar na SSX</p>
             </div>
           </div>
 
@@ -2092,8 +2176,6 @@
         <div id="ferramentas-sub-quebra-string" class="ferramentas-subtela hidden">
           <div class="conteudo-header conteudo-header-com-acao">
             <div>
-              <h2 class="conteudo-titulo">Quebra-String</h2>
-              <p class="conteudo-subtitulo">Decodificador e analisador de pacotes de telemetria</p>
             </div>
             <button type="button" id="btn-quebra-string-disponiveis" class="btn-secondary quebra-string-disponiveis" aria-haspopup="dialog">Disponíveis</button>
           </div>
@@ -2156,8 +2238,6 @@
       <section id="tela-feed" class="panel hidden">
         <div class="conteudo-header">
           <div>
-            <h2 class="conteudo-titulo">Feed</h2>
-            <p class="conteudo-subtitulo">Publicações da equipe sobre os clientes e a operação</p>
           </div>
           <button type="button" id="feed-atualizar" class="btn-secondary" title="Buscar publicações novas">Atualizar</button>
         </div>
@@ -2222,8 +2302,6 @@
       <section id="tela-configuracoes" class="panel hidden">
         <div class="conteudo-header">
           <div>
-            <h2 class="conteudo-titulo">Configurações</h2>
-            <p class="conteudo-subtitulo">Administração de usuários, integrações e templates — visível só para administradores</p>
           </div>
         </div>
 
@@ -2576,16 +2654,17 @@
             <input type="date" id="implantacao-cliente-data">
           </label>
           <label class="campo-migracao">
-            <span>Possui Migração?</span>
-            <select id="implantacao-cliente-tem-migracao">
-              <option value="nao">Não</option>
-              <option value="sim">Sim</option>
-            </select>
-          </label>
-          <label class="campo-migracao">
             <span>Responsável</span>
             <select id="implantacao-cliente-csm">
               <option value="">Selecione...</option>
+            </select>
+          </label>
+          <label class="campo-migracao">
+            <span>Fase de vida</span>
+            <select id="implantacao-cliente-estagio">
+              <option value="implantacao">Implantação</option>
+              <option value="onboarding">Onboarding</option>
+              <option value="ongoing">Ongoing</option>
             </select>
           </label>
 
@@ -3259,25 +3338,6 @@
        cliente de Implantação existente — pergunta se é o mesmo cliente antes
        de criar qualquer coisa, pra não duplicar. Ver checarVinculoMigracao
        (script.js). -->
-  <div id="overlay-vincular-migracao" class="overlay hidden">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>Cliente já cadastrado na Implantação</h3>
-        <button id="vincular-migracao-fechar" class="btn-secondary">Fechar</button>
-      </div>
-      <div class="modal-body">
-        <p id="vincular-migracao-texto" class="placeholder"></p>
-        <div class="form-credencial-botoes">
-          <button type="button" id="btn-vincular-migracao-sim" class="btn-primary">Vincular cliente</button>
-          <button type="button" id="btn-vincular-migracao-nao" class="btn-secondary">Não vincular</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Confirmação pra destravar o link da planilha de migração depois de já
-       ter sido salvo uma vez (só admin vê o botão que abre isso). Ver
-       btnLiberarLinkPlanilha (script.js). -->
   <div id="overlay-liberar-planilha" class="overlay hidden">
     <div class="modal">
       <div class="modal-header">
@@ -3300,7 +3360,6 @@
         <h3 id="veiculos-migracao-titulo">Veículos</h3>
         <div class="modal-header-acoes">
           <span id="veiculos-migracao-envio-status" class="veiculos-migracao-envio-status"></span>
-          <button id="veiculos-migracao-sincronizar-ssx" class="btn-secondary">Sincronizar com SSX</button>
           <button id="veiculos-migracao-verificar-comunicacao" class="btn-secondary">Verificar comunicação</button>
           <button id="veiculos-migracao-selecionar-todos" class="btn-secondary">Selecionar todos</button>
           <button id="veiculos-migracao-enviar-selecionados" class="btn-primary">Enviar</button>
@@ -3402,21 +3461,58 @@
     </div>
   </div>
 
-  <div id="overlay-sincronizar-veiculos-ssx" class="overlay hidden">
-    <div class="modal modal-aviso-erro">
-      <div class="modal-aviso-erro-corpo">
-        <span class="modal-aviso-erro-icone" aria-hidden="true">!</span>
-        <div>
-          <h3 class="modal-aviso-erro-titulo">Confirmar sincronização com a SSX</h3>
-          <p id="sincvei-resumo-texto" class="modal-aviso-erro-texto"></p>
-        </div>
+  <!-- Controle de Migração: "+ Adicionar migração" — escolhe um cliente JÁ
+       cadastrado (não cria cliente). Resto das informações vai na aba
+       Migração da Ficha. -->
+  <div id="overlay-adicionar-migracao" class="overlay hidden">
+    <div class="modal modal-estreito">
+      <div class="modal-header">
+        <h3>Adicionar migração</h3>
+        <button type="button" id="adicionar-migracao-fechar" class="btn-secondary">Fechar</button>
       </div>
-      <div id="sincvei-log" class="log-massa"></div>
-      <div class="modal-aviso-erro-acoes">
-        <button type="button" id="btn-sincvei-confirmar" class="btn-primary">Atualizar</button>
-        <button type="button" id="btn-sincvei-cancelar" class="btn-aviso-erro-cancelar">Cancelar</button>
+      <div class="modal-body">
+        <p class="adicionar-migracao-ajuda">Escolha um cliente já cadastrado. A migração começa na etapa Análise — plataforma, planilha e acesso você preenche depois, na aba Migração da Ficha do cliente.</p>
+        <input type="search" id="adicionar-migracao-busca" class="adicionar-migracao-busca" placeholder="Buscar por nome ou IdCentral..." autocomplete="off">
+        <div id="adicionar-migracao-lista" class="adicionar-migracao-lista"></div>
       </div>
-      <button id="sincvei-fechar-x" class="modal-aviso-erro-fechar" aria-label="Fechar">✕</button>
+    </div>
+  </div>
+
+  <!-- Formulário de finalização da migração — vai pro Histórico da Ficha. -->
+  <div id="overlay-finalizar-migracao" class="overlay hidden">
+    <div class="modal modal-estreito">
+      <div class="modal-header">
+        <h3 id="finalizar-migracao-titulo">Finalizar migração</h3>
+        <button type="button" id="finalizar-migracao-fechar" class="btn-secondary">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-finalizar-migracao" class="form-migracao form-finalizar-migracao">
+          <p class="adicionar-migracao-ajuda">Esse registro vai para o Histórico da migração e não pode ser alterado depois. Quem finalizou, a plataforma, a planilha e os números de veículos são registrados automaticamente.</p>
+          <div class="campo-migracao">
+            <span>Resultado *</span>
+            <div class="finalizar-migracao-resultados">
+              <label><input type="radio" name="finalizar-migracao-resultado" value="concluida"> Concluída</label>
+              <label><input type="radio" name="finalizar-migracao-resultado" value="concluida_pendencias"> Concluída com pendências</label>
+            </div>
+          </div>
+          <label class="campo-migracao">
+            <span>O que aconteceu na migração? *</span>
+            <textarea id="finalizar-migracao-resumo" rows="4" placeholder="Como foi o processo, o que foi migrado, pontos de atenção..."></textarea>
+          </label>
+          <label class="campo-migracao">
+            <span>Pendências ou problemas encontrados <span id="finalizar-migracao-pendencias-obrig" class="hidden">*</span></span>
+            <textarea id="finalizar-migracao-pendencias" rows="3" placeholder="O que ficou pendente, veículos que não comunicaram, problemas..."></textarea>
+          </label>
+          <label class="campo-migracao">
+            <span>Data de término</span>
+            <input type="date" id="finalizar-migracao-data">
+          </label>
+          <div class="finalizar-migracao-acoes">
+            <button type="button" id="finalizar-migracao-cancelar" class="btn-secondary">Cancelar</button>
+            <button type="submit" id="finalizar-migracao-salvar" class="btn-primary">Finalizar migração</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 

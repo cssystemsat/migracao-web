@@ -81,6 +81,25 @@
 
 * { box-sizing: border-box; }
 
+/* Base única de altura/borda/fonte pra TODO select e input de texto do app —
+   antes cada filtro (CRM, Churn, Implantação/Migração, modais) tinha seu
+   próprio ajuste solto. Fica bem no topo da folha de estilo de propósito:
+   especificidade mínima (seletor de atributo/elemento), então qualquer regra
+   mais específica já existente no resto do arquivo continua decidindo onde
+   precisa de algo diferente (ex.: .filtro-lista input tira a borda porque o
+   wrapper já desenha uma; .churn-filtro-campo ajusta o rótulo em cima) — isso
+   aqui só preenche o que não tinha padrão nenhum antes. */
+input[type="text"], input[type="search"], input[type="date"], input[type="tel"],
+input[type="number"], input[type="email"], input[type="password"], select {
+  height: 32px;
+  border: 1px solid var(--cinza-200);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 0.8rem;
+  color: var(--cinza-900);
+  background: var(--painel);
+}
+
 /* Ícones da sidebar (Google Material Symbols, carregado no <head> do
    index.html) — mesma fonte/ícones do mockup, usada via ligadura de texto
    (ex.: <span class="material-symbols-outlined">grid_view</span>) em vez de
@@ -585,11 +604,10 @@ table.convcli-tabela tr.convcli-linha-destacada td:last-child { border-right: 2p
 .di-periodo { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 13px 0; }
 .di-periodo-label { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cinza-500); }
 .di-periodo-botoes { display: flex; flex-wrap: wrap; gap: 6px; }
-.di-periodo-btn { width: auto; margin: 0; padding: 6px 12px; border: 1px solid var(--cinza-300); border-radius: 999px; background: var(--painel); color: var(--cinza-700); font-size: 0.82rem; font-weight: 500; }
-.di-periodo-btn:hover:not(:disabled) { background: var(--cinza-100); }
+.di-periodo-btn { width: auto; margin: 0; height: 32px; padding: 0 12px; border: 1px solid var(--cinza-200); border-radius: 6px; background: var(--cinza-100); color: var(--cinza-700); font-size: 0.78rem; font-weight: 700; }
+.di-periodo-btn:hover:not(:disabled) { background: var(--cinza-200); }
 .di-periodo-btn.ativo { background: var(--azul); border-color: var(--azul); color: #fff; }
 .di-periodo-custom { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--cinza-700); }
-.di-periodo-custom input[type="date"] { height: 32px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.8rem; }
 .di-periodo-custom button { width: auto; margin: 0; padding: 6px 12px; }
 .di-periodo-aviso { flex-basis: 100%; margin: 0; font-size: 0.78rem; }
 
@@ -1374,17 +1392,7 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .combobox-item-vazio:hover { background: none; }
 
 .implantacao-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.implantacao-busca,
-.implantacao-filtro-csm,
-.toolbar-filtro-responsavel {
-  padding: 6px 8px;
-  border: 1px solid var(--cinza-300);
-  border-radius: var(--radius);
-  font-size: 0.85rem;
-}
 .implantacao-busca { min-width: 192px; }
-.implantacao-filtro-csm,
-.toolbar-filtro-responsavel { background: var(--cinza-100); }
 
 .timeline-setor { border-bottom: 1px solid var(--cinza-200); padding: 11px 0; }
 .timeline-setor:last-child { border-bottom: none; }
@@ -1431,10 +1439,6 @@ table.tabela-saida tr.linha-clicavel:hover td { background: #ede9fe; }
 .veiculos-migracao-filtros input[type="text"] {
   flex: 1;
   min-width: 176px;
-  padding: 7px 10px;
-  border: 1px solid var(--cinza-300);
-  border-radius: var(--radius);
-  font-size: 0.88rem;
   font-family: inherit;
 }
 .veiculos-migracao-chips { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -2399,7 +2403,7 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
 .busca-global-vazio { padding: 8px; font-size: 0.8rem; color: var(--cinza-500); }
 
 /* Filtro local das listas (Implantação/Migração) — funil, não lupa. */
-.filtro-lista { display: inline-flex; align-items: center; gap: 5px; padding: 0 6px; border: 1px solid var(--cinza-300); border-radius: var(--radius); background: var(--painel); color: var(--cinza-500); }
+.filtro-lista { display: inline-flex; align-items: center; height: 32px; gap: 5px; padding: 0 8px; border: 1px solid var(--cinza-200); border-radius: 6px; background: var(--painel); color: var(--cinza-500); }
 .filtro-lista:focus-within { border-color: var(--azul); }
 .filtro-lista input { border: none; outline: none; background: transparent; color: var(--cinza-900); padding: 6px 0; width: 136px; font-size: 0.85rem; margin: 0; }
 .tela-lista-compacta .filtro-lista input { padding: 3px 0; font-size: 0.8rem; }
@@ -2432,7 +2436,20 @@ table.quebra-string-tabela td.quebra-string-bruto-ativo:hover { background: #fef
   border-bottom: none;
   flex-shrink: 0;
 }
-.sidebar-marca { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 110px; min-width: 0; }
+.sidebar-marca {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 110px;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
 .sidebar-marca-imagem { display: block; width: min(100%, 110px); height: 40px; object-fit: contain; }
 .sidebar-marca-escura { display: none; }
 :root[data-theme="dark"] .sidebar-marca-clara { display: none; }
@@ -3422,27 +3439,31 @@ table.crm-clientes-tabela .crm-clientes-linha:hover td { background: var(--cinza
   cursor: pointer;
 }
 .crm-mapa-aba.ativa { background: var(--verde); border-color: var(--verde); color: #ffffff; }
-.crm-mapa-tiles { margin-bottom: 16px; }
+.crm-mapa-tiles { max-width: 360px; grid-template-columns: 1fr 1fr; margin-bottom: 16px; }
 .crm-mapa-wrap {
   position: relative;
   width: 100%;
-  max-width: 560px;
-  aspect-ratio: 1 / 1;
+  max-width: 760px;
+  /* Mesma proporção do viewBox do SVG (1000 x 912) — ver brasil-estados.svg. */
+  aspect-ratio: 1000 / 912;
   margin: 0 auto;
-  background: linear-gradient(180deg, #f0fdf4, #ecfdf5);
+  background: var(--painel);
   border-radius: 12px;
-  border: 1px solid var(--cinza-200);
+  overflow: hidden;
 }
-:root[data-theme="dark"] .crm-mapa-wrap { background: linear-gradient(180deg, #0f2318, #0b1f17); }
+.crm-mapa-svg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+:root[data-theme="dark"] .crm-mapa-svg { filter: brightness(0.85); }
 .crm-mapa-bolha {
   position: absolute;
   transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   cursor: pointer;
+  z-index: 1;
 }
+.crm-mapa-bolha:hover { z-index: 2; }
 .crm-mapa-bolha-circulo {
   display: flex;
   align-items: center;
@@ -3451,12 +3472,73 @@ table.crm-clientes-tabela .crm-clientes-linha:hover td { background: var(--cinza
   background: var(--verde);
   color: #ffffff;
   font-weight: 700;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   border: 2px solid #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: transform 0.1s ease;
 }
-.crm-mapa-bolha-uf { font-size: 0.68rem; font-weight: 700; color: var(--cinza-700, #374151); background: #ffffff; padding: 0 4px; border-radius: 4px; }
+.crm-mapa-bolha:hover .crm-mapa-bolha-circulo { transform: scale(1.15); }
+.crm-mapa-bolha-uf {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--cinza-700, #374151);
+  background: #ffffff;
+  padding: 0 4px;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
 :root[data-theme="dark"] .crm-mapa-bolha-uf { color: #e5e7eb; background: #1e2a42; }
+.crm-mapa-legenda { font-size: 0.75rem; color: var(--cinza-500, #6b7280); text-align: center; margin-top: 8px; }
+.crm-mapa-legenda a { color: inherit; }
+
+/* Tela Churn — barra de filtros escura (estilo do dashboard de referência
+   interno) + cards de KPI e gráficos em SVG (sem biblioteca de gráficos:
+   desenhados à mão com grade/eixos, pra ficar parecido com recharts sem
+   adicionar dependência nova). */
+.churn-panel { padding: 0; }
+.churn-topbar {
+  background: var(--painel);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 10px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+}
+.churn-filtro-campo { display: flex; flex-direction: column; gap: 4px; font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cinza-500, #6b7280); }
+.churn-filtro-campo input { width: 150px; }
+.churn-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.churn-chip {
+  border: 1px solid var(--cinza-200);
+  background: var(--cinza-100);
+  color: var(--cinza-700, #374151);
+  padding: 0 8px;
+  height: 32px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.churn-chip.ativo { background: var(--azul); border-color: var(--azul); color: #ffffff; }
+
+.churn-conteudo { padding: 16px; }
+.churn-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.churn-kpi-card { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 14px; }
+.churn-kpi-label { font-size: 0.78rem; font-weight: 700; color: var(--kpi-cor); margin-bottom: 4px; }
+.churn-kpi-valor { font-size: 1.6rem; font-weight: 800; color: var(--kpi-cor); }
+.churn-kpi-sub { font-size: 0.75rem; color: var(--cinza-500, #6b7280); margin-top: 2px; }
+
+.churn-graficos-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.churn-grafico-card { background: var(--painel); border: 1px solid var(--cinza-200); border-radius: var(--radius); padding: 12px; }
+.churn-grafico-card h3 { margin: 0 0 8px; font-size: 0.9rem; color: var(--cinza-900, #111827); }
+.churn-grafico-svg { width: 100%; height: auto; overflow: visible; }
+.churn-grafico-svg .churn-eixo-linha { stroke: var(--cinza-300, #d1d5db); stroke-width: 1; }
+.churn-grafico-svg .churn-grade-linha { stroke: var(--cinza-200, #e5e7eb); stroke-dasharray: 3 3; stroke-width: 1; }
+.churn-grafico-svg .churn-eixo-texto { fill: var(--cinza-500, #6b7280); font-size: 10px; }
+.churn-grafico-svg .churn-barra-rotulo { fill: var(--cinza-900, #111827); font-size: 11px; font-weight: 700; }
+
+table.churn-tabela th, table.churn-tabela td { max-width: 220px; white-space: normal; }
 
 .marco-linha {
   display: flex;
@@ -4220,6 +4302,149 @@ table.crm-clientes-tabela .crm-clientes-linha:hover td { background: var(--cinza
    escopado só aqui pra não mudar a Implantação/Migração. */
 .ficha-dados-cadastrais .info-item { background: #f1f5f9; border: none; box-shadow: none; border-radius: 8px; }
 :root[data-theme="dark"] .ficha-dados-cadastrais .info-item { background: var(--cinza-100); }
+
+/* "+ Adicionar cliente" nas listas de clientes (CRM, Onboarding, Ongoing):
+   .btn-primary global é largura cheia com margem — aqui fica na linha dos filtros. */
+.crm-clientes-adicionar { width: auto; margin: 0; padding: 0 14px; height: 32px; white-space: nowrap; flex-shrink: 0; }
+
+/* Aba Migração da Ficha: Ativa | Histórico (2026-11-26). */
+.ficha-migracao-vazia { text-align: center; padding: 32px 20px; }
+.ficha-migracao-vazia h3 { justify-content: center; margin-bottom: 6px; }
+.ficha-migracao-vazia p { margin: 0 0 16px; color: var(--cinza-500); font-size: 13.5px; }
+.ficha-painel .ficha-migracao-iniciar { width: auto; margin: 0; padding: 8px 18px; }
+.ficha-acoes-separador { flex: 1; }
+.ficha-acoes .ficha-migracao-finalizar { width: auto; margin: 0; padding: 6px 14px; }
+
+.ficha-migracao-historico { display: flex; flex-direction: column; gap: 16px; }
+.ficha-migracao-historico .ficha-painel { margin-bottom: 0; }
+.ficha-migracao-hist-card { border-left: 3px solid var(--verde); }
+.ficha-migracao-hist-card.cancelada { border-left-color: var(--cinza-300); }
+.ficha-migracao-hist-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ficha-migracao-hist-topo h3 { margin: 0; }
+.ficha-migracao-hist-selo { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+.selo-concluida { background: #ecfdf5; color: var(--verde-escuro); }
+.selo-concluida_pendencias { background: #fffbeb; color: var(--amarelo-escuro); }
+.selo-cancelada { background: var(--cinza-100); color: var(--cinza-500); border: 1px solid var(--cinza-200); }
+:root[data-theme="dark"] .selo-concluida { background: rgba(34, 197, 94, 0.15); color: #86efac; }
+:root[data-theme="dark"] .selo-concluida_pendencias { background: rgba(217, 119, 6, 0.2); color: #fcd34d; }
+.ficha-migracao-hist-meta { margin: 4px 0 12px; font-size: 12.5px; color: var(--cinza-500); }
+.ficha-migracao-hist-numeros { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.ficha-migracao-hist-numero { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--cinza-100); }
+.ficha-migracao-hist-numero strong { font-size: 17px; color: var(--cinza-900); }
+.ficha-migracao-hist-numero span { font-size: 11.5px; color: var(--cinza-500); }
+.ficha-migracao-hist-texto { margin-bottom: 10px; }
+.ficha-migracao-hist-texto h4 { margin: 0 0 3px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cinza-500); }
+.ficha-migracao-hist-texto p { margin: 0; font-size: 13.5px; line-height: 19px; color: var(--cinza-900); white-space: pre-line; }
+.ficha-migracao-hist-link { text-decoration: none; display: inline-flex; align-items: center; }
+
+/* "+ Adicionar migração": busca de cliente já cadastrado. */
+.adicionar-migracao-ajuda { margin: 0 0 12px; font-size: 13px; color: var(--cinza-500); line-height: 18px; }
+.adicionar-migracao-busca { width: 100%; box-sizing: border-box; margin-bottom: 10px; }
+.adicionar-migracao-lista { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
+.adicionar-migracao-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  margin: 0; padding: 9px 12px; text-align: left; cursor: pointer;
+  background: var(--painel); color: var(--cinza-900); border: 1px solid var(--cinza-200); border-radius: var(--radius);
+}
+.adicionar-migracao-item:hover:not(:disabled) { border-color: var(--azul); background: rgba(29, 78, 216, 0.05); }
+.adicionar-migracao-item:disabled { cursor: not-allowed; opacity: 0.6; }
+.adicionar-migracao-item-textos { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.adicionar-migracao-item-textos strong { font-size: 14px; font-weight: 600; }
+.adicionar-migracao-item-textos span { font-size: 12px; color: var(--cinza-500); }
+.adicionar-migracao-item-aviso { font-size: 11.5px; font-weight: 600; color: var(--amarelo-escuro); white-space: nowrap; }
+
+/* Formulário de finalização. */
+.finalizar-migracao-resultados { display: flex; flex-wrap: wrap; gap: 6px 18px; padding-top: 2px; }
+.finalizar-migracao-resultados label { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--cinza-900); cursor: pointer; }
+.form-finalizar-migracao textarea { width: 100%; box-sizing: border-box; }
+.finalizar-migracao-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.finalizar-migracao-acoes button { width: auto; margin: 0; padding: 8px 16px; }
+
+/* Tela de veículos aberta pelo Histórico: somente leitura. */
+.veiculos-somente-leitura #veiculos-migracao-verificar-comunicacao,
+.veiculos-somente-leitura #veiculos-migracao-selecionar-todos,
+.veiculos-somente-leitura #veiculos-migracao-enviar-selecionados { display: none; }
+.veiculos-somente-leitura tbody input,
+.veiculos-somente-leitura tbody select,
+.veiculos-somente-leitura tbody textarea,
+.veiculos-somente-leitura tbody button { pointer-events: none; }
+.veiculos-somente-leitura #veiculos-migracao-titulo::after { content: " — somente leitura (migração encerrada)"; font-weight: 400; font-size: 0.8em; color: var(--cinza-500); }
+
+/* Ficha cadastral (Visão Geral > Informações do Cliente) — formato CRM/ERP:
+   coluna principal com as seções do cadastro (mesmas do formulário) e
+   lateral com contatos, completude, documentos e credencial. Modo leitura
+   por padrão; "Editar" troca a página toda pra inputs (classe .editando). */
+.ficha-cad-barra { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 14px; padding: 10px 0; }
+.ficha-cad.editando .ficha-cad-barra { position: sticky; top: 0; z-index: 5; background: var(--fundo-pagina); }
+.ficha-cad-barra-titulo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ficha-cad-barra-titulo h3 { margin: 0; font-size: 16px; line-height: 22px; font-weight: 600; color: var(--cinza-900); }
+.ficha-cad-barra-titulo span { font-size: 12.5px; color: var(--cinza-500); }
+.ficha-cad.editando .ficha-cad-barra-titulo span { color: var(--azul); font-weight: 500; }
+.ficha-cad-barra-acoes { display: flex; gap: 8px; flex-shrink: 0; }
+.ficha-cad-barra-acoes button { width: auto; margin: 0; padding: 7px 14px; font-size: 13px; font-weight: 600; border-radius: var(--radius); }
+.ficha-cad-btn-editar { display: inline-flex; align-items: center; gap: 6px; }
+
+.ficha-cad-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.ficha-cad-lateral { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.ficha-cad-lateral .ficha-painel { margin-bottom: 0; }
+@media (max-width: 1100px) {
+  .ficha-cad-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.ficha-painel.ficha-cad-principal { padding: 0; overflow: visible; }
+.ficha-cad.editando .ficha-painel.ficha-cad-principal { border-color: var(--azul); box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.1); }
+.ficha-cad-secao { padding: 16px 20px 18px; margin: 0; }
+.ficha-cad-secao + .ficha-cad-secao { border-top: 1px solid var(--cinza-200); }
+.ficha-cad-secao-cabecalho { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+.ficha-cad-secao-cabecalho h4 { margin: 0; font-size: 11.5px; line-height: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cinza-500); }
+.ficha-cad-selo { font-size: 11px; line-height: 16px; padding: 1px 8px; border-radius: 999px; background: var(--cinza-100); color: var(--cinza-500); border: 1px solid var(--cinza-200); }
+
+.ficha-cad-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px 24px; }
+.ficha-cad-campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ficha-cad-campo-full { grid-column: 1 / -1; }
+.ficha-cad-rotulo { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--cinza-500); }
+.ficha-cad-valor { font-size: 14px; line-height: 20px; font-weight: 500; color: var(--cinza-900); overflow-wrap: anywhere; white-space: pre-line; }
+.ficha-cad-valor.vazio { color: var(--cinza-300); }
+.ficha-cad-valor.travado { padding: 6px 9px; border-radius: var(--radius); background: var(--cinza-100); color: var(--cinza-500); cursor: not-allowed; }
+.ficha-cad-ajuda { font-size: 11px; line-height: 14px; color: var(--cinza-500); }
+
+/* .ficha-cad na frente: a regra global input[type="text"]... é mais
+   específica que uma classe sozinha e encolhia a fonte dos inputs. */
+.ficha-cad .ficha-cad-input,
+.ficha-cad .ficha-cad-combo input {
+  width: 100%; box-sizing: border-box; height: 36px; padding: 0 10px;
+  border: 1px solid var(--cinza-300); border-radius: var(--radius);
+  background: var(--painel); color: var(--cinza-900);
+  font-size: 14px; font-family: inherit;
+}
+.ficha-cad textarea.ficha-cad-input { height: auto; padding: 8px 10px; resize: vertical; min-height: 60px; }
+.ficha-cad .ficha-cad-input:focus,
+.ficha-cad .ficha-cad-combo input:focus { outline: none; border-color: var(--azul); box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15); }
+.ficha-cad .ficha-cad-combo input:disabled { background: var(--cinza-100); }
+
+.ficha-cad-indicadores .info-grid { margin: 0; }
+.ficha-cad-indicadores .info-item { background: var(--cinza-100); border: none; box-shadow: none; border-radius: 8px; }
+
+/* Lateral */
+.ficha-cad-contatos { display: flex; flex-direction: column; }
+.ficha-cad-contato { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; }
+.ficha-cad-contato + .ficha-cad-contato { border-top: 1px solid var(--cinza-200); }
+.ficha-cad-contato-textos { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ficha-cad-contato-nome { font-size: 14px; font-weight: 500; color: var(--cinza-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ficha-cad-contato-nome.vazio { color: var(--cinza-300); font-weight: 400; }
+.ficha-cad-contato-wpp { flex-shrink: 0; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #25d366; background: rgba(37, 211, 102, 0.12); text-decoration: none; transition: background 0.15s, color 0.15s; }
+.ficha-cad-contato-wpp:hover { background: #25d366; color: #ffffff; }
+
+.ficha-cad-completude-topo { display: flex; align-items: baseline; justify-content: space-between; }
+.ficha-cad-completude-topo h3 { margin: 0 0 8px; }
+.ficha-cad-completude-num { font-size: 13px; font-weight: 600; color: var(--cinza-700); }
+.ficha-cad-completude-trilho { height: 6px; border-radius: 999px; background: var(--cinza-200); overflow: hidden; }
+.ficha-cad-completude-barra { height: 100%; border-radius: 999px; background: var(--azul); transition: width 0.2s; }
+.ficha-cad-completude-barra.completo { background: var(--verde); }
+.ficha-cad-completude-falta { margin: 8px 0 0; font-size: 12px; line-height: 17px; color: var(--cinza-500); }
+
+:root[data-theme="dark"] .ficha-cad.editando .ficha-painel.ficha-cad-principal { box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15); }
+:root[data-theme="dark"] .ficha-cad-contato-wpp { background: rgba(37, 211, 102, 0.18); }
 
 /* Card de Documentos (ficha de entrada, contrato) — mesma linha ERP: ícone +
    rótulo + status à esquerda, ações à direita; quebra em coluna no mobile. */

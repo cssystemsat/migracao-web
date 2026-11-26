@@ -14,7 +14,7 @@ from sqlalchemy import case, func, or_
 import criptografia
 from db_sql import obter_sessao, obter_sessao_leitura
 import migracao_status
-from models import Migracao, MigracaoModeloComando, MigracaoSsxSyncJob, MigracaoVeiculo
+from models import Migracao, MigracaoModeloComando, MigracaoVeiculo
 
 
 def _migracao_para_dict(m):
@@ -35,6 +35,11 @@ def _migracao_para_dict(m):
         "data_inicio": m.data_inicio,
         "data_fim": m.data_fim,
         "motivo": m.motivo,
+        "resultado": m.resultado,
+        "resumo": m.resumo,
+        "pendencias": m.pendencias,
+        "encerrado_por": m.encerrado_por,
+        "snapshot_encerramento": m.snapshot_encerramento,
     }
 
 
@@ -121,25 +126,70 @@ def editar_migracao(migracao_id, campos):
         return _migracao_para_dict(alvo)
 
 
-def finalizar_migracao(migracao_id, data_fim):
+def snapshot_encerramento(migracao_id):
+    """Números da migração congelados no momento do encerramento (finalizar/
+    cancelar) — o Histórico mostra isso, não a contagem ao vivo, pra não
+    mudar depois. "comunicando" = veículos que já comunicaram pela primeira
+    vez na SSX (migracao_confirmada_ssx, marcado pela Verificação de
+    comunicação). Cancelado/Sem rastreador ficam fora do total válido, mesma
+    regra do progresso (ver _recalcular_e_persistir_progresso_na_sessao)."""
+    fora = ["Cancelado", "Sem rastreador"]
+    with obter_sessao_leitura() as sessao:
+        por_status = dict(
+            sessao.query(MigracaoVeiculo.status, func.count())
+            .filter(MigracaoVeiculo.migracao_id == migracao_id)
+            .group_by(MigracaoVeiculo.status)
+            .all()
+        )
+        comunicando = (
+            sessao.query(func.count())
+            .filter(
+                MigracaoVeiculo.migracao_id == migracao_id,
+                MigracaoVeiculo.status.notin_(fora),
+                MigracaoVeiculo.migracao_confirmada_ssx.is_(True),
+            )
+            .scalar()
+        ) or 0
+        alvo = sessao.get(Migracao, migracao_id)
+        percentual = alvo.percentual_migracao if alvo else 0
+    total = sum(por_status.values())
+    validos = total - sum(por_status.get(s, 0) for s in fora)
+    return {
+        "total_veiculos": total,
+        "veiculos_validos": validos,
+        "comunicando": int(comunicando),
+        "nao_comunicando": max(validos - int(comunicando), 0),
+        "sem_rastreador": por_status.get("Sem rastreador", 0),
+        "cancelados": por_status.get("Cancelado", 0),
+        "por_status": por_status,
+        "percentual_migracao": percentual,
+    }
+
+
+def _encerrar_migracao(migracao_id, status, data_fim, campos):
     with obter_sessao() as sessao:
         alvo = sessao.get(Migracao, migracao_id)
         if not alvo:
             return None
-        alvo.status = "concluida"
+        alvo.status = status
         alvo.data_fim = data_fim
+        for campo, valor in campos.items():
+            setattr(alvo, campo, valor)
         return _migracao_para_dict(alvo)
 
 
-def cancelar_migracao(migracao_id, data_fim, motivo):
-    with obter_sessao() as sessao:
-        alvo = sessao.get(Migracao, migracao_id)
-        if not alvo:
-            return None
-        alvo.status = "cancelada"
-        alvo.data_fim = data_fim
-        alvo.motivo = motivo
-        return _migracao_para_dict(alvo)
+def finalizar_migracao(migracao_id, data_fim, resultado="concluida", resumo="", pendencias="",
+                       encerrado_por="", snapshot=None):
+    return _encerrar_migracao(migracao_id, "concluida", data_fim, {
+        "resultado": resultado, "resumo": resumo, "pendencias": pendencias,
+        "encerrado_por": encerrado_por, "snapshot_encerramento": snapshot,
+    })
+
+
+def cancelar_migracao(migracao_id, data_fim, motivo, encerrado_por="", snapshot=None):
+    return _encerrar_migracao(migracao_id, "cancelada", data_fim, {
+        "motivo": motivo, "encerrado_por": encerrado_por, "snapshot_encerramento": snapshot,
+    })
 
 
 def atualizar_link_planilha(migracao_id, link):
@@ -382,139 +432,6 @@ def importar_veiculos_planilha(migracao_id, veiculos):
                 novo = MigracaoVeiculo(migracao_id=migracao_id, cliente=cliente, veiculo=veiculo, **campos)
                 sessao.add(novo)
                 existentes[(cliente, veiculo)] = novo
-
-
-# --- Sincronização com a SSX (ver ssx_veiculos_sync.py pro cálculo do diff) ---
-
-def aplicar_sincronizacao_ssx(migracao_id, criacoes, atualizacoes):
-    """Grava o que o usuário aprovou no modal de confirmação.
-    `criacoes` é a lista de dicts {"campos": {...}} (veículo da SSX sem linha
-    local ainda — caso normal logo depois de zerar a tabela, ver "Passo 0" do
-    plano) e `atualizacoes` é {"veiculo_id", "campos": {campo: (atual,
-    novo)}}, ambos devolvidos por `ssx_veiculos_sync.calcular_diff_sincronizacao`
-    (ou reenviados do front depois da aprovação). Nunca deleta — só cria o
-    que falta e atualiza o que já existe."""
-    criadas = 0
-    atualizados = 0
-    with obter_sessao() as sessao:
-        criadas, atualizados = _aplicar_sincronizacao_ssx_na_sessao(
-            sessao, migracao_id, criacoes, atualizacoes
-        )
-    return criadas, atualizados
-
-
-def _aplicar_sincronizacao_ssx_na_sessao(sessao, migracao_id, criacoes, atualizacoes):
-    criadas = 0
-    atualizados = 0
-    # Evita bater na UniqueConstraint(migracao_id, cliente, veiculo) no meio
-    # do lote; uma duplicata não deve abortar as demais criações/atualizações.
-    pares_existentes = {
-        (cliente, veiculo)
-        for cliente, veiculo in sessao.query(MigracaoVeiculo.cliente, MigracaoVeiculo.veiculo)
-        .filter(MigracaoVeiculo.migracao_id == migracao_id)
-        .all()
-    }
-    for item in criacoes:
-        par = (item["campos"]["cliente"], item["campos"]["veiculo"])
-        if par in pares_existentes:
-            continue
-        campos = dict(item["campos"])
-        campos["status"] = migracao_status.normalizar_status_veiculo(
-            campos.get("status", "Aguardando"),
-            campos.get("id_equipamento"),
-        )
-        sessao.add(MigracaoVeiculo(migracao_id=migracao_id, **campos))
-        pares_existentes.add(par)
-        criadas += 1
-
-    if atualizacoes:
-        ids = [item["veiculo_id"] for item in atualizacoes]
-        veiculos = {
-            veiculo.id: veiculo
-            for veiculo in sessao.query(MigracaoVeiculo).filter(MigracaoVeiculo.id.in_(ids)).all()
-        }
-        for item in atualizacoes:
-            alvo = veiculos.get(item["veiculo_id"])
-            if not alvo:
-                continue
-            for campo, (_antigo, novo) in item["campos"].items():
-                setattr(alvo, campo, novo)
-            alvo.status = migracao_status.normalizar_status_veiculo(alvo.status, alvo.id_equipamento)
-            atualizados += 1
-    return criadas, atualizados
-
-
-def criar_job_sincronizacao_ssx(migracao_id, job_id):
-    """Cria um job durável; jobs antigos são descartados após sete dias."""
-    limite = datetime.now(timezone.utc) - timedelta(days=7)
-    with obter_sessao() as sessao:
-        sessao.query(MigracaoSsxSyncJob).filter(
-            MigracaoSsxSyncJob.criado_em < limite
-        ).delete(synchronize_session=False)
-        sessao.add(MigracaoSsxSyncJob(job_id=job_id, migracao_id=migracao_id, status="rodando"))
-
-
-def atualizar_job_sincronizacao_ssx(job_id, status, diff=None, erro=None):
-    with obter_sessao() as sessao:
-        job = sessao.get(MigracaoSsxSyncJob, job_id)
-        if not job:
-            return False
-        job.status = status
-        job.diff = diff
-        job.erro = erro
-        return True
-
-
-def buscar_job_sincronizacao_ssx(migracao_id, job_id):
-    with obter_sessao_leitura() as sessao:
-        job = (
-            sessao.query(MigracaoSsxSyncJob)
-            .filter(
-                MigracaoSsxSyncJob.job_id == job_id,
-                MigracaoSsxSyncJob.migracao_id == migracao_id,
-            )
-            .one_or_none()
-        )
-        if not job:
-            return None
-        return {
-            "status": job.status,
-            "diff": job.diff,
-            "erro": job.erro,
-            "resultado": job.resultado,
-        }
-
-
-def aplicar_job_sincronizacao_ssx(migracao_id, job_id):
-    """Aplica a prévia e marca o job na mesma transação para evitar reaplicação."""
-    with obter_sessao() as sessao:
-        job = (
-            sessao.query(MigracaoSsxSyncJob)
-            .filter(MigracaoSsxSyncJob.job_id == job_id)
-            .with_for_update()
-            .one_or_none()
-        )
-        if not job or job.migracao_id != migracao_id:
-            return None, "nao_encontrado"
-        if job.status == "aplicado":
-            return {**(job.resultado or {}), "ja_aplicado": True}, None
-        if job.status != "concluido" or not job.diff:
-            return None, "nao_concluido"
-
-        diff = job.diff
-        criadas, atualizados = _aplicar_sincronizacao_ssx_na_sessao(
-            sessao, migracao_id, diff["a_criar"], diff["a_atualizar"]
-        )
-        _recalcular_e_persistir_progresso_na_sessao(sessao, migracao_id)
-        job.status = "aplicado"
-        job.resultado = {
-            "criadas": criadas,
-            "atualizados": atualizados,
-            "nao_cadastrados": diff["nao_cadastrados"],
-        }
-        job.diff = None
-        job.erro = None
-        return job.resultado, None
 
 
 def calcular_resumo_modelos_local(migracao_id):

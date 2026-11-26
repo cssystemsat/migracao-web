@@ -201,6 +201,10 @@ class Cliente(Base):
 
     etapa: Mapped[str] = mapped_column(default="marco-1")
     estagio: Mapped[str] = mapped_column(default="implantacao")
+    # Fase de vida em que o cliente ENTROU (nunca muda depois da criação) —
+    # cliente antigo que entra direto em Onboarding/Ongoing não conta nos
+    # dados das fases anteriores (ver clientes_sql.fases_entrada_que_contam).
+    fase_entrada: Mapped[str] = mapped_column(default="implantacao", server_default="implantacao")
     momento: Mapped[str] = mapped_column(default="")
     flag: Mapped[str] = mapped_column(default="")
     persona: Mapped[str] = mapped_column(default="")
@@ -522,13 +526,28 @@ class Migracao(Base):
     data_fim: Mapped[str] = mapped_column(default="")
     motivo: Mapped[str] = mapped_column(default="")
 
+    # Encerramento (finalizada/cancelada) — vai pro Histórico da aba Migração
+    # da Ficha. resultado: "concluida" | "concluida_pendencias" (vazio se
+    # cancelada). snapshot_encerramento: números congelados no encerramento,
+    # pra o histórico não mudar depois (ver migracoes_sql.snapshot_encerramento).
+    resultado: Mapped[str] = mapped_column(default="", server_default="")
+    resumo: Mapped[str] = mapped_column(Text, default="", server_default="")
+    pendencias: Mapped[str] = mapped_column(Text, default="", server_default="")
+    encerrado_por: Mapped[str] = mapped_column(default="", server_default="")
+    snapshot_encerramento: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     __table_args__ = (
         Index("ix_migracoes_cliente_status", "cliente_id", "status"),
     )
 
 
 class MigracaoSsxSyncJob(Base):
-    """Prévia de sincronização SSX persistida até o usuário aplicá-la."""
+    """Prévia de sincronização SSX persistida até o usuário aplicá-la.
+
+    DESATIVADO (2026-11-26): a sincronização de veículos com a SSX foi
+    removida — veículos da migração entram só pela planilha (ver
+    docs/HISTORICO_DECISOES.md). Model/tabela mantidos só pra não exigir
+    migração de schema destrutiva; nada mais grava aqui."""
 
     __tablename__ = "migracao_ssx_sync_jobs"
 

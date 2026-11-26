@@ -35,6 +35,21 @@ def resolver_responsavel(nome):
         return (usuario.id, nome) if usuario else (None, nome)
 
 
+# Fases de vida, em ordem (Implantação -> Onboarding -> Ongoing). Regra pros
+# dados/KPIs de cada fase: só contam clientes que ENTRARAM nela ou numa fase
+# anterior — cliente antigo cadastrado direto em Ongoing não entra em
+# Implantação nem em Onboarding; direto em Onboarding não entra em
+# Implantação. (Implantação, hoje, já filtra por `tem_implantacao`, que
+# coincide com isso pra cliente novo; usar esta função nos KPIs de
+# Onboarding/Ongoing quando eles existirem.)
+FASES_VIDA_ORDEM = ["implantacao", "onboarding", "ongoing"]
+
+
+def fases_entrada_que_contam(fase):
+    """Valores de `fase_entrada` que contam nos dados da `fase` dada."""
+    return FASES_VIDA_ORDEM[: FASES_VIDA_ORDEM.index(fase) + 1]
+
+
 def _cliente_para_dict(c):
     return {
         "id": c.id,
@@ -51,6 +66,7 @@ def _cliente_para_dict(c):
         "vendedor": c.vendedor_nome,
         "etapa": c.etapa,
         "estagio": c.estagio,
+        "fase_entrada": c.fase_entrada,
         "momento": c.momento,
         "flag": c.flag,
         "persona": c.persona,

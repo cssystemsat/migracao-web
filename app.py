@@ -1181,6 +1181,16 @@ def tela_migracao():
     return _renderizar_shell()
 
 
+@app.route("/onboarding")
+def tela_clientes_onboarding():
+    return _renderizar_shell()
+
+
+@app.route("/ongoing")
+def tela_clientes_ongoing():
+    return _renderizar_shell()
+
+
 @app.route("/crm/dashboard")
 def tela_dashboard_crm():
     return _renderizar_shell()
@@ -1926,7 +1936,8 @@ ROTULOS_CLIENTE = {
     "objetivo": "Objetivo",
     "valor_contrato": "Valor do contrato",
     "csm": "CSM",
-    "estagio": "Estágio",
+    "estagio": "Fase de vida",
+    "fase_entrada": "Fase de entrada",
     "momento": "Momento do cliente",
     "flag": "Flag",
     "vendedor": "Vendedor",
@@ -2049,6 +2060,16 @@ def criar_cliente():
     dados = _dados_cliente(data)
     if dados is None:
         return jsonify(ok=False, error="Informe o IdCentral do cliente."), 400
+    # Cliente que já nasce em Onboarding/Ongoing (cadastrado direto nessas
+    # listas, antes do processo de Implantação existir) não passou por
+    # Implantação: tem_implantacao=False tira ele do Controle/Dashboard e de
+    # todos os KPIs de Implantação (que filtram por esse campo) e evita o
+    # objetivo universal "IMPLANTAÇÃO" (ver clientes_sql.criar_cliente).
+    if dados["estagio"] != ESTAGIO_CLIENTE_PADRAO:
+        dados["tem_implantacao"] = False
+    # Fase de entrada = fase escolhida na criação; nunca mais muda (o PUT de
+    # edição não mexe nela). Ver clientes_sql.fases_entrada_que_contam.
+    dados["fase_entrada"] = dados["estagio"]
     try:
         cliente = clientes_sql.criar_cliente(dados)
     except clientes_sql.IdCentralEmUsoError:
@@ -2085,6 +2106,18 @@ def editar_cliente(cliente_id):
     # geral não manda esse campo, então sem isso qualquer edição comum
     # apagaria o texto.
     dados["descricao_implantacao"] = atual["descricao_implantacao"]
+    # Fase de vida (estagio): só muda quando o payload manda o campo —
+    # _dados_cliente() cai no padrão "implantacao" quando ele falta, e
+    # qualquer cliente de outro lugar que não mande o campo devolveria um
+    # cliente de Onboarding/Ongoing pra Implantação sem ninguém pedir.
+    if "estagio" not in data:
+        dados["estagio"] = atual["estagio"]
+    # Mesma armadilha do estagio: _dados_cliente() assume True quando o campo
+    # não vem, e nenhum formulário de edição manda — editar um cliente que
+    # nasceu só pela Migração ou direto em Onboarding/Ongoing o colocaria na
+    # Implantação (e nos KPIs dela) sem ninguém pedir.
+    if "tem_implantacao" not in data:
+        dados["tem_implantacao"] = atual["tem_implantacao"]
     mudancas = diff_campos(atual, dados, ROTULOS_CLIENTE)
     try:
         cliente = clientes_sql.atualizar_cliente(cliente_id, dados)
@@ -3208,6 +3241,109 @@ def modelo_import_clientes():
     )
 
 
+# Aba "CHURNS" da MESMA planilha de CS (ver PLANILHA_CS_URL acima) — leitura
+# só (nunca escreve de volta nela, diferente do board React de referência que
+# tinha edição de motivo/persona/boleto + análise por IA; ficou de fora desta
+# rodada por depender de integração nova — ver conversa). Colunas pela posição
+# (sem cabeçalho nomeado), igual ao projeto de referência que inspirou esta tela.
+CHURN_SHEET_URL = (
+    "https://docs.google.com/spreadsheets/d/1EJnd8R_3dSSBn9ERl3nRcYcBZWJJiI16tkuaT026Hhc"
+    "/export?format=csv&gid=1060737054"
+)
+
+
+def _buscar_planilha_churn():
+    r = requests.get(CHURN_SHEET_URL, timeout=20)
+    r.raise_for_status()
+    return pd.read_csv(io.BytesIO(r.content), dtype=str, keep_default_na=False, header=None)
+
+
+def _col(row, i):
+    return str(row[i]).strip() if i < len(row) and row[i] is not None else ""
+
+
+def _linha_churn_para_dict(row, indice_linha):
+    data_saida = _col(row, 7)
+    boleto = _col(row, 17)
+    idcentral = _col(row, 18)
+    nome = _col(row, 0)
+    try:
+        meses_casa = int(_col(row, 8) or 0)
+    except ValueError:
+        meses_casa = 0
+    return {
+        "id": f"{idcentral or nome}-{indice_linha}",
+        "nome": nome,
+        "tipo": _col(row, 1),
+        "persona": _col(row, 2),
+        "situacao": _col(row, 3),
+        "decisor": _col(row, 4),
+        "numero": _col(row, 5),
+        "data_entrada": _col(row, 6),
+        "data_saida": data_saida,
+        "data_saida_iso": _parse_data_planilha(data_saida),
+        "meses_casa": meses_casa,
+        "objetivo": _col(row, 9),
+        "csm": _col(row, 10),
+        "vendedor": _col(row, 11),
+        "motivo_cancelamento": _col(row, 12),
+        "motivo_cliente": _col(row, 13),
+        "motivo_csm": _col(row, 14),
+        "motivo_financeiro": _col(row, 15),
+        "motivo_comercial": _col(row, 16),
+        "boleto": boleto,
+        "boleto_valor": _parse_valor_planilha(boleto) if boleto else None,
+        "idcentral": idcentral,
+    }
+
+
+def _carregar_churn_registros():
+    df = _buscar_planilha_churn()
+    registros = []
+    # Linha 0 é cabeçalho (sem nome de coluna, só posição) — começa na 1.
+    for indice_linha in range(1, len(df)):
+        row = df.iloc[indice_linha].tolist()
+        if not _col(row, 0):
+            continue
+        registros.append(_linha_churn_para_dict(row, indice_linha))
+    return registros
+
+
+@app.route("/api/churn")
+def listar_churn():
+    return jsonify(ok=True, registros=_cache_api_obter("churn", _carregar_churn_registros, ttl=300))
+
+
+CHURN_EXPORT_COLUNAS = [
+    ("nome", "Cliente"), ("tipo", "Tipo"), ("persona", "Persona"),
+    ("data_entrada", "Entrada"), ("data_saida", "Saída"), ("meses_casa", "Tempo (meses)"),
+    ("motivo_cliente", "Motivo Cliente"), ("motivo_csm", "Motivo CSM"),
+    ("motivo_financeiro", "Motivo Financeiro"), ("motivo_comercial", "Motivo Comercial"),
+    ("boleto", "Boleto"), ("csm", "CSM"), ("vendedor", "Vendedor"),
+]
+
+
+@app.route("/api/churn/exportar", methods=["POST"])
+def exportar_churn():
+    # Recebe os registros JÁ filtrados pelo front (mesmos filtros da tela) —
+    # evita duplicar a lógica de filtro no backend só pra exportação.
+    data = request.get_json(force=True) or {}
+    registros = data.get("registros") or []
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append([rotulo for _, rotulo in CHURN_EXPORT_COLUNAS])
+    for r in registros:
+        ws.append([r.get(campo, "") for campo, _ in CHURN_EXPORT_COLUNAS])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="churns.xlsx"'},
+    )
+
+
 @app.route("/api/clientes/importar/preview", methods=["POST"])
 @requer_operador
 def preview_import_clientes():
@@ -3848,17 +3984,40 @@ CAMPOS_MIGRACAO_ATTEMPT_PADRAO = {
 }
 
 
+# Migração encerrada (concluída/cancelada) é histórico congelado: nenhuma
+# rota de escrita em /api/clientes/<id>/migracoes/<id>/... pode alterá-la
+# (veículos, modelos, planilha, verificação, edição). Uma trava central aqui
+# cobre todas as rotas — inclusive as que nem buscam a migração antes de
+# gravar (ex.: PUT/DELETE de veículo por id).
+_RE_ROTA_MIGRACAO = re.compile(r"^/api/clientes/\d+/migracoes/(\d+)(/|$)")
+
+
+@app.before_request
+def _bloquear_escrita_em_migracao_encerrada():
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+        return None
+    m = _RE_ROTA_MIGRACAO.match(request.path)
+    if not m:
+        return None
+    migracao = migracoes_sql.buscar_migracao(int(m.group(1)))
+    if migracao and migracao.get("status") != "em_andamento":
+        return jsonify(ok=False, error="Essa migração já foi encerrada e está no histórico — não pode mais ser alterada."), 400
+    return None
+
+
+def _usuario_atual_nome():
+    return session.get("app_usuario_responsavel") or session.get("app_usuario_nome", "")
+
+
+RESULTADOS_MIGRACAO = {"concluida": "Concluída", "concluida_pendencias": "Concluída com pendências"}
+
+
 def _migracao_atual(migracoes):
-    """De uma lista de tentativas de migração de um cliente (mais recente
-    primeiro), escolhe a "atual": a que está em_andamento, senão a mais
-    recente. None se a lista for vazia. Mesma regra usada na Ficha do Cliente
-    e na listagem da tela de Migração — um cliente só aparece com UMA
-    tentativa mesmo tendo histórico de tentativas antigas/canceladas."""
-    migracoes_ordenadas = sorted(migracoes, key=lambda m: m.get("data_inicio") or "", reverse=True)
-    atual = next((m for m in migracoes_ordenadas if m.get("status") == "em_andamento"), None)
-    if atual is None and migracoes_ordenadas:
-        atual = migracoes_ordenadas[0]
-    return atual
+    """A migração ATIVA (em_andamento) do cliente, ou None. Só existe uma por
+    vez; as encerradas (concluída/cancelada) ficam no Histórico da aba
+    Migração da Ficha (lista completa em "migracoes") — não contam mais como
+    "atual" (antes caía na mais recente encerrada)."""
+    return next((m for m in migracoes if m.get("status") == "em_andamento"), None)
 
 
 @app.route("/api/clientes/<int:cliente_id>/migracoes", methods=["GET"])
@@ -3870,8 +4029,10 @@ def listar_migracoes_cliente(cliente_id):
 
 @app.route("/api/clientes/<int:cliente_id>/migracoes", methods=["POST"])
 def iniciar_migracao_cliente(cliente_id):
-    """Cria uma nova tentativa de migração — é o que o toggle "Tem Migração?
-    Sim" do cadastro do cliente chama. Recusa se já existir uma em andamento."""
+    """Cria a migração ATIVA de um cliente já cadastrado ("+ Adicionar
+    migração" do Controle de Migração ou "Iniciar migração" da Ficha) — o
+    resto (plataforma, planilha, acesso) é preenchido depois, na aba Migração
+    da Ficha. Só uma ativa por vez: recusa se já existir uma em andamento."""
     if not clientes_sql.buscar_cliente_por_id(cliente_id):
         return jsonify(ok=False, error="Cliente não encontrado."), 404
     if migracoes_sql.tem_migracao_em_andamento(cliente_id):
@@ -3919,7 +4080,34 @@ def finalizar_migracao_cliente(cliente_id, migracao_id):
     atual = migracoes_sql.buscar_migracao(migracao_id)
     if not atual or atual["cliente_id"] != cliente_id:
         return jsonify(ok=False, error="Migração não encontrada."), 404
-    migracao = migracoes_sql.finalizar_migracao(migracao_id, time.strftime("%Y-%m-%d"))
+    # Formulário de finalização (vai pro Histórico da Ficha): resultado +
+    # resumo + pendências + data de término; quem finalizou e os números de
+    # veículos são automáticos (congelados agora).
+    data = request.get_json(silent=True) or {}
+    resultado = str(data.get("resultado", "")).strip()
+    if resultado not in RESULTADOS_MIGRACAO:
+        return jsonify(ok=False, error="Informe o resultado da migração."), 400
+    resumo = str(data.get("resumo", "")).strip()
+    if not resumo:
+        return jsonify(ok=False, error="Descreva o que aconteceu na migração."), 400
+    pendencias = str(data.get("pendencias", "")).strip()
+    if resultado == "concluida_pendencias" and not pendencias:
+        return jsonify(ok=False, error="Descreva as pendências encontradas."), 400
+    data_fim = str(data.get("data_fim", "")).strip() or time.strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(data_fim, "%Y-%m-%d")
+    except ValueError:
+        return jsonify(ok=False, error="Data de término inválida."), 400
+    snapshot = dict(
+        migracoes_sql.snapshot_encerramento(migracao_id),
+        plataforma_origem=atual.get("plataforma_origem", ""),
+        link_planilha=atual.get("link_planilha", ""),
+        etapa=atual.get("etapa", ""),
+    )
+    migracao = migracoes_sql.finalizar_migracao(
+        migracao_id, data_fim, resultado=resultado, resumo=resumo, pendencias=pendencias,
+        encerrado_por=_usuario_atual_nome(), snapshot=snapshot,
+    )
     link_planilha = atual.get("link_planilha")
     aviso_planilha = None
     if link_planilha:
@@ -3988,8 +4176,15 @@ def cancelar_migracao_cliente(cliente_id, migracao_id):
     # estourava 400 do próprio Flask ao tentar decodificar corpo vazio como
     # JSON, antes mesmo de chegar aqui.
     data = request.get_json(silent=True) or {}
+    snapshot = dict(
+        migracoes_sql.snapshot_encerramento(migracao_id),
+        plataforma_origem=atual.get("plataforma_origem", ""),
+        link_planilha=atual.get("link_planilha", ""),
+        etapa=atual.get("etapa", ""),
+    )
     migracao = migracoes_sql.cancelar_migracao(
         migracao_id, time.strftime("%Y-%m-%d"), str(data.get("motivo", "")).strip(),
+        encerrado_por=_usuario_atual_nome(), snapshot=snapshot,
     )
     return jsonify(ok=True, status=migracao["status"], data_fim=migracao["data_fim"], motivo=migracao["motivo"])
 
@@ -4072,7 +4267,9 @@ def _carregar_clientes_migracao():
         # ar pros outros.
         try:
             migracoes = migracoes_por_cliente.get(cliente["id"], [])
-            m = _migracao_atual(migracoes)
+            # Só a migração ATIVA aparece no Controle (Kanban/lista) — as
+            # encerradas ficam no Histórico da aba Migração da Ficha.
+            m = next((x for x in migracoes if x.get("status") == "em_andamento"), None)
             if m is None:
                 continue
             lista.append({
@@ -4459,7 +4656,11 @@ def importar_veiculos_planilha_cliente(cliente_id, migracao_id):
     )
 
 
-# --- Sincronização de Veículos SSX + Verificação de Comunicação ---
+# --- Verificação de Comunicação SSX ---
+# (A Sincronização de Veículos SSX — que puxava os veículos da plataforma pra
+# migração — foi removida em 2026-11-26: veículos entram só pela planilha,
+# ver docs/HISTORICO_DECISOES.md. A verificação só CONSULTA as listas de
+# comunicação e marca os veículos da própria migração; não grava cadastro.)
 # Mesmo padrão de job/thread/polling de deletar_veiculos_executar/
 # _executar_deletar_veiculos (app.py, seção "DELETAR VEÍCULOS EM MASSA") —
 # token resolvido na requisição, thread não depende de `session`. Ver plano
@@ -4468,79 +4669,6 @@ VERIFICAR_COMUNICACAO_SSX_JOBS = {}
 VERIFICAR_COMUNICACAO_SSX_JOBS_LOCK = threading.Lock()
 SSX_LIST_TIMEOUT_SEGUNDOS = 120
 SSX_LIST_RETRIES = 1
-
-
-def _executar_sincronizar_veiculos_ssx(job_id, migracao_id, token):
-    try:
-        veiculos_locais = migracoes_sql.listar_veiculos(migracao_id)
-        veiculos_ssx = requisicao_padrao(
-            "/Administration/Vehicle/List", None, token,
-            timeout=SSX_LIST_TIMEOUT_SEGUNDOS, retries=SSX_LIST_RETRIES,
-        )
-        modelos_rastreador = requisicao_padrao(
-            "/Administration/Tracker/ListTrackerModel", None, token,
-            timeout=SSX_LIST_TIMEOUT_SEGUNDOS, retries=SSX_LIST_RETRIES,
-        )
-        diff = ssx_veiculos_sync.calcular_diff_sincronizacao(
-            veiculos_locais,
-            veiculos_ssx or [],
-            modelos_rastreador or [],
-        )
-        migracoes_sql.atualizar_job_sincronizacao_ssx(job_id, "concluido", diff=diff)
-    except requests.exceptions.RequestException as e:
-        migracoes_sql.atualizar_job_sincronizacao_ssx(
-            job_id, "erro", erro=f"Falha ao consultar a SSX: {e}"
-        )
-    except Exception as e:
-        app.logger.exception("Falha inesperada na sincronização SSX (job %s)", job_id)
-        migracoes_sql.atualizar_job_sincronizacao_ssx(
-            job_id, "erro", erro=f"Falha ao processar a sincronização: {e}"
-        )
-
-
-@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/sincronizar", methods=["POST"])
-@requer_operador
-def sincronizar_veiculos_ssx_iniciar(cliente_id, migracao_id):
-    migracao = migracoes_sql.buscar_migracao(migracao_id)
-    if not migracao or migracao["cliente_id"] != cliente_id:
-        return jsonify(ok=False, error="Migração não encontrada."), 404
-    token, erro_resp, status = _token_para_cliente(cliente_id)
-    if erro_resp:
-        return erro_resp, status
-
-    job_id = uuid.uuid4().hex
-    migracoes_sql.criar_job_sincronizacao_ssx(migracao_id, job_id)
-    threading.Thread(
-        target=_executar_sincronizar_veiculos_ssx,
-        args=(job_id, migracao_id, token),
-        daemon=True,
-    ).start()
-    return jsonify(ok=True, job_id=job_id)
-
-
-@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/sincronizar/status/<job_id>")
-def sincronizar_veiculos_ssx_status(cliente_id, migracao_id, job_id):
-    migracao = migracoes_sql.buscar_migracao(migracao_id)
-    if not migracao or migracao["cliente_id"] != cliente_id:
-        return jsonify(ok=False, error="Migração não encontrada."), 404
-    resultado = migracoes_sql.buscar_job_sincronizacao_ssx(migracao_id, job_id)
-    if not resultado:
-        return jsonify(ok=False, error="Job não encontrado."), 404
-    return jsonify(ok=True, **resultado)
-
-
-@app.route("/api/clientes/<int:cliente_id>/migracoes/<int:migracao_id>/veiculos/sincronizar/aplicar/<job_id>", methods=["POST"])
-@requer_operador
-def sincronizar_veiculos_ssx_aplicar(cliente_id, migracao_id, job_id):
-    migracao = migracoes_sql.buscar_migracao(migracao_id)
-    if not migracao or migracao["cliente_id"] != cliente_id:
-        return jsonify(ok=False, error="Migração não encontrada."), 404
-    resultado, erro = migracoes_sql.aplicar_job_sincronizacao_ssx(migracao_id, job_id)
-    if erro == "nao_encontrado":
-        return jsonify(ok=False, error="Job não encontrado para esta migração."), 404
-    if erro:
-        return jsonify(ok=False, error="Resultado da sincronização não encontrado. Rode a sincronização novamente."), 400
-    return jsonify(ok=True, **resultado)
 
 
 def _executar_verificar_comunicacao_ssx(job_id, migracao_id, token):
