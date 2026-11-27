@@ -520,6 +520,14 @@ Serve para avisos e alinhamentos que não cabem numa tarefa nem num cliente
 específico. Publicação e comentário podem marcar outro usuário com `@`
 (autocomplete) — quem é marcado recebe notificação (ver "Notificações").
 
+- Publicação não é vinculada a cliente (o seletor de cliente foi removido em
+  2026-11-26; posts antigos com cliente continuam no banco, mas o nome do
+  cliente não aparece mais no card).
+- Publicação pode ter até 4 imagens (JPG, PNG, WEBP ou GIF), pelo botão
+  "Imagem" ou colando (Ctrl+V) no campo de texto. Texto fica opcional quando
+  há imagem. As imagens são redimensionadas no navegador (lado maior até
+  1600px) antes de enviar; GIF vai como está. Clicar abre em tamanho real.
+
 ## Notificações (sininho)
 
 Sem pop-up/toast — só um contador de não lidas no sininho da topbar; a
@@ -528,6 +536,8 @@ lida ao ser clicada (ou todas de uma vez, pelo botão "Marcar todas como
 lidas"). Gera notificação quando:
 
 - Alguém cria uma tarefa pra você (responsável).
+- Uma tarefa que você criou (delegou) é concluída ou cancelada pelo
+  responsável — o texto traz o título da tarefa.
 - Uma tarefa sua (responsável) está a 3 dias, a 1 dia, no dia do
   vencimento, ou já passou do prazo sem estar concluída.
 - Um cliente seu (responsável/CSM) responde uma avaliação de NPS (Wootric).
@@ -536,6 +546,26 @@ lidas"). Gera notificação quando:
 
 Quem gera o evento nunca recebe notificação do próprio evento (ex.: criar
 tarefa pra si mesmo, curtir o próprio post).
+
+## Equipe (página de cada funcionário)
+
+Menu lateral "Equipe" (`/equipe`): grade com todos os usuários (foto ou
+iniciais, nome e área), com busca por nome/área. Clicar abre a página da
+pessoa (`/equipe/<usuario_id>`); clicar no nome do autor de uma publicação
+do Feed (ou de um comentário), ou num `@nome` marcado num post/comentário,
+também leva pra lá.
+
+A página é interna: qualquer usuário logado vê, mas não fica aberta na
+internet. Mostra:
+- Contato: aniversário, celular (com link de ligação e de WhatsApp) e
+  e-mail. Os dados vêm de "Minha conta"; o que estiver vazio aparece como
+  "Não informado".
+- Clientes da carteira: onde a pessoa é Responsável (CS) e/ou Consultor
+  Comercial. Clicar abre a Ficha.
+- Tarefas entre vocês: as que você passou pra ela e as que ela passou pra
+  você (pendentes; as concluídas aparecem com "Mostrar concluídas"). Na
+  própria página esse bloco some, porque as suas tarefas ficam em Minha
+  conta.
 
 ## Minha conta / Gerenciar usuários
 

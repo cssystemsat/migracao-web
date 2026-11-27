@@ -1248,6 +1248,44 @@ def tela_feed():
     return _renderizar_shell()
 
 
+@app.route("/equipe")
+@app.route("/equipe/<usuario_id>")
+def tela_equipe(usuario_id=None):
+    return _renderizar_shell()
+
+
+# --- EQUIPE (página de cada funcionário, visível pra todos os logados) ---
+@app.route("/api/equipe")
+def api_listar_equipe():
+    return jsonify(ok=True, usuarios=usuarios_sql.listar_equipe())
+
+
+@app.route("/api/equipe/<usuario_id>")
+def api_perfil_equipe(usuario_id):
+    """Perfil + carteira de clientes + tarefas entre quem está vendo e essa
+    pessoa (as que um passou pro outro). Na própria página, tarefas vem vazio
+    — as próprias ficam em Minha Conta."""
+    perfil = usuarios_sql.perfil_publico(usuario_id)
+    if not perfil:
+        return jsonify(ok=False, error="Funcionário não encontrado."), 404
+    eu = session.get("app_usuario_id", "")
+    tarefas = tarefas_sql.listar_entre(eu, usuario_id) if eu and eu != usuario_id else []
+    return jsonify(
+        ok=True, perfil=perfil, eu_mesmo=(eu == usuario_id),
+        clientes=clientes_sql.listar_clientes_do_usuario(usuario_id), tarefas=tarefas,
+    )
+
+
+@app.route("/api/equipe/<usuario_id>/foto")
+def api_foto_equipe(usuario_id):
+    foto = usuarios_sql.obter_foto(usuario_id)
+    if not foto or not foto.startswith("data:"):
+        return "", 404
+    cabecalho, _, b64 = foto.partition(",")
+    mimetype = cabecalho.split(":")[1].split(";")[0] if ":" in cabecalho else "image/jpeg"
+    return Response(base64.b64decode(b64), mimetype=mimetype, headers={"Cache-Control": "private, max-age=300"})
+
+
 # Sub-telas de Ferramentas Auxiliares (cards -> Área de Importação e Consulta /
 # Envio de Comandos) — mesmo racional das rotas acima, quem decide o conteúdo é
 # o JS lendo o path; <sub> nem precisa ser validado aqui.
@@ -2874,9 +2912,8 @@ def api_diagnostico_prontidao(cliente_id):
 @app.route("/api/clientes/<int:cliente_id>/implantado", methods=["PUT"])
 def salvar_implantado_cliente(cliente_id):
     """Switch "Implantado" — decisão da equipe, de propósito independente dos
-    marcos (a regra de "quando conta como implantado" ainda não está fechada;
-    a tela só sugere ligar quando o Marco 3/passagem conclui). Guarda quando e
-    quem ligou; desligar limpa os dois."""
+    marcos (concluir um marco não liga o "Implantado" nem sugere ligar).
+    Guarda quando e quem ligou; desligar limpa os dois."""
     data = request.get_json(force=True) or {}
     doc_atual_dict = clientes_sql.buscar_cliente_por_id(cliente_id)
     if not doc_atual_dict:
@@ -3689,6 +3726,8 @@ NOTIFICACAO_TEXTOS = {
     "tarefa_prazo_1d": lambda n: "Uma tarefa sua vence em 1 dia",
     "tarefa_prazo_hoje": lambda n: "Uma tarefa sua vence hoje",
     "tarefa_atrasada": lambda n: "Uma tarefa sua está atrasada",
+    "tarefa_concluida": lambda n: f"{n} concluiu uma tarefa que você criou",
+    "tarefa_cancelada": lambda n: f"{n} cancelou uma tarefa que você criou",
     "nps": lambda n: "Seu cliente respondeu uma avaliação de NPS",
     "mencao": lambda n: f"{n} te marcou numa publicação do Feed",
     "comentario": lambda n: f"{n} comentou na sua publicação",
@@ -3696,8 +3735,11 @@ NOTIFICACAO_TEXTOS = {
 }
 
 
-def _notificar(usuario_id, tipo, entidade_tipo="", entidade_id=None, origem_usuario_id=None, origem_usuario_nome=""):
+def _notificar(usuario_id, tipo, entidade_tipo="", entidade_id=None, origem_usuario_id=None, origem_usuario_nome="",
+               detalhe=""):
     texto = NOTIFICACAO_TEXTOS[tipo](origem_usuario_nome)
+    if detalhe:
+        texto = f"{texto}: “{detalhe}”"
     notificacoes_sql.criar_notificacao(
         usuario_id, tipo, texto, entidade_tipo=entidade_tipo, entidade_id=entidade_id,
         origem_usuario_id=origem_usuario_id, origem_usuario_nome=origem_usuario_nome,
@@ -3970,11 +4012,20 @@ def concluir_tarefa(tarefa_id):
     descricao = str(data.get("descricao", "")).strip()[:1000]
     if resultado == "cancelada" and not descricao:
         return jsonify(ok=False, error="Descreva por que a tarefa foi cancelada."), 400
+    quem_encerrou = session.get("app_usuario_responsavel") or session.get("app_usuario_nome", "")
     tarefas_sql.concluir_tarefa(
-        tarefa_id, resultado, descricao,
-        session.get("app_usuario_responsavel") or session.get("app_usuario_nome", ""),
-        time.strftime("%Y-%m-%d"),
+        tarefa_id, resultado, descricao, quem_encerrou, time.strftime("%Y-%m-%d"),
     )
+    # Avisa quem delegou (criou) a tarefa. Se quem encerrou foi o próprio
+    # criador, criar_notificacao ignora (não notifica o autor do evento).
+    if not dados_atuais.get("concluida"):
+        _notificar(
+            dados_atuais.get("criado_por", ""),
+            "tarefa_concluida" if resultado == "concluida" else "tarefa_cancelada",
+            entidade_tipo="tarefa", entidade_id=tarefa_id,
+            origem_usuario_id=session.get("app_usuario_id", ""), origem_usuario_nome=quem_encerrou,
+            detalhe=dados_atuais.get("titulo", ""),
+        )
     registrar_acao(
         acao="concluir" if resultado == "concluida" else "cancelar", entidade_tipo="tarefa", entidade_id=tarefa_id,
         entidade_nome=dados_atuais.get("titulo", ""),
@@ -8744,10 +8795,15 @@ def conversor_download(conv_id, formato, parte):
 
 
 # --- FEED (publicações da equipe, estilo comunidade: curtidas e comentários) ---
-# Publicação pode ser geral ou vinculada a um cliente.
+# Publicação não é vinculada a cliente (o seletor saiu do composer; posts
+# antigos podem ter cliente_id, a coluna continua no banco). Pode levar até
+# FEED_IMAGENS_MAX imagens, já redimensionadas no navegador.
 FEED_PAGINA = 20
 FEED_PAGINA_MAX = 100
 FEED_TEXTO_MAX = 2000
+FEED_IMAGENS_MAX = 4
+FEED_IMAGEM_MAX_CHARS = 1_500_000
+FEED_IMAGEM_TIPOS = ("data:image/jpeg;", "data:image/png;", "data:image/webp;", "data:image/gif;")
 
 
 def _feed_pode_excluir(autor_id):
@@ -8757,6 +8813,21 @@ def _feed_pode_excluir(autor_id):
 def _feed_texto_valido(data):
     texto = str(data.get("texto", "")).strip()
     return texto if texto and len(texto) <= FEED_TEXTO_MAX else None
+
+
+def _feed_imagens_validas(data):
+    """Devolve (lista_de_data_urls, erro). Lista vazia é válido."""
+    imagens = data.get("imagens") or []
+    if not isinstance(imagens, list):
+        return None, "Imagens inválidas."
+    if len(imagens) > FEED_IMAGENS_MAX:
+        return None, f"No máximo {FEED_IMAGENS_MAX} imagens por publicação."
+    for imagem in imagens:
+        if not isinstance(imagem, str) or not imagem.startswith(FEED_IMAGEM_TIPOS) or ";base64," not in imagem:
+            return None, "Formato de imagem não aceito (use JPG, PNG, WEBP ou GIF)."
+        if len(imagem) > FEED_IMAGEM_MAX_CHARS:
+            return None, "Imagem muito grande — tente uma menor."
+    return imagens, None
 
 
 def _feed_notificar_mencionados(data, entidade_id, origem_usuario_id, origem_usuario_nome):
@@ -8841,31 +8912,36 @@ def obter_post_feed(post_id):
 @requer_operador
 def criar_post_feed():
     data = request.get_json(force=True) or {}
-    texto = _feed_texto_valido(data)
-    if texto is None:
-        return jsonify(ok=False, error=f"Escreva a publicação (até {FEED_TEXTO_MAX} caracteres)."), 400
-
-    cliente_id_raw = str(data.get("cliente_id", "")).strip()
-    cliente_id, cliente_nome = None, ""
-    if cliente_id_raw:
-        if not cliente_id_raw.isdigit():
-            return jsonify(ok=False, error="Cliente não encontrado."), 404
-        cliente = clientes_sql.buscar_cliente_por_id(int(cliente_id_raw))
-        if not cliente:
-            return jsonify(ok=False, error="Cliente não encontrado."), 404
-        cliente_id, cliente_nome = cliente["id"], cliente["cliente"]
+    imagens, erro_imagens = _feed_imagens_validas(data)
+    if erro_imagens:
+        return jsonify(ok=False, error=erro_imagens), 400
+    # Só imagem (sem texto) também vale como publicação.
+    texto = str(data.get("texto", "")).strip()
+    if len(texto) > FEED_TEXTO_MAX or (not texto and not imagens):
+        return jsonify(ok=False, error=f"Escreva a publicação (até {FEED_TEXTO_MAX} caracteres) ou anexe uma imagem."), 400
 
     post = feed_sql.criar_post(
         texto=texto, autor_id=session.get("app_usuario_id", ""), autor_nome=session.get("app_usuario_nome", ""),
-        cliente_id=cliente_id, cliente_nome=cliente_nome,
+        cliente_id=None, cliente_nome="", imagens=imagens,
     )
     registrar_acao(
         acao="criar", entidade_tipo="post", entidade_id=post["id"],
-        entidade_nome=texto[:80], titulo="Publicação no feed",
-        cliente_id=cliente_id, cliente_nome=cliente_nome,
+        entidade_nome=(texto or f"[{len(imagens)} imagem(ns)]")[:80], titulo="Publicação no feed",
     )
     _feed_notificar_mencionados(data, post["id"], post["autor_id"], post["autor_nome"])
     return jsonify(ok=True, post=post)
+
+
+@app.route("/api/feed/imagem/<int:imagem_id>")
+def imagem_post_feed(imagem_id):
+    """Serve a imagem anexada como arquivo de verdade (o JSON do feed só
+    leva os ids). Id é sequencial e a imagem não muda — cache longo."""
+    imagem = feed_sql.obter_imagem(imagem_id)
+    if not imagem or not imagem.startswith("data:"):
+        return "", 404
+    cabecalho, _, b64 = imagem.partition(",")
+    mimetype = cabecalho.split(":")[1].split(";")[0] if ":" in cabecalho else "image/jpeg"
+    return Response(base64.b64decode(b64), mimetype=mimetype, headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.route("/api/feed/<int:post_id>", methods=["DELETE"])

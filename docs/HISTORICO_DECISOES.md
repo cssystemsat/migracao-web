@@ -743,3 +743,38 @@ aparece pra quem tem migração ativa OU encerrada (Histórico). Pra lateral
 nascer certa sem esperar `/api/ficha`, `/api/clientes` passou a trazer
 `tem_migracoes` (1 consulta `DISTINCT cliente_id` em `migracoes`, não N+1) e
 a página aberta pela URL já vem com isso calculado (`_abas_ficha_do_cliente`).
+
+## Feed: sem cliente, com imagens (2026-11-26)
+
+A pedido da usuária, o seletor "Vincular a um cliente" saiu do composer do
+Feed e entrou o anexo de imagens. A coluna `feed_posts.cliente_id` foi
+mantida (não apaga dado de posts antigos); `POST /api/feed` só deixou de
+aceitar `cliente_id`. Imagens ficam no Postgres em tabela própria
+`feed_post_imagens` (data URL base64, FK `ON DELETE CASCADE`), seguindo a
+regra de anexo em tabela separada — o Render não tem disco persistente,
+então arquivo em disco não serve. A listagem leva só os ids; o binário sai
+por `GET /api/feed/imagem/<id>`. Limites: 4 imagens/post e ~1,5M chars por
+imagem (validado no servidor e no navegador).
+
+## Marco 3 não sugere mais "Implantado" (2026-11-27)
+
+A pedido da usuária, saiu a pergunta "Marco 3 concluído. Marcar o cliente
+como implantado?" que aparecia ao salvar os marcos. O switch "Implantado"
+segue sendo decisão manual da equipe (ou automático só pela fase de vida
+Onboarding/Ongoing, `FASES_SEMPRE_IMPLANTADO`); concluir marco nenhum liga
+ou sugere ligar o switch.
+
+## Página de cada funcionário: tela Equipe (2026-11-27)
+
+A pedido da usuária: página "pública" de cada funcionário, com clientes,
+tarefas entre as duas pessoas, aniversário, celular e e-mail. "Pública"
+foi interpretado como visível a todo usuário logado, não aberta na internet:
+a rota passa pelo mesmo `exigir_login_app` do resto do app. Não houve
+mudança de schema, porque todos os campos já existiam em `usuarios`
+(Minha conta), `clientes.responsavel_usuario_id`/`vendedor_usuario_id` e
+`tarefas.criado_por`/`responsavel_id`. A API (`/api/equipe`, `/api/equipe/<id>`)
+nunca devolve `senha_hash` nem perfil de acesso. As tarefas retornadas são só
+as que um passou pro outro, entre quem está vendo e a pessoa da página;
+ninguém vê tarefas entre dois terceiros. A foto sai por
+`/api/equipe/<id>/foto`, porque `/api/app-usuario/foto` serve só a do
+próprio usuário logado.

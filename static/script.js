@@ -878,8 +878,7 @@ function atualizarCampoImplantado(cliente) {
 }
 
 // Switch "Implantado" — salva na hora (endpoint próprio, com data/quem e
-// histórico), sem depender do "Salvar edição" do formulário. Também é
-// chamado pela sugestão que aparece quando o Marco 3 conclui.
+// histórico), sem depender do "Salvar edição" do formulário.
 async function salvarImplantadoCliente(cliente, implantado, recarregar = true) {
   try {
     const r = await fetch(`/api/clientes/${cliente.id}/implantado`, {
@@ -2444,14 +2443,6 @@ btnSalvarImplantacaoMarcos.addEventListener("click", async () => {
     // Rascunho salvo — sem isso o recarregar da Ficha abaixo pediria pra
     // "descartar alterações".
     marcosRascunhoAlterado = false;
-    const passagemAntes = (cliente.marcos_concluidos || []).includes("marco-3");
-
-    // Marco 3 (passagem pro Onboarding) acabou de concluir: só SUGERE ligar
-    // o "Implantado" — a decisão continua sendo da equipe.
-    if (!passagemAntes && data.marcos_concluidos.includes("marco-3") && !cliente.implantado
-        && confirm("Marco 3 concluído. Marcar o cliente como implantado?")) {
-      await salvarImplantadoCliente(cliente, true, false);
-    }
 
     // Recarrega a Ficha (cabeçalho, alertas, etapa) e volta pra aba Marcos,
     // no mesmo marco que estava aberto (construirFichaMarcos mantém).
@@ -20000,11 +19991,13 @@ const TELAS_NAV = {
   ficha: el("tela-ficha-cliente"),
   "minha-conta": el("tela-minha-conta"),
   feed: el("tela-feed"),
+  equipe: el("tela-equipe"),
   configuracoes: el("tela-configuracoes"),
 };
 const NAV_BOTOES = {
   dashboard: el("nav-dashboard"),
   feed: el("nav-feed"),
+  equipe: el("nav-equipe"),
   "dashboard-implantacao": el("nav-sub-dashboard-implantacao"),
   implantacao: el("nav-sub-implantacao"),
   migracao: el("nav-sub-migracao"),
@@ -20045,6 +20038,7 @@ const sidebarCliente = el("sidebar-cliente");
 const CAMINHO_POR_TELA = {
   dashboard: "/",
   feed: "/feed",
+  equipe: "/equipe",
   "dashboard-implantacao": "/implantacao/dashboard",
   implantacao: "/implantacao",
   migracao: "/migracao",
@@ -20060,6 +20054,7 @@ const CAMINHO_POR_TELA = {
 const TELA_POR_CAMINHO_RAIZ = {
   "/": "dashboard",
   "/feed": "feed",
+  "/equipe": "equipe",
   "/implantacao/dashboard": "dashboard-implantacao",
   "/implantacao": "implantacao",
   "/migracao": "migracao",
@@ -20141,6 +20136,8 @@ function resolverCaminho(caminho) {
       sub: FICHA_ABA_POR_SEGMENTO[segmento] || "geral",
     };
   }
+  const mEquipe = caminho.match(/^\/equipe\/([^/]+)$/);
+  if (mEquipe) return { tela: "equipe", usuarioId: decodeURIComponent(mEquipe[1]) };
   const mFerramentas = caminho.match(/^\/ferramentas\/([^/]+)$/);
   if (mFerramentas && FERRAMENTAS_SUBTELAS[mFerramentas[1]]) return { tela: "ferramentas", sub: mFerramentas[1] };
   const mConfig = caminho.match(/^\/configuracoes\/([^/]+)$/);
@@ -20340,6 +20337,7 @@ const topbarTitulo = el("topbar-titulo");
 const TITULO_TOPBAR_POR_TELA = {
   dashboard: "Dashboard",
   feed: "Feed",
+  equipe: "Equipe",
   "dashboard-implantacao": "Dashboard de Implantação",
   implantacao: "Controle de Implantação",
   migracao: "Controle de Migração",
@@ -20466,6 +20464,7 @@ function irParaTela(tela, opcoes) {
   if (!opcoes.semHistorico) {
     const caminho = naFicha
       ? caminhoFichaCliente(opcoes.idcentral, abaFichaSolicitada)
+      : tela === "equipe" && opcoes.usuarioId ? `/equipe/${encodeURIComponent(opcoes.usuarioId)}`
       : novoSub ? `/ferramentas/${novoSub}`
       : tela === "configuracoes" && novoSubConfig !== "admin" ? `/configuracoes/${novoSubConfig}`
       : (CAMINHO_POR_TELA[tela] || "/");
@@ -20473,6 +20472,7 @@ function irParaTela(tela, opcoes) {
       history.pushState({
         tela,
         idcentral: opcoes.idcentral,
+        usuarioId: tela === "equipe" ? (opcoes.usuarioId || undefined) : undefined,
         sub: naFicha ? abaFichaSolicitada : (tela === "configuracoes" ? novoSubConfig : novoSub),
         origem: naFicha ? fichaOrigem : undefined,
         indiceHistoricoApp: indiceHistoricoApp + 1,
@@ -20504,6 +20504,7 @@ function irParaTela(tela, opcoes) {
   if (tela === "clientes-onboarding") carregarClientesFase("onboarding");
   if (tela === "clientes-ongoing") carregarClientesFase("ongoing");
   if (tela === "feed") carregarFeed();
+  if (tela === "equipe") carregarEquipe(opcoes.usuarioId);
   if (tela === "ficha") carregarFichaCliente(opcoes.idcentral, abaFichaSolicitada);
   if (tela === "minha-conta") { carregarMinhaConta(); carregarMinhasTarefas(); }
   if (tela === "configuracoes") mostrarConfigPainel(novoSubConfig);
@@ -20612,6 +20613,48 @@ function attachMentionAutocomplete(campo) {
   });
 }
 
+// Transforma "@Nome" do texto em link pra página do funcionário (/equipe/<id>).
+// A menção não é gravada no banco — o texto guarda só "@Nome" exatamente como
+// o autocomplete inseriu (nome de /api/app-usuarios/opcoes), então reconhece
+// comparando com essa mesma lista, nome mais longo primeiro (pra "@Ana Lima"
+// não virar só "@Ana"). Vale também pra posts antigos. Nome que não bate com
+// nenhum usuário (renomeado, excluído, digitado à mão) fica como texto comum.
+function feedPreencherTextoComMencoes(elemento, texto) {
+  elemento.textContent = "";
+  texto = String(texto || "");
+  const usuarios = (mentionUsuariosCache || []).filter((u) => u.nome && u.id);
+  if (!usuarios.length || !texto.includes("@")) {
+    elemento.textContent = texto;
+    return;
+  }
+  const idPorNome = new Map();
+  usuarios.forEach((u) => { if (!idPorNome.has(u.nome.toLowerCase())) idPorNome.set(u.nome.toLowerCase(), u.id); });
+  const escapar = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const nomes = [...new Set(usuarios.map((u) => u.nome))].sort((a, b) => b.length - a.length).map(escapar);
+  // Só vale com o nome inteiro ("@Anabela" não é "@Ana") e fora de e-mail
+  // ("a@Ana.com" não é menção).
+  const regex = new RegExp(`(?<![\\p{L}\\p{N}_])@(${nomes.join("|")})(?![\\p{L}\\p{N}_])`, "giu");
+  let ultimo = 0;
+  for (const m of texto.matchAll(regex)) {
+    if (m.index > ultimo) elemento.appendChild(document.createTextNode(texto.slice(ultimo, m.index)));
+    const usuarioId = idPorNome.get(m[1].toLowerCase());
+    const link = document.createElement("a");
+    link.className = "feed-mencao";
+    link.href = `/equipe/${encodeURIComponent(usuarioId)}`;
+    link.textContent = m[0];
+    link.title = `Ver página de ${m[1]}`;
+    link.addEventListener("click", (ev) => {
+      // Ctrl/⌘+clique continua abrindo em outra aba (href de verdade).
+      if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button !== 0) return;
+      ev.preventDefault();
+      irParaPerfilEquipe(usuarioId);
+    });
+    elemento.appendChild(link);
+    ultimo = m.index + m[0].length;
+  }
+  if (ultimo < texto.length) elemento.appendChild(document.createTextNode(texto.slice(ultimo)));
+}
+
 // --- FEED (publicações da equipe, estilo comunidade) ---
 // Tudo é montado com createElement/textContent (nunca innerHTML com texto de
 // usuário). Sem atualização automática: cada leitura do feed custa leituras no
@@ -20622,7 +20665,14 @@ const FEED_TEXTO_MAX_CLIENTE = 2000;
 const FEED_PAGINA_CLIENTE = 20;
 const feedComposer = el("feed-composer");
 const feedTexto = el("feed-texto");
-const feedCliente = el("feed-cliente");
+const feedImagemInput = el("feed-imagem-input");
+const feedImagensPreview = el("feed-imagens-preview");
+// Espelham FEED_IMAGENS_MAX / FEED_IMAGEM_MAX_CHARS do app.py.
+const FEED_IMAGENS_MAX_CLIENTE = 4;
+const FEED_IMAGEM_MAX_CHARS_CLIENTE = 1_500_000;
+const FEED_IMAGEM_LADO_MAX = 1600;
+// Data URLs (já redimensionadas) escolhidas no composer, ainda não publicadas.
+let feedImagensPendentes = [];
 const feedPublicar = el("feed-publicar");
 const feedErro = el("feed-erro");
 const feedLista = el("feed-lista");
@@ -20696,8 +20746,13 @@ function feedCriarCard(post) {
   meta.className = "feed-post-meta";
   const autor = document.createElement("strong");
   autor.textContent = post.autor_nome || "Usuário";
+  if (!ehSasha && post.autor_id) {
+    autor.classList.add("equipe-link");
+    autor.title = "Ver página de " + (post.autor_nome || "Usuário");
+    autor.addEventListener("click", () => irParaPerfilEquipe(post.autor_id));
+  }
   const detalhe = document.createElement("span");
-  detalhe.textContent = [feedFormatarData(post.criado_em), post.cliente_nome ? `· ${post.cliente_nome}` : "· Geral"].join(" ");
+  detalhe.textContent = feedFormatarData(post.criado_em);
   meta.append(autor, detalhe);
   cabecalho.append(avatar, meta);
   if (post.pode_excluir) {
@@ -20712,7 +20767,26 @@ function feedCriarCard(post) {
 
   const texto = document.createElement("p");
   texto.className = "feed-post-texto";
-  texto.textContent = post.texto;
+  feedPreencherTextoComMencoes(texto, post.texto);
+  if (!post.texto) texto.classList.add("hidden");
+
+  const galeria = document.createElement("div");
+  const idsImagens = post.imagens || [];
+  galeria.className = `feed-post-imagens feed-post-imagens-${Math.min(idsImagens.length, 4)}`;
+  if (!idsImagens.length) galeria.classList.add("hidden");
+  idsImagens.forEach((imagemId) => {
+    const link = document.createElement("a");
+    link.href = `/api/feed/imagem/${encodeURIComponent(imagemId)}`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = "Abrir imagem em tamanho real";
+    const img = document.createElement("img");
+    img.src = link.href;
+    img.alt = "Imagem da publicação";
+    img.loading = "lazy";
+    link.appendChild(img);
+    galeria.appendChild(link);
+  });
 
   const acoes = document.createElement("footer");
   acoes.className = "feed-post-acoes";
@@ -20746,7 +20820,7 @@ function feedCriarCard(post) {
   });
   btnComentar.addEventListener("click", () => feedAlternarComentarios(post, areaComentarios, pintarAcoes));
 
-  card.append(cabecalho, texto, acoes, areaComentarios);
+  card.append(cabecalho, texto, galeria, acoes, areaComentarios);
   if (feedComentariosAbertos.has(post.id)) feedAbrirComentarios(post, areaComentarios, pintarAcoes);
   return card;
 }
@@ -20824,6 +20898,7 @@ function feedAbrirComentarios(post, area, pintarAcoes) {
 async function feedCarregarComentarios(post, area, pintarAcoes) {
   const lista = area.querySelector(".feed-comentarios-lista");
   try {
+    await mentionCarregarUsuarios();
     const data = await feedRequisicao(`/api/feed/${encodeURIComponent(post.id)}/comentarios`);
     lista.innerHTML = "";
     if (!data.comentarios.length) {
@@ -20837,9 +20912,14 @@ async function feedCarregarComentarios(post, area, pintarAcoes) {
       linha.className = "feed-comentario";
       const autor = document.createElement("strong");
       autor.textContent = c.autor_nome || "Usuário";
+      if (c.autor_id) {
+        autor.classList.add("equipe-link");
+        autor.title = `Ver página de ${c.autor_nome || "Usuário"}`;
+        autor.addEventListener("click", () => irParaPerfilEquipe(c.autor_id));
+      }
       const texto = document.createElement("span");
       texto.className = "feed-comentario-texto";
-      texto.textContent = c.texto;
+      feedPreencherTextoComMencoes(texto, c.texto);
       const quando = document.createElement("small");
       quando.textContent = feedFormatarData(c.criado_em);
       linha.append(autor, texto, quando);
@@ -20899,36 +20979,111 @@ async function feedCarregar({ reiniciar = false } = {}) {
   }
 }
 
-async function feedCarregarClientes() {
-  try {
-    const r = await fetch("/api/clientes");
-    const data = await parseJsonResponse(r);
-    const atual = feedCliente.value;
-    feedCliente.innerHTML = "";
-    const geral = document.createElement("option");
-    geral.value = "";
-    geral.textContent = "Geral (sem cliente)";
-    feedCliente.appendChild(geral);
-    (data.clientes || [])
-      .slice()
-      .sort((a, b) => String(a.cliente || "").localeCompare(String(b.cliente || ""), "pt-BR"))
-      .forEach((c) => {
-        const opcao = document.createElement("option");
-        opcao.value = c.id;
-        opcao.textContent = c.cliente || c.id;
-        feedCliente.appendChild(opcao);
-      });
-    feedCliente.value = atual;
-  } catch (e) {
-    feedMostrarErro("Não foi possível carregar a lista de clientes.");
-  }
+// Lê o arquivo e devolve uma data URL pronta pra enviar: JPG/PNG/WEBP são
+// redimensionados (lado maior até FEED_IMAGEM_LADO_MAX) e regravados em JPEG
+// (PNG com transparência fica PNG); GIF vai como está pra não perder animação.
+function feedLerArquivoComoDataUrl(arquivo) {
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onerror = () => reject(new Error("Não foi possível ler a imagem."));
+    leitor.onload = () => resolve(String(leitor.result || ""));
+    leitor.readAsDataURL(arquivo);
+  });
 }
+
+async function feedPrepararImagem(arquivo) {
+  const original = await feedLerArquivoComoDataUrl(arquivo);
+  if (arquivo.type === "image/gif") return original;
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("Arquivo de imagem inválido."));
+    i.src = original;
+  });
+  const escala = Math.min(1, FEED_IMAGEM_LADO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.naturalWidth * escala);
+  canvas.height = Math.round(img.naturalHeight * escala);
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  if (arquivo.type === "image/png") {
+    const png = canvas.toDataURL("image/png");
+    if (png.length <= FEED_IMAGEM_MAX_CHARS_CLIENTE) return png;
+  }
+  // Fundo branco só pro JPEG (PNG transparente que não coube vira JPEG).
+  const ctx = canvas.getContext("2d");
+  ctx.globalCompositeOperation = "destination-over";
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+function feedRenderizarPreviewImagens() {
+  feedImagensPreview.innerHTML = "";
+  feedImagensPreview.classList.toggle("hidden", !feedImagensPendentes.length);
+  feedImagensPendentes.forEach((dataUrl, indice) => {
+    const item = document.createElement("div");
+    item.className = "feed-imagem-preview-item";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = "Imagem anexada";
+    const remover = document.createElement("button");
+    remover.type = "button";
+    remover.className = "feed-imagem-preview-remover";
+    remover.title = "Remover imagem";
+    remover.textContent = "×";
+    remover.addEventListener("click", () => {
+      feedImagensPendentes.splice(indice, 1);
+      feedRenderizarPreviewImagens();
+    });
+    item.append(img, remover);
+    feedImagensPreview.appendChild(item);
+  });
+}
+
+async function feedAdicionarArquivos(arquivos) {
+  const imagens = Array.from(arquivos || []).filter((a) => a.type.startsWith("image/"));
+  if (!imagens.length) return;
+  const vagas = FEED_IMAGENS_MAX_CLIENTE - feedImagensPendentes.length;
+  if (vagas <= 0) {
+    feedMostrarErro(`No máximo ${FEED_IMAGENS_MAX_CLIENTE} imagens por publicação.`);
+    return;
+  }
+  feedMostrarErro(imagens.length > vagas ? `No máximo ${FEED_IMAGENS_MAX_CLIENTE} imagens por publicação — as excedentes foram ignoradas.` : "");
+  for (const arquivo of imagens.slice(0, vagas)) {
+    try {
+      const dataUrl = await feedPrepararImagem(arquivo);
+      if (dataUrl.length > FEED_IMAGEM_MAX_CHARS_CLIENTE) {
+        feedMostrarErro(`"${arquivo.name}" é muito grande — tente uma imagem menor.`);
+        continue;
+      }
+      feedImagensPendentes.push(dataUrl);
+    } catch (e) {
+      feedMostrarErro(e.message);
+    }
+  }
+  feedRenderizarPreviewImagens();
+}
+
+el("feed-btn-imagem").addEventListener("click", () => feedImagemInput.click());
+feedImagemInput.addEventListener("change", async () => {
+  await feedAdicionarArquivos(feedImagemInput.files);
+  feedImagemInput.value = "";
+});
+// Colar imagem (Ctrl+V de um print) direto no campo de texto.
+feedTexto.addEventListener("paste", (ev) => {
+  const arquivos = Array.from(ev.clipboardData?.files || []);
+  if (!arquivos.some((a) => a.type.startsWith("image/"))) return;
+  ev.preventDefault();
+  feedAdicionarArquivos(arquivos);
+});
 
 async function carregarFeed() {
   const podePublicar = document.body.dataset.usuarioPerfil !== "visualizacao";
   feedComposer.classList.toggle("hidden", !podePublicar);
-  feedCarregarClientes();
   feedCursor = null;
+  // Lista de usuários antes de desenhar os posts, pra os @nomes já nascerem
+  // como link (ver feedPreencherTextoComMencoes).
+  await mentionCarregarUsuarios();
   await feedCarregar({ reiniciar: true });
   if (feedPostParaFocar) {
     const alvo = feedPostParaFocar;
@@ -20971,17 +21126,19 @@ async function feedFocarPost(postId, abrirComentarios) {
 feedComposer.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const texto = feedTexto.value.trim();
-  if (!texto) {
-    feedMostrarErro("Escreva algo antes de publicar.");
+  if (!texto && !feedImagensPendentes.length) {
+    feedMostrarErro("Escreva algo ou anexe uma imagem antes de publicar.");
     return;
   }
   feedPublicar.disabled = true;
   try {
     const data = await feedRequisicao("/api/feed", {
       method: "POST", headers: feedJsonHeaders(),
-      body: JSON.stringify({ texto, cliente_id: feedCliente.value, mencionados: mentionColetarIds(feedTexto) }),
+      body: JSON.stringify({ texto, imagens: feedImagensPendentes, mencionados: mentionColetarIds(feedTexto) }),
     });
     feedTexto.value = "";
+    feedImagensPendentes = [];
+    feedRenderizarPreviewImagens();
     feedMostrarErro("");
     const vazio = feedLista.querySelector(".feed-vazio");
     if (vazio) vazio.remove();
@@ -20999,6 +21156,225 @@ el("feed-atualizar").addEventListener("click", () => {
 });
 
 NAV_BOTOES.feed.addEventListener("click", () => irParaTela("feed"));
+
+// --- EQUIPE (lista de funcionários + página de cada um) ---
+// "/equipe" = grade com todo mundo; "/equipe/<usuario_id>" = página da
+// pessoa: contato, aniversário, carteira de clientes e tarefas que um passou
+// pro outro (só entre quem está vendo e ela — ver GET /api/equipe/<id>).
+const MESES_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
+  "agosto", "setembro", "outubro", "novembro", "dezembro"];
+let equipeUsuarios = [];
+let equipePerfilAtual = null;
+
+function irParaPerfilEquipe(usuarioId) {
+  if (usuarioId) irParaTela("equipe", { usuarioId });
+}
+
+function equipeFormatarAniversario(mmdd) {
+  const [mes, dia] = String(mmdd || "").split("-").map(Number);
+  if (!mes || !dia || !MESES_PT[mes - 1]) return "";
+  return `${dia} de ${MESES_PT[mes - 1]}`;
+}
+
+function equipeLinkWhatsapp(telefone) {
+  let digitos = String(telefone || "").replace(/\D/g, "");
+  if (!digitos) return "";
+  if (digitos.length <= 11) digitos = `55${digitos}`;
+  return `https://wa.me/${digitos}`;
+}
+
+function equipeMontarAvatar(alvo, usuario) {
+  alvo.innerHTML = "";
+  if (usuario.tem_foto) {
+    const img = document.createElement("img");
+    img.src = `/api/equipe/${encodeURIComponent(usuario.id)}/foto`;
+    img.alt = usuario.nome || "";
+    img.loading = "lazy";
+    alvo.appendChild(img);
+  } else {
+    alvo.textContent = feedIniciais(usuario.nome);
+  }
+}
+
+async function carregarEquipe(usuarioId) {
+  const naLista = !usuarioId;
+  el("equipe-lista-view").classList.toggle("hidden", !naLista);
+  el("equipe-perfil-view").classList.toggle("hidden", naLista);
+  if (naLista) {
+    topbarTitulo.textContent = "Equipe";
+    await carregarListaEquipe();
+  } else {
+    await carregarPerfilEquipe(usuarioId);
+  }
+}
+
+async function carregarListaEquipe() {
+  const erro = el("equipe-erro");
+  erro.classList.add("hidden");
+  try {
+    const data = await parseJsonResponse(await fetch("/api/equipe"));
+    if (!data.ok) throw new Error(data.error || "Falha ao carregar a equipe.");
+    equipeUsuarios = data.usuarios || [];
+    renderizarGradeEquipe();
+  } catch (e) {
+    erro.textContent = e.message;
+    erro.classList.remove("hidden");
+  }
+}
+
+function renderizarGradeEquipe() {
+  const grid = el("equipe-grid");
+  const termo = el("equipe-busca").value.trim().toLowerCase();
+  const filtrados = equipeUsuarios.filter((u) =>
+    !termo || `${u.nome} ${u.area}`.toLowerCase().includes(termo));
+  grid.innerHTML = "";
+  if (!filtrados.length) {
+    grid.innerHTML = '<p class="placeholder">Ninguém encontrado.</p>';
+    return;
+  }
+  filtrados.forEach((u) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "equipe-card";
+    const avatar = document.createElement("div");
+    avatar.className = "equipe-avatar";
+    equipeMontarAvatar(avatar, u);
+    const info = document.createElement("div");
+    info.className = "equipe-card-info";
+    const nome = document.createElement("strong");
+    nome.textContent = u.nome || "Usuário";
+    const area = document.createElement("span");
+    area.textContent = u.area || "Sem área definida";
+    info.append(nome, area);
+    card.append(avatar, info);
+    card.addEventListener("click", () => irParaPerfilEquipe(u.id));
+    grid.appendChild(card);
+  });
+}
+
+function equipeLinhaContato(icone, rotulo, valor, href, extra) {
+  const linha = document.createElement("div");
+  linha.className = "equipe-contato";
+  const ic = document.createElement("span");
+  ic.className = "material-symbols-outlined";
+  ic.textContent = icone;
+  const corpo = document.createElement("div");
+  const r = document.createElement("small");
+  r.textContent = rotulo;
+  corpo.appendChild(r);
+  if (valor && href) {
+    const a = document.createElement("a");
+    a.href = href;
+    a.textContent = valor;
+    corpo.appendChild(a);
+  } else {
+    const v = document.createElement("span");
+    v.textContent = valor || "Não informado";
+    if (!valor) v.className = "equipe-contato-vazio";
+    corpo.appendChild(v);
+  }
+  if (extra) corpo.appendChild(extra);
+  linha.append(ic, corpo);
+  return linha;
+}
+
+async function carregarPerfilEquipe(usuarioId) {
+  const nomeEl = el("equipe-perfil-nome");
+  nomeEl.textContent = "Carregando...";
+  el("equipe-perfil-area").textContent = "";
+  el("equipe-perfil-contatos").innerHTML = "";
+  el("equipe-perfil-clientes").innerHTML = "";
+  el("equipe-tarefas-passei").innerHTML = "";
+  el("equipe-tarefas-recebi").innerHTML = "";
+  el("equipe-perfil-avatar").innerHTML = "";
+  try {
+    const data = await parseJsonResponse(await fetch(`/api/equipe/${encodeURIComponent(usuarioId)}`));
+    if (!data.ok) throw new Error(data.error || "Funcionário não encontrado.");
+    equipePerfilAtual = data;
+    renderizarPerfilEquipe();
+  } catch (e) {
+    nomeEl.textContent = e.message;
+  }
+}
+
+function renderizarPerfilEquipe() {
+  const { perfil, clientes, tarefas, eu_mesmo: euMesmo } = equipePerfilAtual;
+  topbarTitulo.textContent = perfil.nome || "Equipe";
+  el("equipe-perfil-nome").textContent = perfil.nome || perfil.usuario || "Usuário";
+  el("equipe-perfil-area").textContent = perfil.area || "Sem área definida";
+  equipeMontarAvatar(el("equipe-perfil-avatar"), perfil);
+  const primeiroNome = (perfil.nome || "").split(" ")[0] || "essa pessoa";
+  document.querySelectorAll(".equipe-perfil-primeiro-nome").forEach((s) => { s.textContent = primeiroNome; });
+
+  const contatos = el("equipe-perfil-contatos");
+  contatos.innerHTML = "";
+  let extraTelefone = null;
+  if (perfil.telefone) {
+    extraTelefone = document.createElement("a");
+    extraTelefone.href = equipeLinkWhatsapp(perfil.telefone);
+    extraTelefone.target = "_blank";
+    extraTelefone.rel = "noopener";
+    extraTelefone.className = "equipe-contato-whatsapp";
+    extraTelefone.textContent = "Abrir no WhatsApp";
+  }
+  contatos.append(
+    equipeLinhaContato("cake", "Aniversário", equipeFormatarAniversario(perfil.aniversario)),
+    equipeLinhaContato("call", "Celular", perfil.telefone,
+      perfil.telefone ? `tel:${perfil.telefone.replace(/[^\d+]/g, "")}` : "", extraTelefone),
+    equipeLinhaContato("mail", "E-mail", perfil.email, perfil.email ? `mailto:${perfil.email}` : ""),
+  );
+
+  const listaClientes = el("equipe-perfil-clientes");
+  listaClientes.innerHTML = "";
+  el("equipe-perfil-clientes-contagem").textContent = String(clientes.length);
+  if (!clientes.length) listaClientes.innerHTML = '<p class="placeholder">Nenhum cliente na carteira.</p>';
+  clientes.forEach((c) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "equipe-cliente";
+    const nome = document.createElement("strong");
+    nome.textContent = c.cliente || c.idcentral;
+    const sub = document.createElement("span");
+    const papeis = (c.papeis || []).map((p) => (p === "comercial" ? "Comercial" : "Responsável"));
+    sub.textContent = [
+      CRM_ESTAGIO_LABELS[c.estagio] || c.estagio,
+      [c.cidade, c.estado].filter(Boolean).join("/"),
+      papeis.join(" + "),
+    ].filter(Boolean).join(" · ");
+    item.append(nome, sub);
+    item.addEventListener("click", () => irParaFicha(c.idcentral));
+    listaClientes.appendChild(item);
+  });
+
+  // Na própria página não há "tarefas entre vocês" — as suas ficam em Minha Conta.
+  el("equipe-perfil-bloco-tarefas").classList.toggle("hidden", euMesmo);
+  if (euMesmo) return;
+  const mostrarConcluidas = el("equipe-mostrar-concluidas").checked;
+  const visiveis = tarefas
+    .filter((t) => mostrarConcluidas || !t.concluida)
+    .sort((a, b) => Number(a.concluida) - Number(b.concluida)
+      || String(a.data_limite).localeCompare(String(b.data_limite)));
+  const passei = visiveis.filter((t) => t.criado_por === USUARIO_ID_ATUAL);
+  const recebi = visiveis.filter((t) => t.responsavel_id === USUARIO_ID_ATUAL);
+  const recarregar = () => carregarPerfilEquipe(perfil.id);
+  const opcoesLista = {
+    mostrarCliente: true, compacta: true, aoMudar: recarregar,
+    aoClicar: (t) => abrirDetalhesTarefa(t, recarregar),
+  };
+  el("equipe-tarefas-passei-contagem").textContent = String(passei.length);
+  el("equipe-tarefas-recebi-contagem").textContent = String(recebi.length);
+  el("equipe-tarefas-passei").innerHTML = "";
+  el("equipe-tarefas-recebi").innerHTML = "";
+  el("equipe-tarefas-passei").appendChild(construirListaTarefas(passei, opcoesLista));
+  el("equipe-tarefas-recebi").appendChild(construirListaTarefas(recebi, opcoesLista));
+}
+
+NAV_BOTOES.equipe.addEventListener("click", () => irParaTela("equipe"));
+el("equipe-busca").addEventListener("input", renderizarGradeEquipe);
+el("equipe-voltar").addEventListener("click", () => irParaTela("equipe"));
+el("equipe-mostrar-concluidas").addEventListener("change", () => {
+  if (equipePerfilAtual) renderizarPerfilEquipe();
+});
 
 // Central CRC leva ao Dashboard e protege o checklist de marcos não salvo.
 el("topbar-central-crc").addEventListener("click", () => {
@@ -21300,6 +21676,7 @@ window.addEventListener("popstate", (e) => {
     {
       semHistorico: true,
       idcentral: estado.idcentral || resolvido.idcentral,
+      usuarioId: resolvido.usuarioId,
       sub: sub || resolvido.sub,
       origem: estado.origem,
     }
@@ -29277,6 +29654,7 @@ const rotaInicial = resolverCaminho(window.location.pathname);
 irParaTela(rotaInicial.tela, {
   semHistorico: true,
   idcentral: rotaInicial.idcentral,
+  usuarioId: rotaInicial.usuarioId,
   sub: rotaInicial.sub,
 });
 const estadoInicialHistorico = history.state && typeof history.state === "object" ? history.state : {};
@@ -29284,6 +29662,7 @@ history.replaceState({
   ...estadoInicialHistorico,
   tela: rotaInicial.tela,
   idcentral: rotaInicial.idcentral,
+  usuarioId: rotaInicial.usuarioId,
   sub: rotaInicial.sub,
   origem: rotaInicial.tela === "ficha" ? fichaOrigem : undefined,
   indiceHistoricoApp: Number.isInteger(estadoInicialHistorico.indiceHistoricoApp)

@@ -42,7 +42,7 @@
   referências soltas (string), não FK de verdade — FK real só existe dentro
   do próprio banco relacional.
 - Arquivo anexado (foto de perfil, documentos do cliente) fica em base64 numa
-  **tabela própria** (`usuario_foto`, `cliente_documentos`), nunca como coluna
+  **tabela própria** (`usuario_foto`, `cliente_documentos`, `feed_post_imagens`), nunca como coluna
   na tabela principal (`usuarios`, `clientes`) — assim listar/buscar o
   registro principal não carrega o blob, só quem busca o anexo em si paga
   esse custo. FK de verdade (`ON DELETE CASCADE`) liga o anexo ao registro
@@ -233,7 +233,10 @@
   @ menção no Feed usa autocomplete no frontend (`attachMentionAutocomplete`
   em script.js, reaproveita `/api/app-usuarios/opcoes`) — a publicação manda
   os ids escolhidos em `mencionados`, backend só valida que cada id existe
-  (`_feed_notificar_mencionados`). Não é parse de texto livre por `@nome` de
+  (`_feed_notificar_mencionados`). Na exibição, o `@nome` vira link
+  pra `/equipe/<id>` reconhecendo o texto contra a mesma lista de
+  `/api/app-usuarios/opcoes` (`feedPreencherTextoComMencoes`) — a menção não
+  é gravada no banco, então nome renomeado/excluído volta a ser texto comum. Não é parse de texto livre por `@nome` de
   propósito (ambiguidade/erro de digitação não notificaria ninguém).
 - **Google Sheets/Drive API** (`planilha_migracao.py`) — geração/leitura da
   planilha de migração por cliente. Reusa a mesma credencial de service

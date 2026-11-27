@@ -204,3 +204,47 @@ def marcar_aniversario_postado(usuario_id, hoje_iso):
         alvo = sessao.get(Usuario, usuario_id)
         if alvo:
             alvo.aniversario_post_em = hoje_iso
+
+
+def _nome_exibicao(u):
+    completo = f"{u.nome or ''} {u.sobrenome or ''}".strip()
+    return completo or u.nome_responsavel or u.usuario or ""
+
+
+def listar_equipe():
+    """Lista da tela Equipe (todos os logados veem). Só dados de contato/
+    identificação — nunca senha_hash, perfil de acesso ou foto (só o flag)."""
+    with obter_sessao_leitura() as sessao:
+        com_foto = {uid for (uid,) in sessao.query(UsuarioFoto.usuario_id)}
+        lista = [
+            {
+                "id": u.id,
+                "nome": _nome_exibicao(u),
+                "area": u.area or "",
+                "aniversario": u.aniversario or "",
+                "email": u.email or "",
+                "telefone": u.telefone_profissional or "",
+                "tem_foto": u.id in com_foto,
+            }
+            for u in sessao.query(Usuario).all()
+        ]
+    lista.sort(key=lambda x: x["nome"].lower())
+    return lista
+
+
+def perfil_publico(usuario_id):
+    """Página do funcionário — mesmos campos de listar_equipe, pra 1 só."""
+    with obter_sessao_leitura() as sessao:
+        u = sessao.get(Usuario, usuario_id)
+        if not u:
+            return None
+        return {
+            "id": u.id,
+            "nome": _nome_exibicao(u),
+            "usuario": u.usuario,
+            "area": u.area or "",
+            "aniversario": u.aniversario or "",
+            "email": u.email or "",
+            "telefone": u.telefone_profissional or "",
+            "tem_foto": sessao.get(UsuarioFoto, u.id) is not None,
+        }

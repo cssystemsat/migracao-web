@@ -390,3 +390,27 @@ def excluir_cliente(cliente_id):
             return False
         sessao.delete(alvo)
         return True
+
+
+def listar_clientes_do_usuario(usuario_id):
+    """Carteira de um funcionário pra página da Equipe: clientes em que ele é
+    o responsável (CS) e/ou o consultor comercial (vendedor)."""
+    with obter_sessao_leitura() as sessao:
+        clientes = (
+            sessao.query(Cliente)
+            .filter((Cliente.responsavel_usuario_id == usuario_id) | (Cliente.vendedor_usuario_id == usuario_id))
+            .all()
+        )
+        lista = []
+        for c in clientes:
+            papeis = []
+            if c.responsavel_usuario_id == usuario_id:
+                papeis.append("responsavel")
+            if c.vendedor_usuario_id == usuario_id:
+                papeis.append("comercial")
+            lista.append({
+                "id": c.id, "idcentral": c.idcentral, "cliente": c.cliente,
+                "estagio": c.estagio, "cidade": c.cidade, "estado": c.estado, "papeis": papeis,
+            })
+    lista.sort(key=lambda c: (c["cliente"] or "").lower())
+    return lista

@@ -8,7 +8,24 @@ produzia."""
 from sqlalchemy import func
 
 from db_sql import obter_sessao
-from models import FeedComentario, FeedPost, FeedPostCurtida
+from models import FeedComentario, FeedPost, FeedPostCurtida, FeedPostImagem
+
+
+def _ids_imagens_por_post(sessao, post_ids):
+    """{post_id: [imagem_id, ...]} na ordem de envio — só os ids, nunca o
+    blob (a imagem em si sai por GET /api/feed/imagem/<id>)."""
+    if not post_ids:
+        return {}
+    resultado = {}
+    linhas = (
+        sessao.query(FeedPostImagem.post_id, FeedPostImagem.id)
+        .filter(FeedPostImagem.post_id.in_(post_ids))
+        .order_by(FeedPostImagem.post_id, FeedPostImagem.ordem, FeedPostImagem.id)
+        .all()
+    )
+    for post_id, imagem_id in linhas:
+        resultado.setdefault(post_id, []).append(imagem_id)
+    return resultado
 
 
 def listar_feed(antes_de, limite, usuario_atual_id, sou_admin):
@@ -21,6 +38,7 @@ def listar_feed(antes_de, limite, usuario_atual_id, sou_admin):
 
         curtidas_totais = {}
         curtidos_por_mim = set()
+        imagens = _ids_imagens_por_post(sessao, post_ids)
         if post_ids:
             curtidas_totais = dict(
                 sessao.query(FeedPostCurtida.post_id, func.count(FeedPostCurtida.usuario_id))
@@ -44,12 +62,13 @@ def listar_feed(antes_de, limite, usuario_atual_id, sou_admin):
                 "curtido_por_mim": p.id in curtidos_por_mim,
                 "comentarios_total": p.comentarios_total,
                 "pode_excluir": (p.autor_id == usuario_atual_id) or sou_admin,
+                "imagens": imagens.get(p.id, []),
             }
             for p in posts
         ]
 
 
-def criar_post(texto, autor_id, autor_nome, cliente_id, cliente_nome, tipo=""):
+def criar_post(texto, autor_id, autor_nome, cliente_id, cliente_nome, tipo="", imagens=None):
     novo = FeedPost(
         texto=texto, autor_id=autor_id, autor_nome=autor_nome,
         cliente_id=cliente_id or None, cliente_nome=cliente_nome, tipo=tipo,
@@ -57,11 +76,18 @@ def criar_post(texto, autor_id, autor_nome, cliente_id, cliente_nome, tipo=""):
     with obter_sessao() as sessao:
         sessao.add(novo)
         sessao.flush()
+        imagem_ids = []
+        for ordem, imagem in enumerate(imagens or []):
+            linha = FeedPostImagem(post_id=novo.id, ordem=ordem, imagem=imagem)
+            sessao.add(linha)
+            sessao.flush()
+            imagem_ids.append(linha.id)
         return {
             "id": novo.id, "texto": novo.texto, "autor_id": novo.autor_id, "autor_nome": novo.autor_nome,
             "cliente_id": novo.cliente_id, "cliente_nome": novo.cliente_nome, "tipo": novo.tipo,
             "criado_em": novo.criado_em.isoformat(), "curtidas_total": 0, "curtido_por_mim": False,
             "comentarios_total": 0, "pode_excluir": True,  # quem cria sempre pode excluir o próprio post
+            "imagens": imagem_ids,
         }
 
 
@@ -97,11 +123,19 @@ def buscar_post_completo(post_id, usuario_atual_id, sou_admin):
             "curtidas_total": curtidas_total, "curtido_por_mim": curtido_por_mim,
             "comentarios_total": p.comentarios_total,
             "pode_excluir": (p.autor_id == usuario_atual_id) or sou_admin,
+            "imagens": _ids_imagens_por_post(sessao, [post_id]).get(post_id, []),
         }
 
 
+def obter_imagem(imagem_id):
+    """Data URL da imagem, ou None se não existir (post apagado etc.)."""
+    with obter_sessao() as sessao:
+        linha = sessao.get(FeedPostImagem, imagem_id)
+        return linha.imagem if linha else None
+
+
 def excluir_post(post_id):
-    """Comentários e curtidas somem junto via ON DELETE CASCADE."""
+    """Comentários, curtidas e imagens somem junto via ON DELETE CASCADE."""
     with obter_sessao() as sessao:
         alvo = sessao.get(FeedPost, post_id)
         if not alvo:

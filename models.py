@@ -701,6 +701,19 @@ class FeedPost(Base):
     tipo: Mapped[str] = mapped_column(default="")
 
 
+class FeedPostImagem(Base):
+    """Imagens anexadas a uma publicação do Feed (data URL base64, já
+    redimensionada no navegador). Tabela própria — mesma regra da foto de
+    perfil: listar o feed não carrega o blob, só GET /api/feed/imagem/<id>."""
+
+    __tablename__ = "feed_post_imagens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("feed_posts.id", ondelete="CASCADE"), index=True)
+    ordem: Mapped[int] = mapped_column(default=0)
+    imagem: Mapped[str] = mapped_column(Text)
+
+
 class FeedPostCurtida(Base):
     """Junção N:N post<->usuário que curtiu — era um array `curtidas` dentro
     do post no Firestore."""
@@ -765,7 +778,8 @@ class Notificacao(Base):
     usuario_id: Mapped[str] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
 
     # "tarefa_criada" | "tarefa_prazo_3d" | "tarefa_prazo_1d" | "tarefa_prazo_hoje" |
-    # "tarefa_atrasada" | "nps" | "mencao" | "comentario" | "curtida"
+    # "tarefa_atrasada" | "tarefa_concluida" | "tarefa_cancelada" | "nps" |
+    # "mencao" | "comentario" | "curtida"
     tipo: Mapped[str] = mapped_column()
     texto: Mapped[str] = mapped_column()
 

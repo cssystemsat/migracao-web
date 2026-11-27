@@ -46,6 +46,10 @@
         <span class="material-symbols-outlined sidebar-item-icone">dynamic_feed</span>
         <span class="sidebar-item-texto">Feed</span>
       </button>
+      <button type="button" class="sidebar-item" id="nav-equipe" title="Equipe">
+        <span class="material-symbols-outlined sidebar-item-icone">badge</span>
+        <span class="sidebar-item-texto">Equipe</span>
+      </button>
       <div class="sidebar-grupo">
         <button type="button" class="sidebar-grupo-toggle" id="sidebar-grupo-crm" data-sidebar-group="crm" aria-controls="sidebar-subnav-crm" aria-expanded="false" title="Expandir ou recolher CRM">
           <span class="material-symbols-outlined sidebar-item-icone">groups</span>
@@ -2248,16 +2252,58 @@
             <div class="mention-campo">
               <textarea id="feed-texto" rows="3" maxlength="2000" placeholder="O que está acontecendo? Use @ pra marcar alguém"></textarea>
             </div>
+            <div id="feed-imagens-preview" class="feed-imagens-preview hidden"></div>
             <div class="feed-composer-acoes">
-              <select id="feed-cliente" title="Vincular a um cliente">
-                <option value="">Geral (sem cliente)</option>
-              </select>
+              <input type="file" id="feed-imagem-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+              <button type="button" class="btn-secondary feed-btn-imagem" id="feed-btn-imagem" title="Anexar imagens (até 4)">
+                <span class="material-symbols-outlined">image</span> Imagem
+              </button>
+              <span class="feed-composer-espaco"></span>
               <button type="submit" class="btn-primary" id="feed-publicar">Publicar</button>
             </div>
           </form>
           <p id="feed-erro" class="feed-erro hidden"></p>
           <div id="feed-lista" class="feed-lista"></div>
           <button type="button" id="feed-mais" class="feed-mais hidden">Carregar mais</button>
+        </div>
+      </section>
+
+      <section id="tela-equipe" class="panel hidden">
+        <div id="equipe-lista-view">
+          <div class="equipe-busca">
+            <input type="search" id="equipe-busca" placeholder="Buscar por nome ou área">
+          </div>
+          <p id="equipe-erro" class="feed-erro hidden"></p>
+          <div id="equipe-grid" class="equipe-grid"></div>
+        </div>
+        <div id="equipe-perfil-view" class="hidden">
+          <button type="button" id="equipe-voltar" class="equipe-voltar">← Equipe</button>
+          <div class="equipe-perfil-cabecalho">
+            <div class="equipe-avatar equipe-avatar-grande" id="equipe-perfil-avatar"></div>
+            <div class="equipe-perfil-identificacao">
+              <h2 id="equipe-perfil-nome"></h2>
+              <p id="equipe-perfil-area" class="equipe-perfil-area"></p>
+            </div>
+          </div>
+          <div class="equipe-perfil-contatos" id="equipe-perfil-contatos"></div>
+          <div class="equipe-perfil-corpo">
+            <div class="equipe-perfil-bloco">
+              <h3>Clientes <span class="minha-conta-tarefas-badge" id="equipe-perfil-clientes-contagem">0</span></h3>
+              <div id="equipe-perfil-clientes" class="equipe-perfil-clientes"></div>
+            </div>
+            <div class="equipe-perfil-bloco" id="equipe-perfil-bloco-tarefas">
+              <h3>Tarefas entre vocês</h3>
+              <div class="minha-conta-tarefas-secao">
+                <h4>Você passou pra <span class="equipe-perfil-primeiro-nome"></span> <span class="minha-conta-tarefas-badge" id="equipe-tarefas-passei-contagem">0</span></h4>
+                <div id="equipe-tarefas-passei" class="minha-conta-tarefas-lista"></div>
+              </div>
+              <div class="minha-conta-tarefas-secao">
+                <h4><span class="equipe-perfil-primeiro-nome"></span> passou pra você <span class="minha-conta-tarefas-badge" id="equipe-tarefas-recebi-contagem">0</span></h4>
+                <div id="equipe-tarefas-recebi" class="minha-conta-tarefas-lista"></div>
+              </div>
+              <label class="equipe-mostrar-concluidas"><input type="checkbox" id="equipe-mostrar-concluidas"> Mostrar concluídas</label>
+            </div>
+          </div>
         </div>
       </section>
 

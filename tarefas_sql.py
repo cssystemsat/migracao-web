@@ -115,3 +115,13 @@ def excluir_tarefa(tarefa_id):
             return False
         sessao.delete(alvo)
         return True
+
+
+def listar_entre(usuario_a, usuario_b):
+    """Tarefas que um passou pro outro (nos dois sentidos) — página da Equipe."""
+    with obter_sessao() as sessao:
+        tarefas = sessao.query(Tarefa).filter(
+            ((Tarefa.responsavel_id == usuario_a) & (Tarefa.criado_por == usuario_b))
+            | ((Tarefa.responsavel_id == usuario_b) & (Tarefa.criado_por == usuario_a))
+        ).all()
+        return [_tarefa_para_dict(t) for t in tarefas]
